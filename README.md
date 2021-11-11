@@ -16,12 +16,14 @@ _Please note: Iqalox is in planning phase, so no implementation has been written
     ALPHA           → 'a' ... 'z' | 'A' ... 'Z' | '_' ;
     DIGIT           → '0' ... '9' ;
     
+
 ## Precedence Rules ##
 
-Name            |       Operators       | Associates
-:--------------:|:---------------------:|:---------:
-Unary           |   `!` `-`             | Right
-Multiplication  |   `/` `*`             | Left
-Addition        |   `-` `+`             | Left
-Comparison      |   `>` `>=` `<` `<=`   | Left
-Equality        |   `==` `!=`           | Left
+Name                |       Operators       | Associates
+:------------------:|:---------------------:|:---------:
+Unary               |   `!` `-`             | Right
+Increment           |   `++` `--`           | Right
+Multiplication      |   `/` `*`             | Left
+Addition            |   `-` `+`             | Left
+Comparison          |   `>` `>=` `<` `<=`   | Left
+Equality            |   `==` `!=`           | Left
