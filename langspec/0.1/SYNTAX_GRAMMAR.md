@@ -6,7 +6,7 @@
                     | funDecl
                     | varDecl
                     | statement ;
-    classDecl       → "class" IDENTIFIER ( "<" IDENTIFIER )?
+    classDecl       → "class" IDENTIFIER ( "extends" IDENTIFIER )?
                     "{" function* "}" ;
     funDecl         → "fun" function ;
     function        → IDENTIFIER "(" parameters? ")" block ;
