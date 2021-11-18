@@ -1,8 +1,8 @@
-# Syntax Grammar for Iqalox v0.1 #
+# Syntax Grammar for Iqalox v0.2 #
 *WIP*
-* Missing at least array and hash map specific syntax
+* Missing at least array and hash map specific syntax and the new
+    standard library statements
 ##
-
     program         → declaration* EOF ;
     
     declaration     → classDecl
@@ -38,9 +38,10 @@
     
     expression      → assignment ;
     
-    assignment      → ( call "." )? IDENTIFIER "=" assignment
+    assignment      → ( call "." )? IDENTIFIER "=" assignment ( ternary )?
                     | logic_or ;
                     
+    ternary         → expression ":" expression "?" expression ;
     logic_or        → logic_and ( "or" logic_and )* ;
     logic_and       → equality ( "and" equality )* ;
     equality        → comparison ( ( "!=" | "==" ) comparison )* ;
