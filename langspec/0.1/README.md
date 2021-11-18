@@ -12,6 +12,9 @@ language that is *Lox*.
 - [ ] `continue` and `break` statements
 - [ ] prefix increment and decrement operators (`++` & `--`)
 
+## Other TODOs: ##
+- [ ] reserve keywords `with`, `concat`, `module` and `trait` 
+
 ## Breaking changes: ##
 - [ ] accessing uninitialised variables as runtime error (implicit `undef` instead of `nil`)*
 
