@@ -10,7 +10,7 @@ class A {
 }
 
 // subclass B of superclass A
-class B < A {
+class B extends A {
     init() {
         print "This is the initializer."
     }
@@ -25,7 +25,7 @@ class B < A {
     }
 }
 
-class C < B {}
+class C extends B {}
 
 var x = B()
 x.show()
@@ -45,7 +45,7 @@ class Doughnut {
     }
 }
 
-class BostonCream < Doughnut {
+class BostonCream extends Doughnut {
     cook() {
         super.cook()
         print "Stuff with tasty cream."
