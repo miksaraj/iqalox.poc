@@ -17,6 +17,7 @@ language that is *Lox*.
 
 ## Breaking changes: ##
 - [ ] accessing uninitialised variables as runtime error (implicit `undef` instead of `nil`)*
+- [ ] use of `extends` instead of `>` to indicate inheritance (classes)
 
 
 `*` The intention is to have a valid `nil` value for the use cases where it makes sense, but that the user will have to *explicitly* assign it to a variable. In order to be accessed *something* will have to be assigned to it:
