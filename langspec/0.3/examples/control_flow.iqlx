@@ -7,14 +7,12 @@ fun ifEqualOr(a, b) {
     } else {
         equality = "is equal to"
     }
-    result = concat [a, equality, b]
-    print result
+    concat [a, equality, b] |> print
 }
 
 fun ifEqualTernary(a, b) {
     var equality = (a == b) ? "is equal to" : "is not equal to"
-    var result = concat [a, equality, b]
-    print result
+    concat [a, equality, b] |> print
 }
 
 ifEqualOr(2, 5)
