@@ -54,7 +54,7 @@ fun defineAst(outputDir: String, baseName: String, types: List<String>): Unit {
 
 fun main(args: Array<String>): Unit {
     if (args.size != 1) {
-        System.err.println("Usage: generate_ast <output directory>")
+        System.err.println("Usage: GenerateAst.kts <output directory>")
         exitProcess(64)
     }
     val outputDir = args[0]
