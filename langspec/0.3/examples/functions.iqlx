@@ -51,3 +51,10 @@ test(count)
 for (var i = 0; i < 20; ++i) {
     fib(i) |> print
 }
+
+// Sample for the use of control flow ignore operator
+var ignore = false
+for (var j = 0; j < 5; ++j) {
+    ignore ? _ : (fib(j) |> print)
+    ignore = !ignore
+}
