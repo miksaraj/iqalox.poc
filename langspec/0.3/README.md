@@ -5,6 +5,7 @@ and changes is incomplete.
 
 ## New features: ##
 - [ ] pipe operator
+- [ ] ignore operator for control flow
 - [ ] standard library for file I/O
 
 ## Breaking changes: ##
