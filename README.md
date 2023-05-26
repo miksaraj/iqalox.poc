@@ -14,7 +14,7 @@ _Please note: Iqalox is in planning phase, so no implementation has been written
 ## Lexical Grammar ##
 
     NUMBER          → DIGIT+ ( "." DIGIT+ )? ;
-    STRING          → '"' <any char except '"'>* '"' ;
+    STRING          → '"' <any char except '"'>* '"' | "'" <any char except "'">* "'" ;
     IDENTIFIER      → ALPHA ( ALPHA | DIGIT )* ;
     ALPHA           → 'a' ... 'z' | 'A' ... 'Z' | '_' ;
     DIGIT           → '0' ... '9' ;
