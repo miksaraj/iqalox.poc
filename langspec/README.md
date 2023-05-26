@@ -15,7 +15,7 @@ as steer it more into a direction more ameniable to the author's personal prefer
 - ignore operator (`_`)
 - anonymous functions (lambdas/closures)
 - nullable infix operator (`??`)
-- mixin support, e.g. `class A extends B with C` or `new A with B`
+- mixin support, e.g. `class A extends B with C` or `A with B`
 - variadic unpacking (`...` operator)
 - trait support, e.g. `trait A {...}` => `class B { use A }`
 - comma operator
