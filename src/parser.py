@@ -44,10 +44,9 @@ class Parser:
             expr = Ternary(expr, left_operator, middle, right_operator, right)
         elif self.match(TokenType.QUESTION_MARK_COLON):
             left_operator = self.previous()
-            middle = self.expression()
             right_operator = self.previous()
             right = self.expression()
-            expr = Ternary(expr, left_operator, middle, right_operator, right)
+            expr = Ternary(expr, left_operator, expr, right_operator, right)
 
         return expr
 
