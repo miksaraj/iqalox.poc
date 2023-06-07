@@ -15,6 +15,7 @@ class TokenType(Enum):
     STAR = '*'
     UNDERSCORE = '_'
     PERCENT = '%'
+    POWER = '^'
 
     # One or two+ character tokens.
     BANG = '!'

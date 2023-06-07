@@ -68,7 +68,8 @@ class Unary(Expr):
 
 
 class Ternary(Expr):
-    def __init__(self, left_operator: Token, middle: Expr, right_operator: Token, right: Expr) -> None:
+    def __init__(self, left: Expr, left_operator: Token, middle: Expr, right_operator: Token, right: Expr) -> None:
+        self.left = left
         self.left_operator = left_operator
         self.middle = middle
         self.right_operator = right_operator

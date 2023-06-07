@@ -21,7 +21,7 @@ EXPRESSIONS: AST_DICT = {
     'Grouping': ('expression: Expr',),
     'Literal': ('value: Any',),
     'Unary': ('operator: Token', 'right: Expr'),
-    'Ternary': ('left_operator: Token', 'middle: Expr', 'right_operator: Token', 'right: Expr'),
+    'Ternary': ('left: Expr', 'left_operator: Token', 'middle: Expr', 'right_operator: Token', 'right: Expr'),
 }
 
 INDENTATION = '    '

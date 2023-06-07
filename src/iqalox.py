@@ -2,12 +2,14 @@ from sys import argv
 
 from scanner import Scanner
 from parser import Parser
-from ast_printer import AstPrinter
 from token import Token, TokenType
+from interpreter import Interpreter, IqaloxRuntimeError
 
 
 class Iqalox:
+    interpreter = Interpreter()
     had_error = False
+    had_runtime_error = False
 
     @staticmethod
     def error(token: Token, message: str) -> None:
@@ -17,28 +19,34 @@ class Iqalox:
             Iqalox.report(token.line, f" at '{token.lexeme}'", message)
 
     @staticmethod
+    def runtime_error(error: IqaloxRuntimeError) -> None:
+        print(f"{error}\n[line {error.token.line}]")
+        Iqalox.had_runtime_error = True
+
+    @staticmethod
     def report(line: int, where: str, message: str) -> None:
         # TODO [#1]: improve error reporting to show the user exactly where the error is.
         print(f"[line {line}] Error{where}: {message}")
         Iqalox.had_error = True
 
-    @staticmethod
-    def run(source: str) -> None:
+    def run(self, source: str) -> None:
         scanner = Scanner(source)
         tokens = scanner.scan_tokens()
         parser = Parser(tokens)
         expression = parser.parse()
 
-        if Iqalox.had_error:
+        if self.had_error:
             return
 
-        print(AstPrinter().print(expression))
+        Iqalox.interpreter.interpret(expression)
 
     def run_file(self, path: str) -> None:
         with open(path) as f:
-            Iqalox.run(f.read())
+            self.run(f.read())
         if self.had_error:
             exit(65)
+        if self.had_runtime_error:
+            exit(70)
 
     def run_prompt(self) -> None:
         while True:
@@ -47,7 +55,7 @@ class Iqalox:
             except EOFError:
                 print()
                 break
-            Iqalox.run(line)
+            self.run(line)
             self.had_error = False
 
 

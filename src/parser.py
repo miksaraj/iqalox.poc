@@ -84,7 +84,13 @@ class Parser:
     def multiplication(self) -> Optional[Expr]:
         expr = self.increment()
 
-        while self.match(TokenType.SLASH, TokenType.STAR, TokenType.PERCENT):
+        while self.match(
+                TokenType.SLASH,
+                TokenType.STAR,
+                TokenType.PERCENT,
+                TokenType.POWER,
+                TokenType.DOUBLE_QUESTION_MARK
+        ):
             operator = self.previous()
             right = self.increment()
             expr = Binary(expr, operator, right)
