@@ -1,4 +1,4 @@
-// superclass A
+# superclass A
 class A {
     show() {
         print "A"
@@ -9,7 +9,7 @@ class A {
     }
 }
 
-// subclass B of superclass A
+# subclass B of superclass A
 class B extends A {
     init() {
         print "This is the initializer."
@@ -38,7 +38,7 @@ x.test()
 
 C().test()
 
-// A little bit tastier example...
+# A little bit tastier example...
 class Doughnut {
     cook() {
         print "Fry until golden brown."

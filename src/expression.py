@@ -6,19 +6,23 @@ from scanner import Scanner
 
 class ExprVisitor(ABC):
     @abstractmethod
-    def visit_binary_expr(self, expr: Expr) -> Any:
+    def visit_binary_expr(self, expr: 'Expr') -> Any:
         pass
 
     @abstractmethod
-    def visit_grouping_expr(self, expr: Expr) -> Any:
+    def visit_grouping_expr(self, expr: 'Expr') -> Any:
         pass
 
     @abstractmethod
-    def visit_literal_expr(self, expr: Expr) -> Any:
+    def visit_literal_expr(self, expr: 'Expr') -> Any:
         pass
 
     @abstractmethod
-    def visit_unary_expr(self, expr: Expr) -> Any:
+    def visit_unary_expr(self, expr: 'Expr') -> Any:
+        pass
+
+    @abstractmethod
+    def visit_ternary_expr(self, expr: 'Expr') -> Any:
         pass
 
 
@@ -61,4 +65,15 @@ class Unary(Expr):
 
     def accept(self, visitor: ExprVisitor) -> None:
         return visitor.visit_unary_expr(self)
+
+
+class Ternary(Expr):
+    def __init__(self, left_operator: Token, middle: Expr, right_operator: Token, right: Expr) -> None:
+        self.left_operator = left_operator
+        self.middle = middle
+        self.right_operator = right_operator
+        self.right = right
+
+    def accept(self, visitor: ExprVisitor) -> None:
+        return visitor.visit_ternary_expr(self)
 

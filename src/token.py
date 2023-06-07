@@ -4,84 +4,87 @@ from typing import Dict, Any, Tuple
 
 class TokenType(Enum):
     # Single-character tokens.
-    LEFT_PAREN = '(',
-    RIGHT_PAREN = ')',
-    LEFT_BRACE = '{',
-    RIGHT_BRACE = '}',
-    COMMA = ',',
-    SEMICOLON = ';',
-    SLASH = '/',
+    LEFT_PAREN = '('
+    RIGHT_PAREN = ')'
+    LEFT_BRACE = '{'
+    RIGHT_BRACE = '}'
+    COMMA = ','
+    SEMICOLON = ';'
+    SLASH = '/'
     BACKSLASH = '\\'
-    STAR = '*',
-    UNDERSCORE = '_',
+    STAR = '*'
+    UNDERSCORE = '_'
+    PERCENT = '%'
 
     # One or two+ character tokens.
-    BANG = '!',
-    BANG_EQUAL = '!=',
-    EQUAL = '=',
-    EQUAL_EQUAL = '==',
-    GREATER = '>',
-    GREATER_EQUAL = '>=',
-    LESS = '<',
-    LESS_EQUAL = '<=',
-    MINUS = '-',
-    MINUS_MINUS = '--',
-    PLUS = '+',
-    PLUS_PLUS = '++',
-    DOT = '.',
-    ELLIPSIS = '...',
-    QUESTION_MARK = '?',
-    COLON = ':',
-    QUESTION_MARK_COLON = '?:',
-    DOUBLE_QUESTION_MARK = '??',
-    PIPE = '|>',
+    BANG = '!'
+    BANG_EQUAL = '!='
+    EQUAL = '='
+    EQUAL_EQUAL = '=='
+    GREATER = '>'
+    GREATER_EQUAL = '>='
+    LESS = '<'
+    LESS_EQUAL = '<='
+    MINUS = '-'
+    MINUS_MINUS = '--'
+    PLUS = '+'
+    PLUS_PLUS = '++'
+    DOT = '.'
+    ELLIPSIS = '...'
+    QUESTION_MARK = '?'
+    COLON = ':'
+    QUESTION_MARK_COLON = '?:'
+    DOUBLE_QUESTION_MARK = '??'
+    PIPE = '|>'
 
     # Keywords.
-    AND = 'and',
-    CLASS = 'class',
-    FALSE = 'false',
-    FUN = 'fun',
-    FOR = 'for',
-    NIL = 'nil',
-    OR = 'or',
-    PRINT = 'print',
-    RETURN = 'return',
-    SUPER = 'super',
-    SELF = 'self',
-    TRUE = 'true',
-    VAR = 'var',
-    WITH = 'with',
-    CONCAT = 'concat',
-    MODULE = 'module',
-    TRAIT = 'trait',
-    EXTENDS = 'extends',
-    BREAK = 'break',
-    CONTINUE = 'continue',
-    USE = 'use',
+    AND = 'and'
+    CLASS = 'class'
+    FALSE = 'false'
+    FUN = 'fun'
+    FOR = 'for'
+    NIL = 'nil'
+    OR = 'or'
+    PRINT = 'print'
+    RETURN = 'return'
+    SUPER = 'super'
+    SELF = 'self'
+    TRUE = 'true'
+    VAR = 'var'
+    WITH = 'with'
+    CONCAT = 'concat'
+    MODULE = 'module'
+    TRAIT = 'trait'
+    EXTENDS = 'extends'
+    BREAK = 'break'
+    CONTINUE = 'continue'
+    USE = 'use'
 
     # String starters.
-    SINGLE_QUOTE = "'",
-    DOUBLE_QUOTE = '"',
+    SINGLE_QUOTE = "'"
+    DOUBLE_QUOTE = '"'
 
     # New line.
-    NEWLINE = '\n',
+    NEWLINE = '\n'
 
     # Space.
-    SPACE = ' ',
-    TAB = '\t',
+    SPACE = ' '
+    TAB = '\t'
 
     # String terminator
-    NULL_CHAR = '\0',
+    NULL_CHAR = '\0'
 
     # EOF
     EOF = ''
 
     # Comment
     COMMENT = '#'
+    BLOCK_COMMENT_START = '<#'
+    BLOCK_COMMENT_END = '#>'
 
     # Literals
-    IDENTIFIER = 'IDENTIFIER',
-    STRING = 'STRING',
+    IDENTIFIER = 'IDENTIFIER'
+    STRING = 'STRING'
     NUMBER = 'NUMBER'
 
 
@@ -90,13 +93,16 @@ _keywords: Tuple = (
     'concat', 'module', 'trait', 'extends', 'break', 'continue', 'use'
 )
 
-KEYWORDS: Dict[str, TokenType] = {keyword: TokenType(keyword) for keyword in _keywords}
+KEYWORDS: Dict[str, TokenType] = {key: TokenType(key) for key in _keywords}
 
 SINGLE_CHARACTER_TOKENS: Tuple = ('(', ')', '{', '}', ',', ';', '/', '\\', '*', '_')
 
 ONE_OR_MORE_CHARACTER_TOKENS: Tuple = (
-    '!', '!=', '=', '==', '>', '>=', '<', '<=', '-', '--', '+', '++', '.', '...', '?', ':', '?:', '??', '|>'
+    '!', '!=', '=', '==', '>', '>=', '<', '<=', '-', '--', '+',
+    '++', '.', '...', '?', ':', '?:', '??', '|>', '#', '<#', '#>'
 )
+
+COMMENT_TOKENS: Tuple = ('#', '<#', '#>')
 
 WHITESPACE: Tuple = (' ', '\t', '\r')
 

@@ -21,6 +21,7 @@ EXPRESSIONS: AST_DICT = {
     'Grouping': ('expression: Expr',),
     'Literal': ('value: Any',),
     'Unary': ('operator: Token', 'right: Expr'),
+    'Ternary': ('left_operator: Token', 'middle: Expr', 'right_operator: Token', 'right: Expr'),
 }
 
 INDENTATION = '    '
@@ -39,7 +40,7 @@ def define_visitor(file: TextIO, base_name: str, types: Iterable[str]) -> None:
 
     for _type in types:
         file.write(f'\n{INDENTATION}@abstractmethod')
-        file.write(f'\n{INDENTATION}def visit_{_type.lower()}_{name}(self, expr: {base_name}) -> Any:')
+        file.write(f'\n{INDENTATION}def visit_{_type.lower()}_{name}(self, expr: \'{base_name}\') -> Any:')
         file.write('\n')
         file.write(f'{INDENTATION * 2}pass\n')
 

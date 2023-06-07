@@ -1,4 +1,5 @@
 from typing import List, Any
+
 from token import (
     Token,
     TokenType,
@@ -6,9 +7,9 @@ from token import (
     ONE_OR_MORE_CHARACTER_TOKENS,
     WHITESPACE,
     STRING_STARTERS,
-    KEYWORDS
+    KEYWORDS,
+    COMMENT_TOKENS
 )
-from iqalox import Iqalox
 
 
 class Scanner:
@@ -19,16 +20,19 @@ class Scanner:
         self.current = 0
         self.line = 1
 
+    @property
+    def current_token(self) -> str:
+        return self.source[self.start:self.current]
+
     def is_at_end(self) -> bool:
         return self.current >= len(self.source)
 
     def advance(self) -> str:
         self.current += 1
-        return self.source[self.current]
+        return self.current_token
 
     def add_token(self, token_type: TokenType, literal: Any = None) -> None:
-        text = self.source[self.start:self.current]
-        self.tokens.append(Token(token_type, text, literal, self.line))
+        self.tokens.append(Token(token_type, self.current_token, literal, self.line))
 
     def match(self, expected: str) -> bool:
         if self.is_at_end() or self.source[self.current] != expected:
@@ -54,8 +58,7 @@ class Scanner:
         return ('a' <= c <= 'z') or ('A' <= c <= 'Z') or c == '_'
 
     def is_alpha_numeric(self) -> bool:
-        c = self.peek()
-        return self.is_alpha(c) or self.is_digit(c)
+        return self.is_alpha() or self.is_digit()
 
     def string(self, char: str) -> None:
         while self.peek() != char and not self.is_at_end():
@@ -63,7 +66,8 @@ class Scanner:
                 self.line += 1
             self.advance()
         if self.is_at_end():
-            Iqalox.error(self.line, "Unterminated string.")
+            import iqalox
+            iqalox.Iqalox.error(Token(TokenType.EOF, '', None, self.line), "Unterminated string.")
             return
         self.advance()
         value = self.source[self.start + 1:self.current - 1]
@@ -81,10 +85,8 @@ class Scanner:
     def identifier(self) -> None:
         while self.is_alpha_numeric():
             self.advance()
-        text = self.source[self.start:self.current]
+        text = self.current_token
         token_type = KEYWORDS.get(text, TokenType.IDENTIFIER)
-        if token_type is None:
-            token_type = TokenType.IDENTIFIER
         self.add_token(token_type)
 
     def scan_token(self) -> None:
@@ -98,10 +100,17 @@ class Scanner:
                 if self.match(compound[1]):
                     token = compound
                     break
-            self.add_token(TokenType(token))
-        elif c == TokenType.COMMENT:
-            while self.peek() != '\n' and not self.is_at_end():
-                self.advance()
+            if token in COMMENT_TOKENS:
+                if token == TokenType.COMMENT:
+                    while self.peek() != '\n' and not self.is_at_end():
+                        self.advance()
+                elif token == TokenType.BLOCK_COMMENT_START:
+                    while self.peek() != '#' and self.peek_next() != '>' and not self.is_at_end():
+                        self.advance()
+                    self.advance()
+                    self.advance()
+            else:
+                self.add_token(TokenType(token))
         elif c in WHITESPACE:
             return
         elif c == TokenType.NEWLINE:
@@ -114,7 +123,8 @@ class Scanner:
             self.identifier()
         else:
             # TODO [#2]: handle a run of one or more invalid tokens as a single error.
-            Iqalox.error(self.line, f"Unexpected character: {c}")
+            import iqalox
+            iqalox.Iqalox.error(Token(TokenType.NULL_CHAR, c, None, self.line), f"Unexpected character: {c}")
 
     def scan_tokens(self) -> List[Token]:
         while not self.is_at_end():

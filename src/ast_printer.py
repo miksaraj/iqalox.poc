@@ -1,5 +1,5 @@
 from token import Token, TokenType
-from expression import Expr, Binary, Grouping, Literal, Unary, ExprVisitor
+from expression import Expr, Binary, Grouping, Literal, Unary, Ternary, ExprVisitor
 
 
 class AstPrinter(ExprVisitor):
@@ -12,6 +12,9 @@ class AstPrinter(ExprVisitor):
 
     def visit_binary_expr(self, expr: Binary) -> str:
         return self.parenthesize(expr.operator.lexeme, expr.left, expr.right)
+
+    def visit_ternary_expr(self, expr: Ternary) -> str:
+        return self.parenthesize(expr.left_operator.lexeme, expr.middle, expr.right_operator.lexeme, expr.right)
 
     def visit_grouping_expr(self, expr: Grouping) -> str:
         return self.parenthesize('group', expr.expression)

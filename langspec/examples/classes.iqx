@@ -1,4 +1,4 @@
-// Simple class with constructor and method.
+# Simple class with constructor and method.
 
 class Duck {
     init(name) {
