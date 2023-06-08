@@ -173,9 +173,7 @@ class Parser:
         self.advance()
 
         while not self.is_at_end():
-            if self.previous().type == TokenType.SEMICOLON:  # This is for the benefit of REPL usage only
-                return
-            if self.previous().line < self.peek().line:
+            if self.previous().type == TokenType.SEMICOLON:
                 return
 
             if self.peek().type in [
