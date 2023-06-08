@@ -114,6 +114,7 @@ class Scanner:
         elif c in WHITESPACE:
             return
         elif c == TokenType.NEWLINE:
+            self.add_token(TokenType.SEMICOLON)
             self.line += 1
         elif c in STRING_STARTERS:
             self.string(c)
