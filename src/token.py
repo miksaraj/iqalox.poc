@@ -8,6 +8,8 @@ class TokenType(Enum):
     RIGHT_PAREN = ')'
     LEFT_BRACE = '{'
     RIGHT_BRACE = '}'
+    LEFT_BRACKET = '['
+    RIGHT_BRACKET = ']'
     COMMA = ','
     SEMICOLON = ';'
     SLASH = '/'
@@ -60,6 +62,7 @@ class TokenType(Enum):
     BREAK = 'break'
     CONTINUE = 'continue'
     USE = 'use'
+    MUTABLE = 'mut'
 
     # String starters.
     SINGLE_QUOTE = "'"
@@ -91,12 +94,12 @@ class TokenType(Enum):
 
 _keywords: Tuple = (
     'and', 'class', 'false', 'fun', 'for', 'nil', 'or', 'print', 'return', 'super', 'self', 'true', 'var', 'with',
-    'concat', 'module', 'trait', 'extends', 'break', 'continue', 'use'
+    'concat', 'module', 'trait', 'extends', 'break', 'continue', 'use', 'mut'
 )
 
 KEYWORDS: Dict[str, TokenType] = {key: TokenType(key) for key in _keywords}
 
-SINGLE_CHARACTER_TOKENS: Tuple = ('(', ')', '{', '}', ',', ';', '/', '\\', '*', '_')
+SINGLE_CHARACTER_TOKENS: Tuple = ('(', ')', '{', '}', '[', ']', ',', ';', '/', '\\', '*', '_')
 
 ONE_OR_MORE_CHARACTER_TOKENS: Tuple = (
     '!', '!=', '=', '==', '>', '>=', '<', '<=', '-', '--', '+',

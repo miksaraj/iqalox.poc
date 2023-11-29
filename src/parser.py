@@ -1,32 +1,109 @@
 from typing import List, Optional
 
-from expression import Expr, Binary, Unary, Literal, Grouping, Ternary
+from expression import Expr, Binary, Unary, Literal, Grouping, Ternary, Vector, Variable, Assign
+from statement import Stmt, Expression, Print, Concat, Var, Block
 from token import Token, TokenType
+from error import ParseError
 
 
 class Parser:
     def __init__(self, tokens: List[Token]) -> None:
         self.tokens = tokens
         self.current = 0
+        self.comma_as_operator = True
 
-    class ParseError(RuntimeError):
-        def __init__(self, token: Token, message: str):
-            super().__init__(message)
-            self.token = token
+    def parse(self) -> List[Stmt]:
+        statements: List[Stmt] = []
 
-    def parse(self) -> Optional[Expr]:
-        try:
-            return self.expression()
-        except self.ParseError:
-            return None
+        while not self.is_at_end():
+            statements.append(self.declaration())
+        return statements
 
     def expression(self) -> Optional[Expr]:
-        return self.comma()
+        return self.assignment()
+
+    def declaration(self) -> Optional[Stmt]:
+        try:
+            if self.match(TokenType.VAR):
+                return self.var_declaration()
+            return self.statement()
+        except ParseError:
+            self.synchronize()
+            return None
+
+    def statement(self) -> Optional[Stmt]:
+        if self.match(TokenType.PRINT):
+            return self.print_statement()
+        if self.match(TokenType.CONCAT):
+            return self.concat_statement()
+        if self.match(TokenType.LEFT_BRACE):
+            return Block(self.block())
+        return self.expression_statement()
+
+    def print_statement(self) -> Optional[Stmt]:
+        value = self.expression()
+        self.consume(TokenType.SEMICOLON, "Expect line break or ';' after value.")
+        return Print(value)
+
+    def concat_statement(self) -> Optional[Stmt]:
+        expr = self.expression()
+        self.consume(TokenType.SEMICOLON, "Expect line break or ';' after value.")
+        return Concat(expr)
+
+    def var_declaration(self) -> Optional[Stmt]:
+        name = self.consume(TokenType.IDENTIFIER, "Expect variable name.")
+
+        is_mutable = False
+        if self.match(TokenType.MUTABLE):
+            is_mutable = True
+            self.advance()
+
+        initializer = None
+        if self.match(TokenType.EQUAL):
+            initializer = self.expression()
+        elif not is_mutable:
+            raise self.error(self.peek(), "Expect '=' after 'var'. Immutable variables must be initialized.")
+
+        self.consume(TokenType.SEMICOLON, "Expect line break or ';' after variable declaration.")
+        return Var(name, initializer, is_mutable)
+
+    def expression_statement(self) -> Optional[Stmt]:
+        expr = self.expression()
+        self.consume(TokenType.SEMICOLON, "Expect line break or ';' after expression.")
+        return Expression(expr)
+
+    def block(self) -> List[Stmt]:
+        statements: List[Stmt] = []
+
+        while not self.check(TokenType.RIGHT_BRACE) and not self.is_at_end():
+            statements.append(self.declaration())
+
+        self.consume(TokenType.RIGHT_BRACE, "Expect '}' after block.")
+        return statements
+
+    def assignment(self) -> Optional[Expr]:
+        expr = self.comma()
+
+        if self.match(TokenType.EQUAL):
+            equals = self.previous()
+            value = self.assignment()
+
+            if isinstance(expr, Variable):
+                name = expr.name
+                return Assign(name, value)
+
+            raise self.error(equals, "Invalid assignment target.")
+
+        return expr
 
     def comma(self) -> Optional[Expr]:
         expr = self.ternary()
 
-        while self.match(TokenType.COMMA):
+        if not self.comma_as_operator:
+            self.advance()
+            expr = self.ternary()
+
+        while self.comma_as_operator and self.match(TokenType.COMMA):
             operator = self.previous()
             right = self.ternary()
             expr = Binary(expr, operator, right)
@@ -123,10 +200,24 @@ class Parser:
         if self.match(TokenType.NUMBER, TokenType.STRING):
             return Literal(self.previous().literal)
 
+        if self.match(TokenType.IDENTIFIER):
+            return Variable(self.previous())
+
         if self.match(TokenType.LEFT_PAREN):
             expr = self.expression()
             self.consume(TokenType.RIGHT_PAREN, "Expect ')' after expression.")
             return Grouping(expr)
+
+        if self.match(TokenType.LEFT_BRACKET):
+            exprs = []
+            self.comma_as_operator = False
+
+            while not self.match(TokenType.RIGHT_BRACKET):
+                exprs.append(self.expression())
+
+            self.consume(TokenType.RIGHT_BRACKET, "Expect ']' after expression.")
+            self.comma_as_operator = True
+            return Vector(exprs)
 
         raise self.error(self.peek(), "Expect expression.")
 
@@ -167,7 +258,7 @@ class Parser:
     def error(token: Token, message: str) -> ParseError:
         import iqalox
         iqalox.Iqalox.error(token, message)
-        return Parser.ParseError(token, message)
+        return ParseError(token, message)
 
     def synchronize(self) -> None:
         self.advance()

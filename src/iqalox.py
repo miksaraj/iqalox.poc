@@ -3,7 +3,8 @@ from sys import argv
 from scanner import Scanner
 from parser import Parser
 from token import Token, TokenType
-from interpreter import Interpreter, IqaloxRuntimeError
+from interpreter import Interpreter
+from error import IqaloxRuntimeError
 
 
 class Iqalox:
@@ -33,12 +34,12 @@ class Iqalox:
         scanner = Scanner(source)
         tokens = scanner.scan_tokens()
         parser = Parser(tokens)
-        expression = parser.parse()
+        statements = parser.parse()
 
         if self.had_error:
             return
 
-        Iqalox.interpreter.interpret(expression)
+        Iqalox.interpreter.interpret(statements)
 
     def run_file(self, path: str) -> None:
         with open(path) as f:

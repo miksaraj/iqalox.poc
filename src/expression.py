@@ -1,10 +1,13 @@
 from abc import ABC, abstractmethod
 from typing import Any, List
 from token import Token
-from scanner import Scanner
 
 
 class ExprVisitor(ABC):
+    @abstractmethod
+    def visit_assign_expr(self, expr: 'Expr') -> Any:
+        pass
+
     @abstractmethod
     def visit_binary_expr(self, expr: 'Expr') -> Any:
         pass
@@ -25,11 +28,28 @@ class ExprVisitor(ABC):
     def visit_ternary_expr(self, expr: 'Expr') -> Any:
         pass
 
+    @abstractmethod
+    def visit_vector_expr(self, expr: 'Expr') -> Any:
+        pass
+
+    @abstractmethod
+    def visit_variable_expr(self, expr: 'Expr') -> Any:
+        pass
+
 
 class Expr(ABC):
     @abstractmethod
     def accept(self, visitor: ExprVisitor) -> Any:
         pass
+
+
+class Assign(Expr):
+    def __init__(self, name: Token, value: Expr) -> None:
+        self.name = name
+        self.value = value
+
+    def accept(self, visitor: ExprVisitor) -> None:
+        return visitor.visit_assign_expr(self)
 
 
 class Binary(Expr):
@@ -77,4 +97,20 @@ class Ternary(Expr):
 
     def accept(self, visitor: ExprVisitor) -> None:
         return visitor.visit_ternary_expr(self)
+
+
+class Vector(Expr):
+    def __init__(self, values: List[Expr]) -> None:
+        self.values = values
+
+    def accept(self, visitor: ExprVisitor) -> None:
+        return visitor.visit_vector_expr(self)
+
+
+class Variable(Expr):
+    def __init__(self, name: Token) -> None:
+        self.name = name
+
+    def accept(self, visitor: ExprVisitor) -> None:
+        return visitor.visit_variable_expr(self)
 

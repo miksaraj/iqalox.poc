@@ -13,15 +13,31 @@ DEFAULT_IMPORTS: Tuple = ('from abc import ABC, abstractmethod',)
 EXPRESSIONS_IMPORTS: Tuple = DEFAULT_IMPORTS + (
     'from typing import Any, List',
     'from token import Token',
-    'from scanner import Scanner',
+)
+
+STATEMENT_IMPORTS: Tuple = DEFAULT_IMPORTS + (
+    'from typing import Any, List',
+    'from expression import Expr',
+    'from token import Token',
 )
 
 EXPRESSIONS: AST_DICT = {
+    'Assign': ('name: Token', 'value: Expr'),
     'Binary': ('left: Expr', 'operator: Token', 'right: Expr'),
     'Grouping': ('expression: Expr',),
     'Literal': ('value: Any',),
     'Unary': ('operator: Token', 'right: Expr'),
     'Ternary': ('left: Expr', 'left_operator: Token', 'middle: Expr', 'right_operator: Token', 'right: Expr'),
+    'Vector': ('values: List[Expr]',),
+    'Variable': ('name: Token',),
+}
+
+STATEMENTS: AST_DICT = {
+    'Block': ('statements: List[Stmt]',),
+    'Expression': ('expression: Expr',),
+    'Print': ('expression: Expr',),
+    'Concat': ('expression: Expr',),
+    'Var': ('name: Token', 'initializer: Expr', 'is_mutable: bool'),
 }
 
 INDENTATION = '    '
@@ -84,6 +100,7 @@ def main() -> None:
         arg_parser.error(f'"{path}" is not a directory.')
 
     define_ast(path / 'expression.py', 'Expr', EXPRESSIONS, EXPRESSIONS_IMPORTS)
+    define_ast(path / 'statement.py', 'Stmt', STATEMENTS, STATEMENT_IMPORTS)
 
 
 if __name__ == '__main__':
