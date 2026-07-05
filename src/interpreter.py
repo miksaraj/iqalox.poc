@@ -1,12 +1,12 @@
 from typing import Any, List
 
 from expression import Expr, ExprVisitor, Binary, Logical, Unary, Literal, Grouping, Ternary, Vector, Variable, \
-    Assign, Break, Continue, Ignore, Call
-from statement import Stmt, StmtVisitor, Expression, Var, Block, For, Function, Return
+    Assign, Break, Continue, Ignore, Call, Get, Set, Self, Super
+from statement import Stmt, StmtVisitor, Expression, Var, Block, For, Function, Return, Class
 from token import Token, TokenType
 from error import IqaloxRuntimeError
 from environment import Environment, VariableData
-from callable import IqaloxCallable, NativeFunction, IqaloxFunction
+from callable import IqaloxCallable, NativeFunction, IqaloxFunction, IqaloxClass, IqaloxInstance
 
 
 class BreakSignal(Exception):
@@ -118,6 +118,24 @@ class Interpreter(ExprVisitor, StmtVisitor):
         self.environment.define(stmt.name.lexeme, VariableData(function, is_mutable=False))
         return None
 
+    def visit_class_stmt(self, stmt: Class) -> None:
+        superclass = None
+        if stmt.superclass is not None:
+            superclass = self.evaluate(stmt.superclass)
+            if not isinstance(superclass, IqaloxClass):
+                raise IqaloxRuntimeError(stmt.superclass.name, 'Superclass must be a class.')
+
+        environment = self.environment
+        if superclass is not None:
+            environment = Environment(self.environment)
+            environment.define('super', VariableData(superclass, is_mutable=False))
+
+        methods = {method.name.lexeme: IqaloxFunction(method, environment) for method in stmt.methods}
+
+        klass = IqaloxClass(stmt.name.lexeme, superclass, methods)
+        self.environment.define(stmt.name.lexeme, VariableData(klass, is_mutable=False))
+        return None
+
     def visit_return_stmt(self, stmt: Return) -> None:
         value = None
         if stmt.value is not None:
@@ -209,10 +227,13 @@ class Interpreter(ExprVisitor, StmtVisitor):
     def visit_call_expr(self, expr: Call) -> Any:
         callee = self.evaluate(expr.callee)
         arguments = [self.evaluate(argument) for argument in expr.arguments]
-        # The parser only ever builds a Call with a Variable callee (see
-        # Parser.call()), so its name token doubles as this call's location
-        # for error reporting.
-        name_token = expr.callee.name
+        # The parser only ever builds a Call with a Variable, Get, or Super
+        # callee (see Parser.call_head()/finish_property_access()); pick
+        # whichever token that callee carries as this call's error location.
+        if isinstance(expr.callee, Super):
+            name_token = expr.callee.method
+        else:
+            name_token = expr.callee.name
 
         if not isinstance(callee, IqaloxCallable):
             raise IqaloxRuntimeError(name_token, f"'{name_token.lexeme}' is not callable.")
@@ -223,6 +244,31 @@ class Interpreter(ExprVisitor, StmtVisitor):
             )
 
         return callee.call(self, arguments)
+
+    def visit_get_expr(self, expr: Get) -> Any:
+        obj = self.evaluate(expr.object)
+        if isinstance(obj, IqaloxInstance):
+            return obj.get(expr.name)
+        raise IqaloxRuntimeError(expr.name, 'Only instances have properties.')
+
+    def visit_set_expr(self, expr: Set) -> Any:
+        obj = self.evaluate(expr.object)
+        if not isinstance(obj, IqaloxInstance):
+            raise IqaloxRuntimeError(expr.name, 'Only instances have fields.')
+        value = self.evaluate(expr.value)
+        obj.set(expr.name, value)
+        return value
+
+    def visit_self_expr(self, expr: Self) -> Any:
+        return self.environment.get(expr.keyword)
+
+    def visit_super_expr(self, expr: Super) -> Any:
+        superclass = self.environment.get(expr.keyword)
+        instance = self.environment.get(Token(TokenType.SELF, 'self', None, expr.keyword.line))
+        method = superclass.find_method(expr.method.lexeme)
+        if method is None:
+            raise IqaloxRuntimeError(expr.method, f"Undefined property '{expr.method.lexeme}'.")
+        return method.bind(instance)
 
     def visit_variable_expr(self, expr: Variable) -> Any:
         return self.environment.get(expr.name)

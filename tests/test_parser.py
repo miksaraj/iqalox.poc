@@ -1,7 +1,8 @@
 from conftest import parse
 
-from expression import Literal, Logical, Binary, Break, Continue, Call, Grouping, Ignore, Ternary, Variable, Vector
-from statement import For, Function, Return, Expression
+from expression import Literal, Logical, Binary, Break, Continue, Call, Get, Grouping, Ignore, Self, Set, Super, \
+    Ternary, Variable, Vector
+from statement import Class, For, Function, Return, Expression
 from token import TokenType
 
 
@@ -223,3 +224,69 @@ def test_ignore_operator_usable_as_ternary_branch():
     expr = single_expr("a ? _ : b")
     assert isinstance(expr, Ternary)
     assert isinstance(expr.middle, Ignore)
+
+
+def test_class_declaration_parses_methods():
+    stmts = parse("class Duck { quack() { return 1; } }")
+    assert len(stmts) == 1
+    cls = stmts[0]
+    assert isinstance(cls, Class)
+    assert cls.name.lexeme == "Duck"
+    assert cls.superclass is None
+    assert len(cls.methods) == 1
+    assert isinstance(cls.methods[0], Function)
+    assert cls.methods[0].name.lexeme == "quack"
+
+
+def test_class_declaration_parses_superclass():
+    cls = parse("class B extends A {}")[0]
+    assert isinstance(cls.superclass, Variable)
+    assert cls.superclass.name.lexeme == "A"
+
+
+def test_class_body_tolerates_blank_lines():
+    cls = parse("class Duck {\n\n    quack() { return 1; }\n\n}")[0]
+    assert len(cls.methods) == 1
+
+
+def test_property_access_is_a_get_expression():
+    expr = single_expr("duck.name")
+    assert isinstance(expr, Get)
+    assert expr.name.lexeme == "name"
+    assert isinstance(expr.object, Variable) and expr.object.name.lexeme == "duck"
+
+
+def test_property_call_with_zero_args():
+    call = single_expr("duck.quack()")
+    assert isinstance(call, Call)
+    assert isinstance(call.callee, Get) and call.callee.name.lexeme == "quack"
+    assert call.arguments == []
+
+
+def test_property_call_with_args_needs_no_parens():
+    call = single_expr("math.square 3")
+    assert isinstance(call, Call)
+    assert isinstance(call.callee, Get) and call.callee.name.lexeme == "square"
+    assert call.arguments[0].value == 3.0
+
+
+def test_property_assignment_is_a_set_expression():
+    stmts = parse("self.name = value")
+    assert len(stmts) == 1
+    expr = stmts[0].expression
+    assert isinstance(expr, Set)
+    assert expr.name.lexeme == "name"
+    assert isinstance(expr.object, Self)
+    assert isinstance(expr.value, Variable) and expr.value.name.lexeme == "value"
+
+
+def test_super_method_call():
+    call = single_expr("super.test()")
+    assert isinstance(call, Call)
+    assert isinstance(call.callee, Super)
+    assert call.callee.method.lexeme == "test"
+    assert call.arguments == []
+
+
+def test_self_is_an_expression():
+    assert isinstance(single_expr("self"), Self)

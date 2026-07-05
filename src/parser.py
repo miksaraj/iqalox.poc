@@ -1,8 +1,8 @@
 from typing import List, Optional
 
 from expression import Expr, Binary, Logical, Unary, Literal, Grouping, Ternary, Vector, Variable, Assign, Break, \
-    Continue, Call, Ignore
-from statement import Stmt, Expression, Var, Block, For, Function, Return
+    Continue, Call, Ignore, Get, Set, Self, Super
+from statement import Stmt, Expression, Var, Block, For, Function, Return, Class
 from token import Token, TokenType
 from error import ParseError
 
@@ -12,7 +12,7 @@ from error import ParseError
 ARGUMENT_START_TOKENS = (
     TokenType.LEFT_PAREN, TokenType.LEFT_BRACKET, TokenType.FALSE, TokenType.TRUE, TokenType.NIL,
     TokenType.NUMBER, TokenType.STRING, TokenType.IDENTIFIER, TokenType.BREAK, TokenType.CONTINUE,
-    TokenType.UNDERSCORE,
+    TokenType.UNDERSCORE, TokenType.SELF, TokenType.SUPER,
 )
 
 
@@ -36,6 +36,8 @@ class Parser:
 
     def declaration(self) -> Optional[Stmt]:
         try:
+            if self.match(TokenType.CLASS):
+                return self.class_declaration()
             if self.match(TokenType.FUN):
                 return self.function_declaration('function')
             if self.match(TokenType.VAR):
@@ -45,7 +47,26 @@ class Parser:
             self.synchronize()
             return None
 
-    def function_declaration(self, kind: str) -> Stmt:
+    def class_declaration(self) -> Stmt:
+        name = self.consume(TokenType.IDENTIFIER, "Expect class name.")
+
+        superclass = None
+        if self.match(TokenType.EXTENDS):
+            self.consume(TokenType.IDENTIFIER, "Expect superclass name.")
+            superclass = Variable(self.previous())
+
+        self.consume(TokenType.LEFT_BRACE, "Expect '{' before class body.")
+
+        methods: List[Function] = []
+        while not self.check(TokenType.RIGHT_BRACE) and not self.is_at_end():
+            if self.match(TokenType.SEMICOLON):
+                continue
+            methods.append(self.function_declaration('method'))
+
+        self.consume(TokenType.RIGHT_BRACE, "Expect '}' after class body.")
+        return Class(name, superclass, methods)
+
+    def function_declaration(self, kind: str) -> Function:
         name = self.consume(TokenType.IDENTIFIER, f"Expect {kind} name.")
         self.consume(TokenType.LEFT_PAREN, f"Expect '(' after {kind} name.")
 
@@ -145,8 +166,9 @@ class Parser:
             value = self.assignment()
 
             if isinstance(expr, Variable):
-                name = expr.name
-                return Assign(name, value)
+                return Assign(expr.name, value)
+            if isinstance(expr, Get):
+                return Set(expr.object, expr.name, value)
 
             raise self.error(equals, "Invalid assignment target.")
 
@@ -295,6 +317,15 @@ class Parser:
         return self.call()
 
     def call(self) -> Optional[Expr]:
+        expr = self.call_head()
+
+        while self.match(TokenType.DOT):
+            name = self.consume(TokenType.IDENTIFIER, "Expect property name after '.'.")
+            expr = self.finish_property_access(Get(expr, name))
+
+        return expr
+
+    def call_head(self) -> Optional[Expr]:
         # No call takes parentheses. `f()` is the explicit zero-arg marker;
         # `f a`, `f a, b` (fixed-arity, comma-separated, no wrapping parens)
         # are calls with arguments; a bare `f` with nothing recognizable as
@@ -313,7 +344,29 @@ class Parser:
                     arguments.append(self.argument())
                 return Call(Variable(name), arguments)
 
-        return self.primary()
+        expr = self.primary()
+        # `super.method` is one combined primary (see primary()) that, like
+        # any other property access, may itself be immediately called.
+        if isinstance(expr, Super):
+            expr = self.finish_property_access(expr)
+        return expr
+
+    def finish_property_access(self, expr: Expr) -> Optional[Expr]:
+        # expr is a Get or a Super -- same zero-arg/argument-start call
+        # detection as call_head(), just anchored on whatever comes right
+        # after the property/method name instead of after a bare identifier.
+        if self.check(TokenType.LEFT_PAREN) and self.check_at(1, TokenType.RIGHT_PAREN):
+            self.advance()
+            self.advance()
+            return Call(expr, [])
+
+        if self.starts_argument(self.peek()):
+            arguments = [self.argument()]
+            while self.match(TokenType.COMMA):
+                arguments.append(self.argument())
+            return Call(expr, arguments)
+
+        return expr
 
     def argument(self) -> Optional[Expr]:
         # A grouped expression, a nested call, or a bare primary -- `call()`
@@ -338,6 +391,13 @@ class Parser:
             return Continue()
         if self.match(TokenType.UNDERSCORE):
             return Ignore()
+        if self.match(TokenType.SELF):
+            return Self(self.previous())
+        if self.match(TokenType.SUPER):
+            keyword = self.previous()
+            self.consume(TokenType.DOT, "Expect '.' after 'super'.")
+            method = self.consume(TokenType.IDENTIFIER, "Expect superclass method name.")
+            return Super(keyword, method)
 
         if self.match(TokenType.NUMBER, TokenType.STRING):
             return Literal(self.previous().literal)

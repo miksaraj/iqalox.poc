@@ -135,6 +135,46 @@ parameters, or a `mut` marker in the parameter list, this is a one-line
 change (`is_mutable=False` in `IqaloxFunction.call()`, `src/callable.py`)
 plus a small grammar addition for the marker case.
 
+**Flagging, not deciding: instance fields (`self.x = ...`) are freely
+reassignable, with no immutability enforcement at all.** Unlike function
+parameters, there isn't even a `var`-shaped declaration step to hang a
+default on — `self.x = value` is simultaneously "declare and assign" the
+first time and "reassign" every time after, dynamically, so there's no
+clean way to apply the `var`-style "immutable unless `mut`" default without
+inventing a new mechanism (e.g. deciding what a first-vs-later assignment
+even means when it depends on runtime state, or requiring fields to be
+pre-declared somewhere). Went with plain, always-mutable fields — closer to
+how Python/Lox objects behave by default — since no example needs anything
+stricter and this avoids inventing a field-declaration syntax that isn't
+in any spec anywhere. Worth an explicit decision later if field
+immutability turns out to matter.
+
+**Known limitation, not a decision: classes can't reference themselves by
+name from inside their own methods.** jlox's book handles this by
+`environment.define(name, null)` *before* building methods, then
+`environment.assign(name, klass)` after — a placeholder-then-patch pattern.
+Our `Environment` doesn't support that cleanly: `define()` errors on
+redeclaration, and `assign()` errors on immutable targets, and class
+bindings are (deliberately, matching function bindings) immutable — so
+there's no clean placeholder step. Skipped rather than reworking
+`Environment`'s API for a case no example needs (methods reference `self`/
+`super`, never their own enclosing class by name).
+
+**Known limitation, not a decision: chaining `.method()` directly onto a
+call's result is ambiguous when that call takes an argument, and currently
+resolves in favor of the argument.** `f x.y` correctly parses as `f(x.y)`
+(the dot binds to the argument) — but by the same rule, `f x .y` variants
+like `B "Bea".greet()` *also* bind the dot to the last argument, parsing as
+`B(("Bea").greet())` instead of `(B("Bea")).greet()`. This is inherent to a
+grammar with no parentheses marking where a call's argument list ends
+(Lox's `f(x).y` has no such ambiguity, because `)` marks the boundary
+unambiguously). Workaround, and what every actual example already does
+anyway: bind the call's result to a variable first (`var b = B "Bea"` then
+`b.greet()`), or wrap the whole call in its own grouping parens
+(`(B "Bea").greet()`) if chaining inline is really wanted. Not fixed because
+it would need a real grammar decision (e.g. requiring explicit grouping
+around any call used as a chain target) rather than a parser bug fix.
+
 ## 2. Status of 0.1-poc feature list
 
 Legend: ✅ done · 🟡 partial/buggy · ⛔ not started
@@ -146,9 +186,9 @@ Legend: ✅ done · 🟡 partial/buggy · ⛔ not started
 | Implicit semicolons | ✅ | Newline → `SEMICOLON` token in `Scanner.scan_token`. A stray/empty semicolon (blank line, comment-only line) is now a harmless no-op statement instead of a hard parse error — see §3. |
 | `continue` / `break` statements | ✅ | Implemented as zero-field `Expr` nodes (`Break`/`Continue`), not statements — see decision 1's engineering note. Usable anywhere an expression is (bare, or as a ternary branch); raise `BreakSignal`/`ContinueSignal` in the interpreter, caught by the enclosing `for`. |
 | Prefix `++`/`--` | ✅ | Mutates via `Environment.assign` (so the existing immutability check applies), evaluates to the new value. Parser rejects non-`Variable` targets (`++5` is a parse error). |
-| `extends` for inheritance | ⛔ | Still not started — no `class` declaration parsing/interpretation at all yet. |
+| `extends` for inheritance | ✅ | `Class` statement's optional `superclass` (a `Variable` reference, resolved at class-declaration time); `IqaloxClass.find_method` walks the superclass chain; `super.method(...)` resolves lexically to the defining class's superclass, not the calling instance's actual class — see §2 status row for classes and §1's `super`-scoping note. |
 | Chainable ternary (elvis `?:` too) instead of if/else | ✅ | `Ternary` node, both `? :` and `?:` forms parse and evaluate; nesting gives chaining. `break`/`continue` work as branches because they're expressions now (see above), not because `Ternary` itself changed. |
-| Support for standard methods | ⛔ | Baseline Lox method dispatch on classes (decision 6) — depends on classes existing at all. |
+| Support for standard methods | ✅ | Plain method dispatch via `instance.method(...)` — see the `Classes` row below. |
 | No `+` string concat | 🟡 | Unchanged from before — `+` on two strings raises a runtime error today only as a side effect of numeric type-checking, not an intentional string-specific rule. |
 | `print` / `concat` as builtin functions | ✅ | Registered as `NativeFunction` instances (arity 1 each) in the global environment at `Interpreter.__init__`; `print`/`concat` are no longer keywords at all (removed from `_keywords`, scan as plain `IDENTIFIER`) — ordinary, shadowable bindings, called through the exact same `Call` grammar as user-defined functions. |
 | Pipe operator `\|>` | ✅ | Desugars directly to a `Call` at parse time (`a \|> f` → `f(a)`, chains left-associatively) — no separate AST node or interpreter support needed. Scanner fix from §3 was a prerequisite (`\|` alone wasn't tokenizable). |
@@ -159,16 +199,16 @@ Legend: ✅ done · 🟡 partial/buggy · ⛔ not started
 | `for` loops | ✅ | Full grammar (initializer/condition/increment all optional, per the drafted grammar minus the removed `whileStmt`). Loop-scoped `Environment` wraps the initializer; body executes via the normal `Block` mechanics. |
 | Logical `and`/`or` | ✅ | `Logical` expr node, short-circuit evaluation, sits between `ternary` and `equality` in precedence (`ternary → logic_or → logic_and → equality`). |
 | Functions (`fun`, calls, `return`, closures) | ✅ | `Function`/`Call`/`Return` AST nodes; `IqaloxFunction`/`NativeFunction` runtime callables in `src/callable.py`; closures work via capturing `self.environment` at declaration time (same object the function's name gets `define`d into, so recursion works); `Call` uses the paren-free grammar from decision 4 directly — no parenthesized form was ever built. |
+| Classes (`class`, methods, instances, `init`, `super`, `self`) | ✅ | `Class`/`Get`/`Set`/`Self`/`Super` AST nodes; `IqaloxClass`/`IqaloxInstance` in `src/callable.py`; `.` member-access chaining added to `Parser.call()` (`call_head()` + `finish_property_access()`). Constructing an instance is just calling the class value (`Duck "Waddles"`, `Math()`) — arity comes from `init`'s arity (0 if no `init`). Fields (`self.x = ...`) are freely mutable (§1). Classes can't reference themselves by name from their own methods, and chaining `.method()` straight onto a call with arguments is ambiguous (both §1, known limitations, not bugs). |
 
 Mixin support and trait support are **out of scope for 0.1-poc** (deferred to
-0.2, decision 5) and are intentionally not in this table.
+0.2, decision 5) and are intentionally not in this table. Getters/setters
+are also 0.2 scope — plain field access (`self.x`, `instance.x`) is all
+0.1-poc supports, no forced accessor methods.
 
-Not on the 0.1-poc list but required by the example scripts and by Lox
-baseline, still **not implemented**:
-
-| Missing baseline | Notes |
-|---|---|
-| Classes (`class`, methods, instances, `init`, `super`, `self`) | No AST nodes, no parsing. Needed for `classes.iqx`/`inheritance.iqx`. `.` member access (`instance.method args`) doesn't exist in the `call()` grammar yet either — `call → IDENTIFIER arguments?` only, no `("." IDENTIFIER arguments?)*` chaining — add it alongside classes, not before there's a receiver to chain off of. |
+With classes done, every 0.1-poc feature and every Lox-baseline mechanic the
+example scripts need is now implemented — see §4 for what's left (grammar
+doc sync, more test coverage) versus what's genuinely still open.
 
 ## 3. Known bugs
 
@@ -362,6 +402,32 @@ a *bare*, standalone `_` to scan correctly, which it already did) — no
 example or test needs a leading-underscore identifier today, so this is
 noted for whenever it actually blocks something, not fixed speculatively.
 
+### Fixed as part of implementing step 10 (fifth batch, classes)
+
+1. **A blank line right after `class Name {` failed to parse**, the same
+   class of bug as the original blank-line/empty-statement issue from the
+   first batch, just not yet exercised in this specific position:
+   `class_declaration()`'s method-collecting loop called
+   `function_declaration('method')` directly, which unconditionally expects
+   an `IDENTIFIER` next — but the newline right after `{` is a stray
+   semicolon (implicit-semicolon insertion doesn't know it followed a `{`
+   with nothing on that line), so it errored "Expect method name." instead
+   of just skipping the empty statement the way `block()`/top-level
+   `declaration()` already do. Fixed by skipping a leading `SEMICOLON` in
+   the loop, same fix shape as the original.
+2. **`classes.iqx` and `inheritance.iqx` were both missing their trailing
+   newline**, unlike every other example file — meaning their last
+   statement had no terminator at all (there's no "EOF also terminates a
+   statement" rule) and always failed to parse. Not a classes-specific bug
+   (any file missing a trailing newline would hit this), just never
+   surfaced before because these two files could never even get that far
+   until classes existed. Fixed by adding the missing newline to both files.
+
+With both fixed, `classes.iqx` and `inheritance.iqx` run to completion via
+the real CLI for the first time — meaning **every example script in
+`langspec/examples/` now runs end-to-end successfully** (verified with
+`python3 iqalox.py <file>`, exit code 0 for all five).
+
 ### Still open
 
 1. `error.py`'s `IqaloxRuntimeError.__str__`/`__repr__` just call `super()`,
@@ -374,18 +440,17 @@ With §1 resolved, all of the following can proceed without further design
 sign-off — flag anything that turns up a *new* design question rather than
 deciding it inline (per `CLAUDE.md`).
 
-**All steps except 10, 11, and 12 (classes, doc sync, further test backfill)
-are done** (branches `claude/0.1-poc-control-flow`,
-`claude/0.1-poc-functions`, `claude/0.1-poc-pipe-ignore`, 2026-07-05). Step 8
+**All steps except 11 and 12 (grammar doc sync, further test backfill) are
+done** (branches `claude/0.1-poc-control-flow`, `claude/0.1-poc-functions`,
+`claude/0.1-poc-pipe-ignore`, `claude/0.1-poc-classes`, 2026-07-05). Step 8
 (prefix `++`/`--` mutation) was pulled forward from its original position
 because `for` loops are untestable — infinite-looping — without a working
 increment, and every existing loop example relies on `++i`/`++j`/`++k`. See
 §2/§3 for what actually landed and what bugs surfaced along the way, and §5
-for the test suite. As of the pipe/ignore batch, `functions.iqx`,
-`control_flow.iqx`, and `loops.iqx` all run to completion end-to-end for the
-first time — only `classes.iqx`/`inheritance.iqx` still need classes
-(step 10). Verified every batch via the actual CLI (`iqalox.py`), not just
-pytest — see §3 bug #3 (module-duplication) for why that mattered.
+for the test suite. As of the classes batch, **every example script in
+`langspec/examples/` runs to completion end-to-end** for the first time.
+Verified every batch via the actual CLI (`iqalox.py`), not just pytest —
+see §3 bug #3 (module-duplication) for why that mattered.
 
 1. ~~**Fix known bugs**~~ — done, see §3.
 2. ~~**Logical `and`/`or`**~~ — done.
@@ -422,23 +487,27 @@ pytest — see §3 bug #3 (module-duplication) for why that mattered.
 8. ~~**Prefix `++`/`--` mutation**~~ — done (pulled forward, see above).
 9. ~~**Ignore operator `_`**~~ — done. Zero-field `Ignore` expr, same
    pattern as `Break`/`Continue`; evaluates to `nil`.
-10. **Classes** — `class`, `extends`, `init`, methods, `super`, `self` (not
-    `this`, decision 3). Getters/setters and mixins/traits explicitly stay
-    out of scope (0.2, decision 5). Also where `.` member-access chaining
-    needs adding to `Parser.call()` (`call → IDENTIFIER arguments? ( "."
-    IDENTIFIER arguments? )*` — the second half doesn't exist yet, see §2).
+10. ~~**Classes**~~ — done. `class`, `extends`, `init`, methods, `super`,
+    `self` (not `this`, decision 3); `.` member-access chaining added to
+    `Parser.call()` (`call_head()` for the identifier-anchored head,
+    `finish_property_access()` shared between `.`-chains and `super.method`,
+    since both need the same "does a call immediately follow" check).
+    Getters/setters and mixins/traits stay out of scope (0.2, decision 5) —
+    plain field access only. See §1 for the field-mutability and
+    self-referencing-class limitations, and §2 for the chaining-ambiguity
+    limitation.
 11. **Sync `langspec/SYNTAX_GRAMMAR.md` and `langspec/README.md`** with
     whatever actually got built. Patched so far: `while`/`if`/`this`
-    removals, the real paren-free `call`/`arguments`/`argument` grammar,
+    removals, the real paren-free `call`/`arguments`/`argument` grammar
+    (including `.` chaining and `classDecl`/`Get`/`Set`/`self`/`super`),
     `pipe`, and `_` in `primary`. Still stale: the
     `assignment`/`ternary`/logical/`null_coalescing` precedence chain's
     details (`null_coalescing` isn't shown at all; `ternary` doesn't reflect
-    the elvis `?:` form) — none of that blocks anything, it's just
-    documentation debt to pay down, ideally alongside class grammar (which
-    will also need `.` added to `call`).
-12. ~~**Backfill pytest coverage**~~ — extended again this batch (functions,
-    calls, closures, recursion, vector-literal regressions), see §5. Keep
-    extending as steps 7+ land rather than after the fact.
+    the elvis `?:` form) — doesn't block anything, just documentation debt.
+12. ~~**Backfill pytest coverage**~~ — extended again this batch (class
+    declarations, instances, fields, method dispatch, inheritance, `super`,
+    arity-from-`init`, error cases), see §5. Keep extending as remaining
+    stdlib/0.2 work lands rather than after the fact.
 
 Steps 2–3 have no dependency on anything else in this list and could start
 immediately.
@@ -457,9 +526,14 @@ one/multi-arg, grouped compound arguments, nested calls, bare-reference-vs-
 call disambiguation), function declarations/closures/recursion/return,
 native `print`/`concat`, arity and not-callable errors, vector-literal
 regressions (empty/single/multi-element), the pipe operator (single call,
-chaining, non-identifier-target rejection, full-expression left side), and
-the ignore operator (bare, as a ternary branch, no side effect). Run with
-`pytest` from the repo root (`pytest.ini` sets `pythonpath = src`).
+chaining, non-identifier-target rejection, full-expression left side), the
+ignore operator (bare, as a ternary branch, no side effect), and classes
+(`tests/test_classes.py`: construction with/without `init`, field get/set
+and free reassignment, method dispatch and overriding, inheritance and
+`super` — including that `super` resolves lexically rather than by the
+calling instance's actual class — arity derived from `init`, and the
+undefined-property/non-instance/non-class-superclass error cases). Run
+with `pytest` from the repo root (`pytest.ini` sets `pythonpath = src`).
 
 Deliberately **not** covered by this suite: anything requiring the actual
 `iqalox.py` CLI process (module-duplication bug in §3, exit codes) — pytest
