@@ -35,6 +35,10 @@ EXPRESSIONS: AST_DICT = {
     'Continue': (),
     'Ignore': (),
     'Call': ('callee: Expr', 'arguments: List[Expr]'),
+    'Get': ('object: Expr', 'name: Token'),
+    'Set': ('object: Expr', 'name: Token', 'value: Expr'),
+    'Self': ('keyword: Token',),
+    'Super': ('keyword: Token', 'method: Token'),
 }
 
 STATEMENTS: AST_DICT = {
@@ -44,6 +48,7 @@ STATEMENTS: AST_DICT = {
     'For': ('initializer: Stmt', 'condition: Expr', 'increment: Expr', 'body: Stmt'),
     'Function': ('name: Token', 'params: List[Token]', 'body: List[Stmt]'),
     'Return': ('keyword: Token', 'value: Expr'),
+    'Class': ('name: Token', 'superclass: Expr', 'methods: List[Function]'),
 }
 
 INDENTATION = '    '

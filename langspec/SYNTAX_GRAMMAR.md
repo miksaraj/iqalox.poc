@@ -15,10 +15,23 @@
     (`funDecl`/`function`, unchanged). `print`/`concat` are ordinary
     builtin function bindings (not keywords), called through this same
     grammar — there is no `printStmt`/`concatStmt`.
-* `call` only chains off a bare `IDENTIFIER` for now (`call → IDENTIFIER
-    arguments?`) — no `.` member-access chaining yet (`instance.method
-    args`); that needs classes (not yet implemented) to have a receiver
-    to chain off of.
+* `call` chains `.` member access/method calls off of a `call_head` (an
+    `IDENTIFIER`, optionally with its own `arguments`, or any other
+    `primary` — including a `self` or `super.method` reference). Each `.`
+    step is itself optionally followed by `arguments`, the same zero-arg
+    `()`/comma-separated/grouped-argument rules as everywhere else — e.g.
+    `duck.quack()`, `math.square 3`, `self.name = name`. Classes are
+    implemented (`classDecl` below); getters/setters and mixins/traits are
+    explicitly out of scope for 0.1-poc (0.2, `docs/PLAN-0.1-POC.md`
+    decision 5) — plain field access only, no forced accessor methods.
+* Chaining `.method()` straight onto a call that itself takes arguments is
+    ambiguous in this paren-free grammar and currently binds to the
+    argument, not the outer call (`f x.y` parses as `f(x.y)`, and by the
+    same rule `B "Bea".greet()` parses as `B(("Bea").greet())`, not
+    `(B("Bea")).greet()`) — bind to a variable first, or wrap the call in
+    its own parens (`(B "Bea").greet()`), to chain immediately. See
+    `docs/PLAN-0.1-POC.md` §1/§2 for the full explanation; not fixed, since
+    a real fix needs a grammar decision, not just a parser patch.
 * The `assignment`/`ternary`/logical/`null_coalescing` chain below is still
     stale relative to `src/parser.py` in its details (predates most of the
     features documented in `docs/PLAN-0.1-POC.md`) — the shape of `call`,
@@ -67,7 +80,9 @@
     multiplication  → unary ( ( "/" | "*" ) unary )* ;
     
     unary           → ( "!" | "-" | "++" | "--" ) unary | call ;
-    call            → IDENTIFIER arguments? ;
+    call            → call_head ( "." IDENTIFIER arguments? )* ;
+    call_head       → IDENTIFIER arguments?
+                    | primary ;
     arguments       → "(" ")"
                     | argument ( "," argument )* ;
     argument        → "(" expression ")"

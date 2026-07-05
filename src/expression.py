@@ -56,6 +56,22 @@ class ExprVisitor(ABC):
     def visit_call_expr(self, expr: 'Expr') -> Any:
         pass
 
+    @abstractmethod
+    def visit_get_expr(self, expr: 'Expr') -> Any:
+        pass
+
+    @abstractmethod
+    def visit_set_expr(self, expr: 'Expr') -> Any:
+        pass
+
+    @abstractmethod
+    def visit_self_expr(self, expr: 'Expr') -> Any:
+        pass
+
+    @abstractmethod
+    def visit_super_expr(self, expr: 'Expr') -> Any:
+        pass
+
 
 class Expr(ABC):
     @abstractmethod
@@ -176,4 +192,40 @@ class Call(Expr):
 
     def accept(self, visitor: ExprVisitor) -> None:
         return visitor.visit_call_expr(self)
+
+
+class Get(Expr):
+    def __init__(self, object: Expr, name: Token) -> None:
+        self.object = object
+        self.name = name
+
+    def accept(self, visitor: ExprVisitor) -> None:
+        return visitor.visit_get_expr(self)
+
+
+class Set(Expr):
+    def __init__(self, object: Expr, name: Token, value: Expr) -> None:
+        self.object = object
+        self.name = name
+        self.value = value
+
+    def accept(self, visitor: ExprVisitor) -> None:
+        return visitor.visit_set_expr(self)
+
+
+class Self(Expr):
+    def __init__(self, keyword: Token) -> None:
+        self.keyword = keyword
+
+    def accept(self, visitor: ExprVisitor) -> None:
+        return visitor.visit_self_expr(self)
+
+
+class Super(Expr):
+    def __init__(self, keyword: Token, method: Token) -> None:
+        self.keyword = keyword
+        self.method = method
+
+    def accept(self, visitor: ExprVisitor) -> None:
+        return visitor.visit_super_expr(self)
 

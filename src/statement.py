@@ -29,6 +29,10 @@ class StmtVisitor(ABC):
     def visit_return_stmt(self, expr: 'Stmt') -> Any:
         pass
 
+    @abstractmethod
+    def visit_class_stmt(self, expr: 'Stmt') -> Any:
+        pass
+
 
 class Stmt(ABC):
     @abstractmethod
@@ -90,4 +94,14 @@ class Return(Stmt):
 
     def accept(self, visitor: StmtVisitor) -> None:
         return visitor.visit_return_stmt(self)
+
+
+class Class(Stmt):
+    def __init__(self, name: Token, superclass: Expr, methods: List[Function]) -> None:
+        self.name = name
+        self.superclass = superclass
+        self.methods = methods
+
+    def accept(self, visitor: StmtVisitor) -> None:
+        return visitor.visit_class_stmt(self)
 
