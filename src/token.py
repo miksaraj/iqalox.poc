@@ -2,7 +2,7 @@ from enum import Enum
 from typing import Dict, Any, Tuple
 
 
-class TokenType(Enum):
+class TokenType(str, Enum):
     # Single-character tokens.
     LEFT_PAREN = '('
     RIGHT_PAREN = ')'

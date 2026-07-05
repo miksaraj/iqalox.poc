@@ -50,15 +50,18 @@ class Scanner:
             return '\0'
         return self.source[self.current + 1]
 
-    def is_digit(self) -> bool:
-        return '0' <= self.peek() <= '9'
+    def is_digit(self, c: str = None) -> bool:
+        if c is None:
+            c = self.peek()
+        return '0' <= c <= '9'
 
-    def is_alpha(self) -> bool:
-        c = self.peek()
+    def is_alpha(self, c: str = None) -> bool:
+        if c is None:
+            c = self.peek()
         return ('a' <= c <= 'z') or ('A' <= c <= 'Z') or c == '_'
 
-    def is_alpha_numeric(self) -> bool:
-        return self.is_alpha() or self.is_digit()
+    def is_alpha_numeric(self, c: str = None) -> bool:
+        return self.is_alpha(c) or self.is_digit(c)
 
     def string(self, char: str) -> None:
         while self.peek() != char and not self.is_at_end():
@@ -105,7 +108,9 @@ class Scanner:
                     while self.peek() != '\n' and not self.is_at_end():
                         self.advance()
                 elif token == TokenType.BLOCK_COMMENT_START:
-                    while self.peek() != '#' and self.peek_next() != '>' and not self.is_at_end():
+                    while not (self.peek() == '#' and self.peek_next() == '>') and not self.is_at_end():
+                        if self.peek() == '\n':
+                            self.line += 1
                         self.advance()
                     self.advance()
                     self.advance()
@@ -118,9 +123,9 @@ class Scanner:
             self.line += 1
         elif c in STRING_STARTERS:
             self.string(c)
-        elif self.is_digit():
+        elif self.is_digit(c):
             self.number()
-        elif self.is_alpha():
+        elif self.is_alpha(c):
             self.identifier()
         else:
             # TODO [#2]: handle a run of one or more invalid tokens as a single error.

@@ -1,7 +1,8 @@
 from typing import List, Optional
 
-from expression import Expr, Binary, Unary, Literal, Grouping, Ternary, Vector, Variable, Assign
-from statement import Stmt, Expression, Print, Concat, Var, Block
+from expression import Expr, Binary, Logical, Unary, Literal, Grouping, Ternary, Vector, Variable, Assign, Break, \
+    Continue
+from statement import Stmt, Expression, Print, Concat, Var, Block, For
 from token import Token, TokenType
 from error import ParseError
 
@@ -16,7 +17,9 @@ class Parser:
         statements: List[Stmt] = []
 
         while not self.is_at_end():
-            statements.append(self.declaration())
+            stmt = self.declaration()
+            if stmt is not None:
+                statements.append(stmt)
         return statements
 
     def expression(self) -> Optional[Expr]:
@@ -32,13 +35,41 @@ class Parser:
             return None
 
     def statement(self) -> Optional[Stmt]:
+        if self.match(TokenType.SEMICOLON):
+            return None
         if self.match(TokenType.PRINT):
             return self.print_statement()
         if self.match(TokenType.CONCAT):
             return self.concat_statement()
+        if self.match(TokenType.FOR):
+            return self.for_statement()
         if self.match(TokenType.LEFT_BRACE):
             return Block(self.block())
         return self.expression_statement()
+
+    def for_statement(self) -> Optional[Stmt]:
+        self.consume(TokenType.LEFT_PAREN, "Expect '(' after 'for'.")
+
+        if self.match(TokenType.SEMICOLON):
+            initializer = None
+        elif self.match(TokenType.VAR):
+            initializer = self.var_declaration()
+        else:
+            initializer = self.expression_statement()
+
+        condition = None
+        if not self.check(TokenType.SEMICOLON):
+            condition = self.expression()
+        self.consume(TokenType.SEMICOLON, "Expect ';' after loop condition.")
+
+        increment = None
+        if not self.check(TokenType.RIGHT_PAREN):
+            increment = self.expression()
+        self.consume(TokenType.RIGHT_PAREN, "Expect ')' after for clauses.")
+
+        body = self.statement()
+
+        return For(initializer, condition, increment, body)
 
     def print_statement(self) -> Optional[Stmt]:
         value = self.expression()
@@ -53,10 +84,7 @@ class Parser:
     def var_declaration(self) -> Optional[Stmt]:
         name = self.consume(TokenType.IDENTIFIER, "Expect variable name.")
 
-        is_mutable = False
-        if self.match(TokenType.MUTABLE):
-            is_mutable = True
-            self.advance()
+        is_mutable = self.match(TokenType.MUTABLE)
 
         initializer = None
         if self.match(TokenType.EQUAL):
@@ -76,7 +104,9 @@ class Parser:
         statements: List[Stmt] = []
 
         while not self.check(TokenType.RIGHT_BRACE) and not self.is_at_end():
-            statements.append(self.declaration())
+            stmt = self.declaration()
+            if stmt is not None:
+                statements.append(stmt)
 
         self.consume(TokenType.RIGHT_BRACE, "Expect '}' after block.")
         return statements
@@ -111,7 +141,7 @@ class Parser:
         return expr
 
     def ternary(self) -> Optional[Expr]:
-        expr = self.equality()
+        expr = self.logic_or()
 
         if self.match(TokenType.QUESTION_MARK):
             left_operator = self.previous()
@@ -124,6 +154,26 @@ class Parser:
             right_operator = self.previous()
             right = self.expression()
             expr = Ternary(expr, left_operator, expr, right_operator, right)
+
+        return expr
+
+    def logic_or(self) -> Optional[Expr]:
+        expr = self.logic_and()
+
+        while self.match(TokenType.OR):
+            operator = self.previous()
+            right = self.logic_and()
+            expr = Logical(expr, operator, right)
+
+        return expr
+
+    def logic_and(self) -> Optional[Expr]:
+        expr = self.equality()
+
+        while self.match(TokenType.AND):
+            operator = self.previous()
+            right = self.equality()
+            expr = Logical(expr, operator, right)
 
         return expr
 
@@ -177,6 +227,8 @@ class Parser:
         if self.match(TokenType.PLUS_PLUS, TokenType.MINUS_MINUS):
             operator = self.previous()
             right = self.unary()
+            if not isinstance(right, Variable):
+                raise self.error(operator, "Invalid increment/decrement target.")
             return Unary(operator, right)
 
         return self.unary()
@@ -191,11 +243,15 @@ class Parser:
 
     def primary(self) -> Optional[Expr]:
         if self.match(TokenType.FALSE):
-            return Literal(TokenType.FALSE)
+            return Literal(False)
         if self.match(TokenType.TRUE):
-            return Literal(TokenType.TRUE)
+            return Literal(True)
         if self.match(TokenType.NIL):
-            return Literal(TokenType.NIL)
+            return Literal(None)
+        if self.match(TokenType.BREAK):
+            return Break()
+        if self.match(TokenType.CONTINUE):
+            return Continue()
 
         if self.match(TokenType.NUMBER, TokenType.STRING):
             return Literal(self.previous().literal)

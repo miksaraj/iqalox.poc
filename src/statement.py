@@ -25,6 +25,10 @@ class StmtVisitor(ABC):
     def visit_var_stmt(self, expr: 'Stmt') -> Any:
         pass
 
+    @abstractmethod
+    def visit_for_stmt(self, expr: 'Stmt') -> Any:
+        pass
+
 
 class Stmt(ABC):
     @abstractmethod
@@ -72,4 +76,15 @@ class Var(Stmt):
 
     def accept(self, visitor: StmtVisitor) -> None:
         return visitor.visit_var_stmt(self)
+
+
+class For(Stmt):
+    def __init__(self, initializer: Stmt, condition: Expr, increment: Expr, body: Stmt) -> None:
+        self.initializer = initializer
+        self.condition = condition
+        self.increment = increment
+        self.body = body
+
+    def accept(self, visitor: StmtVisitor) -> None:
+        return visitor.visit_for_stmt(self)
 

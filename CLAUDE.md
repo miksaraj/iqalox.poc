@@ -83,9 +83,13 @@ implement something differently than what's actually specified elsewhere.
 - **Python style**: match what's there — 4-space indents, type hints on
   public methods, `ABC`/visitor pattern for AST nodes, no docstrings/comments
   beyond the occasional `# TODO [#n]: ...` marker.
-- **Testing**: the project standardizes on **pytest**. There is no test suite
-  yet; when adding non-trivial interpreter behavior, add tests under `tests/`
-  rather than relying on manual `.iqx` script runs alone.
+- **Testing**: the project standardizes on **pytest**. Run with `pytest` from
+  the repo root (`pytest.ini` sets `pythonpath = src`; dev dependencies are in
+  `requirements-dev.txt`). When adding non-trivial interpreter behavior, add
+  tests under `tests/` rather than relying on manual `.iqx` script runs alone.
+  Note: `src/token.py` shadows the stdlib `token` module — `tests/conftest.py`
+  works around this by evicting it from `sys.modules` before importing
+  project modules; see `docs/PLAN-0.1-POC.md` §5 if that ever needs revisiting.
 - **Example scripts**: live in `langspec/examples/*.iqx` (current) —
   `langspec/archived/*/examples/*.iqlx` used the old extension and are frozen.
   Keep the current examples runnable as features land; if an example depends

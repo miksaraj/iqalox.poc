@@ -13,6 +13,10 @@ class ExprVisitor(ABC):
         pass
 
     @abstractmethod
+    def visit_logical_expr(self, expr: 'Expr') -> Any:
+        pass
+
+    @abstractmethod
     def visit_grouping_expr(self, expr: 'Expr') -> Any:
         pass
 
@@ -34,6 +38,14 @@ class ExprVisitor(ABC):
 
     @abstractmethod
     def visit_variable_expr(self, expr: 'Expr') -> Any:
+        pass
+
+    @abstractmethod
+    def visit_break_expr(self, expr: 'Expr') -> Any:
+        pass
+
+    @abstractmethod
+    def visit_continue_expr(self, expr: 'Expr') -> Any:
         pass
 
 
@@ -60,6 +72,16 @@ class Binary(Expr):
 
     def accept(self, visitor: ExprVisitor) -> None:
         return visitor.visit_binary_expr(self)
+
+
+class Logical(Expr):
+    def __init__(self, left: Expr, operator: Token, right: Expr) -> None:
+        self.left = left
+        self.operator = operator
+        self.right = right
+
+    def accept(self, visitor: ExprVisitor) -> None:
+        return visitor.visit_logical_expr(self)
 
 
 class Grouping(Expr):
@@ -113,4 +135,20 @@ class Variable(Expr):
 
     def accept(self, visitor: ExprVisitor) -> None:
         return visitor.visit_variable_expr(self)
+
+
+class Break(Expr):
+    def __init__(self) -> None:
+        pass
+
+    def accept(self, visitor: ExprVisitor) -> None:
+        return visitor.visit_break_expr(self)
+
+
+class Continue(Expr):
+    def __init__(self) -> None:
+        pass
+
+    def accept(self, visitor: ExprVisitor) -> None:
+        return visitor.visit_continue_expr(self)
 
