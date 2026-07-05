@@ -13,10 +13,10 @@ so they were routed to the repo owner per `CLAUDE.md` rather than guessed at.
 Resolved 2026-07-05:
 
 1. **Ternary fully replaces `if`/`else`, including for statement-like
-   branches.** `continue`, `break`, and calls with side effects (`print(...)`)
+   branches.** `continue`, `break`, and calls with side effects (`print k`)
    must all be usable as ternary branches, e.g.:
    ```
-   (k == 0 or k == 5) ? continue : (k == 10) ? break : print(k)
+   (k == 0 or k == 5) ? continue : (k == 10) ? break : print k
    ```
    Engineering consequence: the ternary's middle/right branches can't be
    restricted to the `Expr` hierarchy the way `Ternary` is defined today —
@@ -56,18 +56,59 @@ Resolved 2026-07-05:
    record).
 
 4. **`print` and `concat` are promoted to ordinary builtin functions**, not
-   statement keywords. Consequence worked out from this, not re-litigated:
-   every other function call in the examples already uses standard
-   parenthesized call syntax (`add5(1)`, `fib(n - 2)`, `math.square(3)`), so
-   `print`/`concat` calls now follow the same convention —
-   `print(x)` / `concat([a, b])` — rather than the old bare `print x` /
-   `concat [...]` statement forms. All current (non-archived) example
-   scripts have been updated to add the parens at direct call sites; bare
-   `concat`/`print` used as a pipe target (`|> print`) is unaffected, since
-   that's just a first-class function value reference, not a call.
-   `src/statement.py`'s `Print`/`Concat` statement nodes will need to go away
-   once function calls exist and `print`/`concat` are registered as builtin
-   function values instead (§4 below).
+   statement keywords — but **called without parentheses**: `print x`,
+   `concat [a, b]`. This is a fixed, non-negotiable convention (corrects an
+   earlier draft of this doc, which wrongly inferred parenthesized calls by
+   analogy with `add5(1)`-style user function calls — that analogy doesn't
+   hold; builtins keep the bare call form from the original examples). All
+   example scripts have been reverted to the bare `print x` / `concat [...]`
+   form. `concat`/`print` used as a pipe target (`|> print`) is unaffected
+   either way, since that's a first-class function value reference, not a
+   call. `src/statement.py`'s `Print`/`Concat` statement nodes still need to
+   go away once function calls exist and `print`/`concat` are registered as
+   builtin function *values* instead (§4 below) — becoming a value doesn't
+   imply gaining parentheses.
+
+   **4b. Open exploration: should *no* function call require parentheses?**
+   Not yet decided — flagging the real tradeoffs rather than picking one.
+   It's achievable in principle (this is exactly how Haskell/ML function
+   application works: juxtaposition, binding tighter than any operator), but
+   it has concrete consequences for this language specifically:
+   - **Compound arguments need their own grouping parens.** `fact(n - 1)`
+     would become `fact (n - 1)` — the parens move from "this is the
+     argument list" to "this groups a sub-expression," which look identical
+     but mean different things. Simple single-token arguments (`print k`,
+     already true today) are unaffected.
+   - **Zero-argument calls need to stay distinguishable from bare references.**
+     The language relies on referencing a function by name *without* calling
+     it (`return adder`, `print fact` prints the function itself, `test(count)`
+     passes `count` as a value without invoking it). If a bare identifier
+     always meant "call it," that distinction is lost. Keeping `f()` as the
+     explicit zero-arg call marker (even if 1+-arg calls drop parens) would
+     preserve it.
+   - **Multi-argument calls collide with the existing comma operator.**
+     `f a, b` is ambiguous between "call `f` with two arguments" and "call
+     `f` with one argument `a`, then the comma operator sequencing `, b`" —
+     the comma operator is already implemented and its precedence is
+     documented in the root `README.md`. Resolving this needs either
+     restricting multi-arg paren-free calls, or scoping the comma operator
+     out of unparenthesized call-argument position (similar to how
+     `Parser.comma_as_operator` already gets toggled off while parsing a
+     `[...]` vector literal).
+   - **Currying is a separate, larger decision riding along with this one.**
+     True Haskell-style juxtaposition implies every function is effectively
+     single-argument (`f a b c` = `((f a) b) c`), which would enable partial
+     application for free but changes what a function value *is* and doesn't
+     match the current fixed-arity `fun f(a, b, c) {...}` declaration form.
+     A fixed-arity juxtaposition (`f a b c` calls `f` with exactly the three
+     declared parameters, no currying) avoids that but still needs an answer
+     to the comma-operator collision above.
+
+   Recommendation if/when this gets picked up: fixed-arity juxtaposition,
+   keep mandatory `()` for zero-arg calls only, and disable the comma
+   operator while parsing a paren-free argument list — but this is a
+   recommendation, not a decision, and needs explicit sign-off before any
+   grammar work happens here, per `CLAUDE.md`.
 
 5. **Mixins and traits are deferred out of 0.1-poc**, moved to `0.2` in
    `ROADMAP.md`. The PHP-vs-Scala-style implementation question from the
@@ -173,7 +214,14 @@ deciding it inline (per `CLAUDE.md`).
    `Print`/`Concat` statement AST nodes), retire the dedicated
    `print`/`concat` statement grammar in `parser.py`, and remove `Print`/
    `Concat` from `tools/generate_ast.py`'s `STATEMENTS` dict once nothing
-   depends on them.
+   depends on them. Becoming a function value does **not** mean gaining
+   parentheses (decision 4) — the general `Call` grammar from step 5 (which
+   presumably requires `(args)`, matching every other example call site)
+   needs a paren-free calling form for at least these two builtins, e.g. a
+   dedicated `builtinCall → IDENTIFIER expression` production or similar,
+   independent of whatever step 5's general call syntax ends up being. If
+   4b (paren-free calls generally) gets picked up later, this dedicated form
+   can likely be folded into the general one.
 7. **Pipe operator `|>`** — once functions and step 6 land, desugar
    `a |> f` to a call `f(a)`.
 8. **Prefix `++`/`--` mutation** — per decision 2: assign the incremented

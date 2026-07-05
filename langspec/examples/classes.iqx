@@ -6,7 +6,7 @@ class Duck {
     }
 
     quack() {
-        print(concat([self.name, "quacks"]))
+        print concat [self.name, "quacks"]
     }
 }
 
@@ -20,4 +20,4 @@ var duck = Duck("Waddles")
 duck.quack()
 
 var math = Math()
-print(math.square(3))
+print math.square(3)

@@ -55,8 +55,13 @@ New/changed vs. Lox:
   function calls with side effects). There is no `if` statement.
 - `while` does not exist — `for` is the only loop construct
 - `print` and `concat` are ordinary (builtin) functions, not statement
-  keywords — call them like any other function (`print(x)`,
-  `concat([a, b])`), or reference them by name as pipe/callback targets
+  keywords — but they are called **without parentheses**
+  (`print x`, `concat [a, b]`), matching every existing example. This is a
+  fixed, non-negotiable convention. Whether ordinary user-defined function
+  calls (currently written `add5(1)`, `fib(n - 2)`, `math.square(3)` in the
+  examples) should *also* drop their parentheses is a live but unresolved
+  exploration — see `docs/PLAN-0.1-POC.md` for the tradeoffs. Until that's
+  settled, only builtins are confirmed parenthesis-free.
 - No string concatenation via `+` (arrays/strings use array-manipulation
   facilities/`concat` instead)
 - Pipe operator (`|>`)
