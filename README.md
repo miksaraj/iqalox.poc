@@ -34,3 +34,4 @@ _Please note: Iqalox is in planning phase, so no implementation has been written
 | Null-coalescing  |       `??`        |    Left    |
 |     Ternary      |       `? :`       |   Right    |
 |      Comma       |        `,`        |    Left    |
+|       Pipe       |       `\|>`       |    Left    |

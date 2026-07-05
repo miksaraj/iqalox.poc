@@ -1,7 +1,7 @@
 from typing import Any, List
 
 from expression import Expr, ExprVisitor, Binary, Logical, Unary, Literal, Grouping, Ternary, Vector, Variable, \
-    Assign, Break, Continue, Call
+    Assign, Break, Continue, Ignore, Call
 from statement import Stmt, StmtVisitor, Expression, Var, Block, For, Function, Return
 from token import Token, TokenType
 from error import IqaloxRuntimeError
@@ -202,6 +202,9 @@ class Interpreter(ExprVisitor, StmtVisitor):
 
     def visit_continue_expr(self, expr: Continue) -> Any:
         raise ContinueSignal()
+
+    def visit_ignore_expr(self, expr: Ignore) -> Any:
+        return None
 
     def visit_call_expr(self, expr: Call) -> Any:
         callee = self.evaluate(expr.callee)

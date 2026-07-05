@@ -1,7 +1,7 @@
 from typing import List, Optional
 
 from expression import Expr, Binary, Logical, Unary, Literal, Grouping, Ternary, Vector, Variable, Assign, Break, \
-    Continue, Call
+    Continue, Call, Ignore
 from statement import Stmt, Expression, Var, Block, For, Function, Return
 from token import Token, TokenType
 from error import ParseError
@@ -12,6 +12,7 @@ from error import ParseError
 ARGUMENT_START_TOKENS = (
     TokenType.LEFT_PAREN, TokenType.LEFT_BRACKET, TokenType.FALSE, TokenType.TRUE, TokenType.NIL,
     TokenType.NUMBER, TokenType.STRING, TokenType.IDENTIFIER, TokenType.BREAK, TokenType.CONTINUE,
+    TokenType.UNDERSCORE,
 )
 
 
@@ -137,7 +138,7 @@ class Parser:
         return statements
 
     def assignment(self) -> Optional[Expr]:
-        expr = self.comma()
+        expr = self.pipe()
 
         if self.match(TokenType.EQUAL):
             equals = self.previous()
@@ -148,6 +149,21 @@ class Parser:
                 return Assign(name, value)
 
             raise self.error(equals, "Invalid assignment target.")
+
+        return expr
+
+    def pipe(self) -> Optional[Expr]:
+        # `a |> f` desugars directly to the call `f(a)` at parse time --
+        # there's no separate Pipe AST node or interpreter support needed.
+        # Chains left-associatively: `a |> f |> g` is `g(f(a))`.
+        expr = self.comma()
+
+        while self.match(TokenType.PIPE):
+            operator = self.previous()
+            right = self.comma()
+            if not isinstance(right, Variable):
+                raise self.error(operator, "Expect a function reference after '|>'.")
+            expr = Call(right, [expr])
 
         return expr
 
@@ -320,6 +336,8 @@ class Parser:
             return Break()
         if self.match(TokenType.CONTINUE):
             return Continue()
+        if self.match(TokenType.UNDERSCORE):
+            return Ignore()
 
         if self.match(TokenType.NUMBER, TokenType.STRING):
             return Literal(self.previous().literal)

@@ -59,3 +59,20 @@ def test_block_comment_tracks_line_numbers():
     tokens = Scanner("<# line one\nline two #>\nprint 1").scan_tokens()
     print_token = next(t for t in tokens if t.type == TokenType.IDENTIFIER)
     assert print_token.line == 3
+
+
+def test_pipe_operator_scans_as_one_token():
+    # Regression test: the scanner's dispatch requires the single character
+    # just consumed to itself be a listed token before it looks for a
+    # longer match -- '|' alone wasn't listed (only the full '|>' was), so
+    # this always fell through to "Unexpected character" instead.
+    tokens = token_types("a |> b")
+    assert tokens[1] == TokenType.PIPE
+
+
+def test_bare_pipe_character_is_a_clean_scan_error_not_a_crash():
+    # '|' not followed by '>' doesn't extend into any valid token; this
+    # must be reported like any other bad character, not raise a raw
+    # ValueError from an unguarded TokenType(token) construction.
+    tokens = token_types("a | b")
+    assert TokenType.PIPE not in tokens

@@ -1,6 +1,6 @@
 from conftest import parse
 
-from expression import Literal, Logical, Binary, Break, Continue, Call, Grouping, Ternary, Variable, Vector
+from expression import Literal, Logical, Binary, Break, Continue, Call, Grouping, Ignore, Ternary, Variable, Vector
 from statement import For, Function, Return, Expression
 from token import TokenType
 
@@ -183,3 +183,43 @@ def test_vector_literal_with_multiple_elements():
 def test_empty_and_single_element_vector_literals():
     assert single_expr("[]").values == []
     assert [v.value for v in single_expr("[1]").values] == [1.0]
+
+
+def test_pipe_desugars_to_a_call():
+    call = single_expr("a |> f")
+    assert isinstance(call, Call)
+    assert call.callee.name.lexeme == "f"
+    assert isinstance(call.arguments[0], Variable) and call.arguments[0].name.lexeme == "a"
+
+
+def test_pipe_chains_left_associatively():
+    # `a |> f |> g` is `g(f(a))`.
+    call = single_expr("a |> f |> g")
+    assert isinstance(call, Call) and call.callee.name.lexeme == "g"
+    inner = call.arguments[0]
+    assert isinstance(inner, Call) and inner.callee.name.lexeme == "f"
+    assert isinstance(inner.arguments[0], Variable) and inner.arguments[0].name.lexeme == "a"
+
+
+def test_pipe_requires_a_function_reference_on_the_right():
+    # `a |> 1` doesn't make sense -- the right side must be a bare name.
+    stmts = parse("a |> 1")
+    assert stmts == []
+
+
+def test_pipe_binds_looser_than_comma_and_ternary():
+    # A ternary as the whole pipe input needs no extra grouping.
+    call = single_expr("(a ? b : c) |> f")
+    assert isinstance(call, Call)
+    assert isinstance(call.arguments[0], Grouping)
+    assert isinstance(call.arguments[0].expression, Ternary)
+
+
+def test_ignore_operator_is_an_expression():
+    assert isinstance(single_expr("_"), Ignore)
+
+
+def test_ignore_operator_usable_as_ternary_branch():
+    expr = single_expr("a ? _ : b")
+    assert isinstance(expr, Ternary)
+    assert isinstance(expr.middle, Ignore)

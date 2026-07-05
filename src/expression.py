@@ -49,6 +49,10 @@ class ExprVisitor(ABC):
         pass
 
     @abstractmethod
+    def visit_ignore_expr(self, expr: 'Expr') -> Any:
+        pass
+
+    @abstractmethod
     def visit_call_expr(self, expr: 'Expr') -> Any:
         pass
 
@@ -155,6 +159,14 @@ class Continue(Expr):
 
     def accept(self, visitor: ExprVisitor) -> None:
         return visitor.visit_continue_expr(self)
+
+
+class Ignore(Expr):
+    def __init__(self) -> None:
+        pass
+
+    def accept(self, visitor: ExprVisitor) -> None:
+        return visitor.visit_ignore_expr(self)
 
 
 class Call(Expr):
