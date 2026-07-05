@@ -70,4 +70,5 @@ def main(args) -> None:
         Iqalox().run_prompt()
 
 
-main(argv[1:])
+if __name__ == '__main__':
+    main(argv[1:])

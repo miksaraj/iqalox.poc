@@ -24,12 +24,15 @@ STATEMENT_IMPORTS: Tuple = DEFAULT_IMPORTS + (
 EXPRESSIONS: AST_DICT = {
     'Assign': ('name: Token', 'value: Expr'),
     'Binary': ('left: Expr', 'operator: Token', 'right: Expr'),
+    'Logical': ('left: Expr', 'operator: Token', 'right: Expr'),
     'Grouping': ('expression: Expr',),
     'Literal': ('value: Any',),
     'Unary': ('operator: Token', 'right: Expr'),
     'Ternary': ('left: Expr', 'left_operator: Token', 'middle: Expr', 'right_operator: Token', 'right: Expr'),
     'Vector': ('values: List[Expr]',),
     'Variable': ('name: Token',),
+    'Break': (),
+    'Continue': (),
 }
 
 STATEMENTS: AST_DICT = {
@@ -38,6 +41,7 @@ STATEMENTS: AST_DICT = {
     'Print': ('expression: Expr',),
     'Concat': ('expression: Expr',),
     'Var': ('name: Token', 'initializer: Expr', 'is_mutable: bool'),
+    'For': ('initializer: Stmt', 'condition: Expr', 'increment: Expr', 'body: Stmt'),
 }
 
 INDENTATION = '    '
@@ -63,11 +67,15 @@ def define_visitor(file: TextIO, base_name: str, types: Iterable[str]) -> None:
 
 def define_type(file: TextIO, base_name: str, class_name: str, fields: Tuple) -> None:
     file.write(f'class {class_name}({base_name}):\n')
-    file.write(f'{INDENTATION}def __init__(self, {", ".join(fields)}) -> None:\n')
+    params = ', '.join(('self',) + fields)
+    file.write(f'{INDENTATION}def __init__({params}) -> None:\n')
 
-    for field in fields:
-        name = field.split(':')[0]
-        file.write(f'{INDENTATION * 2}self.{name} = {name}\n')
+    if fields:
+        for field in fields:
+            name = field.split(':')[0]
+            file.write(f'{INDENTATION * 2}self.{name} = {name}\n')
+    else:
+        file.write(f'{INDENTATION * 2}pass\n')
 
     file.write('\n')
     file.write(f'{INDENTATION}def accept(self, visitor: {base_name}Visitor) -> None:\n')

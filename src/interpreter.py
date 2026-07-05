@@ -1,10 +1,19 @@
 from typing import Any, List
 
-from expression import Expr, ExprVisitor, Binary, Unary, Literal, Grouping, Ternary, Vector, Variable, Assign
-from statement import Stmt, StmtVisitor, Expression, Print, Concat, Var, Block
+from expression import Expr, ExprVisitor, Binary, Logical, Unary, Literal, Grouping, Ternary, Vector, Variable, \
+    Assign, Break, Continue
+from statement import Stmt, StmtVisitor, Expression, Print, Concat, Var, Block, For
 from token import Token, TokenType
 from error import IqaloxRuntimeError
 from environment import Environment, VariableData
+
+
+class BreakSignal(Exception):
+    pass
+
+
+class ContinueSignal(Exception):
+    pass
 
 
 class Interpreter(ExprVisitor, StmtVisitor):
@@ -24,11 +33,16 @@ class Interpreter(ExprVisitor, StmtVisitor):
             self.environment = previous
 
     def interpret(self, statements: List[Stmt]) -> None:
+        import iqalox
         try:
             for statement in statements:
                 self.execute(statement)
-        except IqaloxRuntimeError:
-            return
+        except IqaloxRuntimeError as error:
+            iqalox.Iqalox.runtime_error(error)
+        except BreakSignal:
+            print("Runtime error: 'break' used outside of a loop.")
+        except ContinueSignal:
+            print("Runtime error: 'continue' used outside of a loop.")
 
     @staticmethod
     def stringify(obj: Any) -> str:
@@ -98,6 +112,27 @@ class Interpreter(ExprVisitor, StmtVisitor):
         self.environment.define(stmt.name.lexeme, VariableData(value, stmt.is_mutable))
         return None
 
+    def visit_for_stmt(self, stmt: For) -> None:
+        previous = self.environment
+        try:
+            self.environment = Environment(previous)
+            if stmt.initializer is not None:
+                self.execute(stmt.initializer)
+
+            while stmt.condition is None or self.is_truthy(self.evaluate(stmt.condition)):
+                try:
+                    self.execute(stmt.body)
+                except BreakSignal:
+                    break
+                except ContinueSignal:
+                    pass
+
+                if stmt.increment is not None:
+                    self.evaluate(stmt.increment)
+        finally:
+            self.environment = previous
+        return None
+
     def visit_assign_expr(self, expr: Assign) -> Any:
         value = self.evaluate(expr.value)
         self.environment.assign(expr.name, value)
@@ -113,21 +148,40 @@ class Interpreter(ExprVisitor, StmtVisitor):
         return [self.evaluate(value) for value in expr.values]
 
     def visit_unary_expr(self, expr: Unary) -> Any:
+        if expr.operator.type in (TokenType.PLUS_PLUS, TokenType.MINUS_MINUS):
+            current = self.environment.get(expr.right.name)
+            self.check_number_operand(expr.operator, current)
+            step = 1 if expr.operator.type == TokenType.PLUS_PLUS else -1
+            new_value = float(current) + step
+            self.environment.assign(expr.right.name, new_value)
+            return new_value
+
         right = self.evaluate(expr.right)
 
-        if expr.operator.type == TokenType.PLUS_PLUS:
-            self.check_number_operand(expr.operator, right)
-            return float(right) + 1
-        elif expr.operator.type == TokenType.MINUS_MINUS:
-            self.check_number_operand(expr.operator, right)
-            return float(right) - 1
-        elif expr.operator.type == TokenType.BANG:
+        if expr.operator.type == TokenType.BANG:
             return not self.is_truthy(right)
         elif expr.operator.type == TokenType.MINUS:
             self.check_number_operand(expr.operator, right)
             return -float(right)
 
         return None
+
+    def visit_logical_expr(self, expr: Logical) -> Any:
+        left = self.evaluate(expr.left)
+
+        if expr.operator.type == TokenType.OR:
+            if self.is_truthy(left):
+                return left
+        elif not self.is_truthy(left):
+            return left
+
+        return self.evaluate(expr.right)
+
+    def visit_break_expr(self, expr: Break) -> Any:
+        raise BreakSignal()
+
+    def visit_continue_expr(self, expr: Continue) -> Any:
+        raise ContinueSignal()
 
     def visit_variable_expr(self, expr: Variable) -> Any:
         return self.environment.get(expr.name)
