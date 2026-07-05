@@ -76,3 +76,42 @@ def test_bare_pipe_character_is_a_clean_scan_error_not_a_crash():
     # ValueError from an unguarded TokenType(token) construction.
     tokens = token_types("a | b")
     assert TokenType.PIPE not in tokens
+
+
+def test_token_tracks_column_within_its_line():
+    tokens = Scanner("var x = 1").scan_tokens()
+    ident = next(t for t in tokens if t.type == TokenType.IDENTIFIER)
+    assert ident.lexeme == "x"
+    assert ident.column == 5  # 1-indexed: 'v','a','r',' ','x'
+
+
+def test_token_column_resets_on_each_new_line():
+    tokens = Scanner("var x = 1\n  y = 2").scan_tokens()
+    y_token = next(t for t in tokens if t.type == TokenType.IDENTIFIER and t.lexeme == "y")
+    assert y_token.line == 2
+    assert y_token.column == 3  # two leading spaces on the second line
+
+
+def test_multiline_string_is_reported_at_its_opening_quote(capsys):
+    Scanner('var s = "unterminated\nstill going').scan_tokens()
+    out = capsys.readouterr().out
+    # The opening quote is on line 1, even though the scanner only notices
+    # the string is unterminated after running off the end of the source.
+    assert "[line 1]" in out
+    assert "Unterminated string" in out
+
+
+def test_run_of_invalid_characters_is_a_single_error(capsys):
+    tokens = token_types("var x = @@@ 1")
+    out = capsys.readouterr().out
+    # One error, not three -- and it names the whole run, not just one '@'.
+    assert out.count("Unexpected character") == 1
+    assert "@@@" in out
+    assert TokenType.NUMBER in tokens  # scanning recovers and continues past the run
+
+
+def test_single_invalid_character_is_still_reported_singular(capsys):
+    token_types("var x = @ 1")
+    out = capsys.readouterr().out
+    assert "Unexpected character:" in out
+    assert "Unexpected characters:" not in out

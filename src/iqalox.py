@@ -1,5 +1,6 @@
 import sys
 from sys import argv
+from typing import List, Optional
 
 from scanner import Scanner
 from parser import Parser
@@ -22,26 +23,48 @@ class Iqalox:
     interpreter = Interpreter()
     had_error = False
     had_runtime_error = False
+    # The source of the program/line currently being run, split into lines,
+    # so error reporting can show the offending line itself rather than just
+    # a line number. Reset at the top of every run() call.
+    source_lines: List[str] = []
 
     @staticmethod
     def error(token: Token, message: str) -> None:
         if token.type == TokenType.EOF:
-            Iqalox.report(token.line, " at end", message)
+            Iqalox.report(token.line, " at end", message, token.column, token.lexeme)
         else:
-            Iqalox.report(token.line, f" at '{token.lexeme}'", message)
+            # An implicit semicolon's lexeme is a literal newline -- display
+            # it as a word instead of a raw '\n', which would otherwise
+            # split this single error line into two.
+            displayed = 'newline' if token.lexeme == '\n' else token.lexeme
+            Iqalox.report(token.line, f" at '{displayed}'", message, token.column, token.lexeme)
 
     @staticmethod
     def runtime_error(error: IqaloxRuntimeError) -> None:
         print(f"{error}\n[line {error.token.line}]")
+        Iqalox.print_source_context(error.token.line, error.token.column, error.token.lexeme)
         Iqalox.had_runtime_error = True
 
     @staticmethod
-    def report(line: int, where: str, message: str) -> None:
-        # TODO [#1]: improve error reporting to show the user exactly where the error is.
+    def report(line: int, where: str, message: str, column: Optional[int] = None, lexeme: str = '') -> None:
         print(f"[line {line}] Error{where}: {message}")
+        Iqalox.print_source_context(line, column, lexeme)
         Iqalox.had_error = True
 
+    @staticmethod
+    def print_source_context(line: int, column: Optional[int], lexeme: str) -> None:
+        # Best-effort: silently skip whenever there's nothing sensible to
+        # show (no column info, or a line number outside the source we have
+        # -- e.g. an EOF token on a blank final line).
+        if column is None or line < 1 or line > len(Iqalox.source_lines):
+            return
+        source_line = Iqalox.source_lines[line - 1]
+        print(f"    {source_line}")
+        underline_width = max(len(lexeme), 1)
+        print(f"    {' ' * (column - 1)}{'^' * underline_width}")
+
     def run(self, source: str) -> None:
+        Iqalox.source_lines = source.splitlines()
         scanner = Scanner(source)
         tokens = scanner.scan_tokens()
         parser = Parser(tokens)

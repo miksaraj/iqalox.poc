@@ -264,7 +264,7 @@ class Interpreter(ExprVisitor, StmtVisitor):
 
     def visit_super_expr(self, expr: Super) -> Any:
         superclass = self.environment.get(expr.keyword)
-        instance = self.environment.get(Token(TokenType.SELF, 'self', None, expr.keyword.line))
+        instance = self.environment.get(Token(TokenType.SELF, 'self', None, expr.keyword.line, expr.keyword.column))
         method = superclass.find_method(expr.method.lexeme)
         if method is None:
             raise IqaloxRuntimeError(expr.method, f"Undefined property '{expr.method.lexeme}'.")
