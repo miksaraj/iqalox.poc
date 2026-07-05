@@ -8,8 +8,14 @@
     `while` was removed from the language outright (`for` is the only
     loop construct). `printStmt` below is stale — `print`/`concat` are
     being promoted to ordinary builtin functions rather than statement
-    keywords; this production still needs a rewrite once that lands
-    (see `docs/PLAN-0.1-POC.md`).
+    keywords, called via the same paren-free `call`/`arguments` grammar
+    as any other function; this production still needs a rewrite once
+    that lands (see `docs/PLAN-0.1-POC.md`).
+* No function call takes parentheses (builtin or user-defined) — see the
+    `call`/`arguments`/`argument` rules below. Parens still appear for:
+    grouping a compound argument (`fact (n - 1)`), the explicit zero-arg
+    call marker (`count()`), and function *declarations'* parameter lists
+    (`funDecl`/`function`, unchanged).
 ##
     program         → declaration* EOF ;
     
@@ -54,8 +60,12 @@
     multiplication  → unary ( ( "/" | "*" ) unary )* ;
     
     unary           → ( "!" | "-" | "++" | "--" ) unary | call ;
-    call            → primary ( "(" arguments? ")" | "." IDENTIFIER )* ;
-    arguments       → expression ( "," expression )* ;
+    call            → primary ( arguments | "." IDENTIFIER )* ;
+    arguments       → "(" ")"
+                    | argument ( "," argument )* ;
+    argument        → "(" expression ")"
+                    | primary
+                    | call ;
     primary         → "true" | "false" | "nil" | "self" | "undef"
                     | NUMBER | STRING | IDENTIFIER | "(" expression ")"
                     | "super" "." IDENTIFIER ;

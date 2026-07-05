@@ -16,8 +16,8 @@ class Math {
     }
 }
 
-var duck = Duck("Waddles")
+var duck = Duck "Waddles"
 duck.quack()
 
 var math = Math()
-print math.square(3)
+print math.square 3

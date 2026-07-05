@@ -54,14 +54,19 @@ New/changed vs. Lox:
   `if`/`else` — including for statement-like branches (`continue`, `break`,
   function calls with side effects). There is no `if` statement.
 - `while` does not exist — `for` is the only loop construct
-- `print` and `concat` are ordinary (builtin) functions, not statement
-  keywords — but they are called **without parentheses**
-  (`print x`, `concat [a, b]`), matching every existing example. This is a
-  fixed, non-negotiable convention. Whether ordinary user-defined function
-  calls (currently written `add5(1)`, `fib(n - 2)`, `math.square(3)` in the
-  examples) should *also* drop their parentheses is a live but unresolved
-  exploration — see `docs/PLAN-0.1-POC.md` for the tradeoffs. Until that's
-  settled, only builtins are confirmed parenthesis-free.
+- **No function call — builtin or user-defined — takes parentheses.**
+  `print x`, `concat [a, b]`, `add5 1`, `math.square 3`, `Duck "Waddles"`,
+  `fact (n - 1)`. Parentheses still show up in three narrower, unrelated
+  roles: grouping a compound (non-primary) argument expression
+  (`fact (n - 1)`), the explicit zero-argument call marker (`count()`,
+  `B()` — needed so a bare name can still mean "the function value itself,"
+  e.g. `print fact`, `return adder`, `test count`), and multiple arguments
+  are comma-separated without an enclosing pair (`ifEqualOr 2, 5`) — the
+  comma there is an argument separator, not the general comma operator,
+  exactly like the comma operator is already suppressed inside `[...]`
+  vector literals. Function *declarations* keep their existing
+  `fun f(a, b) { ... }` parameter-list parens; this only changes call sites.
+  See `docs/PLAN-0.1-POC.md` for the full grammar sketch.
 - No string concatenation via `+` (arrays/strings use array-manipulation
   facilities/`concat` instead)
 - Pipe operator (`|>`)

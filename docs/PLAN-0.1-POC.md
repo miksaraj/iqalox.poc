@@ -55,60 +55,56 @@ Resolved 2026-07-05:
    Archived snapshots under `langspec/archived/` are left as-is (historical
    record).
 
-4. **`print` and `concat` are promoted to ordinary builtin functions**, not
-   statement keywords — but **called without parentheses**: `print x`,
-   `concat [a, b]`. This is a fixed, non-negotiable convention (corrects an
-   earlier draft of this doc, which wrongly inferred parenthesized calls by
-   analogy with `add5(1)`-style user function calls — that analogy doesn't
-   hold; builtins keep the bare call form from the original examples). All
-   example scripts have been reverted to the bare `print x` / `concat [...]`
-   form. `concat`/`print` used as a pipe target (`|> print`) is unaffected
-   either way, since that's a first-class function value reference, not a
-   call. `src/statement.py`'s `Print`/`Concat` statement nodes still need to
-   go away once function calls exist and `print`/`concat` are registered as
-   builtin function *values* instead (§4 below) — becoming a value doesn't
-   imply gaining parentheses.
-
-   **4b. Open exploration: should *no* function call require parentheses?**
-   Not yet decided — flagging the real tradeoffs rather than picking one.
-   It's achievable in principle (this is exactly how Haskell/ML function
-   application works: juxtaposition, binding tighter than any operator), but
-   it has concrete consequences for this language specifically:
-   - **Compound arguments need their own grouping parens.** `fact(n - 1)`
-     would become `fact (n - 1)` — the parens move from "this is the
-     argument list" to "this groups a sub-expression," which look identical
-     but mean different things. Simple single-token arguments (`print k`,
-     already true today) are unaffected.
-   - **Zero-argument calls need to stay distinguishable from bare references.**
-     The language relies on referencing a function by name *without* calling
-     it (`return adder`, `print fact` prints the function itself, `test(count)`
-     passes `count` as a value without invoking it). If a bare identifier
-     always meant "call it," that distinction is lost. Keeping `f()` as the
-     explicit zero-arg call marker (even if 1+-arg calls drop parens) would
-     preserve it.
-   - **Multi-argument calls collide with the existing comma operator.**
-     `f a, b` is ambiguous between "call `f` with two arguments" and "call
-     `f` with one argument `a`, then the comma operator sequencing `, b`" —
-     the comma operator is already implemented and its precedence is
-     documented in the root `README.md`. Resolving this needs either
-     restricting multi-arg paren-free calls, or scoping the comma operator
-     out of unparenthesized call-argument position (similar to how
+4. **No function call — builtin or user-defined — takes parentheses.**
+   `print`/`concat` are promoted to ordinary (builtin) function values, not
+   statement keywords, and called the same way every other function is:
+   without parens (`print x`, `concat [a, b]`, `add5 1`, `math.square 3`).
+   This generalizes what was originally asked only for `print`/`concat` to
+   *all* calls, resolving the "4b" exploration from an earlier draft of this
+   doc, using the fixed-arity-juxtaposition option that was flagged there as
+   the recommendation. Finalized shape, worked out from the earlier
+   tradeoffs:
+   - **Fixed-arity juxtaposition, no currying.** `fun f(a, b) {...}` keeps
+     its existing declaration form; a call site provides exactly that many
+     arguments, space- (and, for 2+, comma-) separated, immediately after
+     the callee — see the grammar sketch below.
+   - **Compound (non-primary) arguments need grouping parens.**
+     `fact(n - 1)` becomes `fact (n - 1)` — parens here mean "group this
+     sub-expression into one argument," not "this is the argument list."
+     Simple single-token arguments need nothing (`add5 1`, `Duck "Waddles"`).
+   - **Zero-argument calls keep explicit `()`** — `count()`, `B()`,
+     `duck.quack()` — so a bare name can still mean "the function value
+     itself, don't call it" (`print fact`, `return adder`, `test count`).
+     Without this, first-class function values (already used throughout
+     `functions.iqx`) would have no way to be passed around unevaluated.
+   - **2+ arguments are comma-separated without an enclosing pair**:
+     `ifEqualOr 2, 5`. The comma here is an argument separator, not the
+     general comma operator — scoped out exactly like
      `Parser.comma_as_operator` already gets toggled off while parsing a
-     `[...]` vector literal).
-   - **Currying is a separate, larger decision riding along with this one.**
-     True Haskell-style juxtaposition implies every function is effectively
-     single-argument (`f a b c` = `((f a) b) c`), which would enable partial
-     application for free but changes what a function value *is* and doesn't
-     match the current fixed-arity `fun f(a, b, c) {...}` declaration form.
-     A fixed-arity juxtaposition (`f a b c` calls `f` with exactly the three
-     declared parameters, no currying) avoids that but still needs an answer
-     to the comma-operator collision above.
+     `[...]` vector literal, just triggered by "currently parsing a bare
+     call's argument list" instead.
+   - **Nested calls need no extra parens**, because a call is itself a
+     `primary`-level unit once fully parsed: `print concat [self.name, "quacks"]`
+     parses as `concat` immediately followed by the vector-literal primary
+     `[self.name, "quacks"]` — forming the complete call `concat([...])` —
+     which then becomes `print`'s one argument, i.e.
+     `print(concat([self.name, "quacks"]))`. No comma appears between
+     `print` and `concat`, so `print` never tries to treat `concat` and the
+     vector as two separate arguments.
 
-   Recommendation if/when this gets picked up: fixed-arity juxtaposition,
-   keep mandatory `()` for zero-arg calls only, and disable the comma
-   operator while parsing a paren-free argument list — but this is a
-   recommendation, not a decision, and needs explicit sign-off before any
-   grammar work happens here, per `CLAUDE.md`.
+   Rough grammar sketch (to be refined when functions/calls are actually
+   implemented — see §4 step 5):
+   ```
+   call       → IDENTIFIER arguments? ( "." IDENTIFIER arguments? )*
+   arguments  → "(" ")"                     ; explicit zero-arg call
+              | argument ( "," argument )*  ; 1+ args, no wrapping parens
+   argument   → "(" expression ")"          ; grouped/compound argument
+              | primary
+              | call                        ; nested call, e.g. `concat [...]`
+   ```
+   `src/statement.py`'s `Print`/`Concat` statement nodes need to go away
+   once function calls exist and `print`/`concat` are registered as builtin
+   function values in the global environment instead (§4 step 6).
 
 5. **Mixins and traits are deferred out of 0.1-poc**, moved to `0.2` in
    `ROADMAP.md`. The PHP-vs-Scala-style implementation question from the
@@ -208,20 +204,19 @@ deciding it inline (per `CLAUDE.md`).
    chosen, caught by the enclosing `for`'s execution loop.
 5. **Functions** (`fun`, `Call`, `Return`, closures over `Environment`) —
    standard Lox mechanics; needed for almost everything else including the
-   pipe operator and for `print`/`concat` to become callable.
+   pipe operator and for `print`/`concat` to become callable. The `Call`
+   grammar itself is the paren-free form from decision 4 (fixed-arity
+   juxtaposition, `()` only as the explicit zero-arg marker, comma-separated
+   2+ args) — there is no separate parenthesized-call form to build first
+   and migrate away from; build the paren-free grammar directly.
 6. **Promote `print`/`concat` to builtin functions** (decision 4) — register
    them as native function values in the global environment (rather than
    `Print`/`Concat` statement AST nodes), retire the dedicated
    `print`/`concat` statement grammar in `parser.py`, and remove `Print`/
    `Concat` from `tools/generate_ast.py`'s `STATEMENTS` dict once nothing
-   depends on them. Becoming a function value does **not** mean gaining
-   parentheses (decision 4) — the general `Call` grammar from step 5 (which
-   presumably requires `(args)`, matching every other example call site)
-   needs a paren-free calling form for at least these two builtins, e.g. a
-   dedicated `builtinCall → IDENTIFIER expression` production or similar,
-   independent of whatever step 5's general call syntax ends up being. If
-   4b (paren-free calls generally) gets picked up later, this dedicated form
-   can likely be folded into the general one.
+   depends on them. They use the exact same call grammar as user-defined
+   functions (step 5) — no special-casing needed now that no call takes
+   parens.
 7. **Pipe operator `|>`** — once functions and step 6 land, desugar
    `a |> f` to a call `f(a)`.
 8. **Prefix `++`/`--` mutation** — per decision 2: assign the incremented

@@ -13,7 +13,7 @@ fun makeAdder(n) {
 }
 
 fun fact(n) {
-    return (n == 1) ? n : (n * fact(n - 1))
+    return (n == 1) ? n : (n * fact (n - 1))
 }
 
 fun createCounter() {
@@ -30,15 +30,15 @@ fun test(func) {
 }
 
 fun fib(n) {
-    return (n <= 1) ? n : (fib(n - 2) * fib(n - 1))
+    return (n <= 1) ? n : (fib (n - 2) * fib (n - 1))
 }
 
-var add5 = makeAdder(5)
+var add5 = makeAdder 5
 
-print add5(1)
-print add5(100)
+print add5 1
+print add5 100
 
-print fact(7)
+print fact 7
 print fact
 
 var count = createCounter()
@@ -46,15 +46,15 @@ count()
 count()
 print count
 
-test(count)
+test count
 
 for (var i = 0; i < 20; ++i) {
-    fib(i) |> print
+    fib i |> print
 }
 
 # Sample for the use of control flow ignore operator
 var ignore = false
 for (var j = 0; j < 5; ++j) {
-    ignore ? _ : (fib(j) |> print)
+    ignore ? _ : (fib j |> print)
     ignore = !ignore
 }
