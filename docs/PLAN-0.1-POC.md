@@ -142,7 +142,7 @@ Legend: ✅ done · 🟡 partial/buggy · ⛔ not started
 | `print` / `concat` as builtin functions | ⛔ | Still dedicated `Stmt` subclasses — depends on functions/calls existing (§4 step 5) and its own migration (§4 step 6). |
 | Pipe operator `\|>` | ⛔ | Token exists; not parsed at all. Depends on `print`/`concat` being callable values and on functions existing. |
 | Ignore operator `_` | ⛔ | Token exists (`UNDERSCORE`); no parsing/semantics. |
-| Nullable infix `??` | ✅ | Parsed in `multiplication()` (questionable precedence placement, see §3) and evaluated in `visit_binary_expr`. |
+| Nullable infix `??` | ✅ | Own `null_coalescing()` precedence level, between `ternary` and `logic_or` (just above the conditional operator, below logical OR/AND — see §3). |
 | Comma operator | ✅ | `comma()` in parser, precedence matches the table in the root `README.md`. |
 | Immutability by default (`mut`) | ✅ | `VariableData.is_mutable`, enforced in `Environment.assign`. The `var IDENTIFIER mut? = expr` parse path had a double-`advance()` bug that made `mut` declarations unparseable in practice — fixed, see §3. |
 | `for` loops | ✅ | Full grammar (initializer/condition/increment all optional, per the drafted grammar minus the removed `whileStmt`). Loop-scoped `Environment` wraps the initializer; body executes via the normal `Block` mechanics. |
@@ -246,15 +246,18 @@ design questions, so fixed directly rather than routed for sign-off:
    outside of a loop, which is a plain `Exception` internally and has no
    token to build a "proper" error from).
 
-### Still open (not addressed in this batch)
+### Resolved 2026-07-05 (second batch)
 
-1. **`??` precedence.** `DOUBLE_QUESTION_MARK` is matched inside
-   `multiplication()`, i.e. it currently binds as tightly as `*`/`/`/`%`/`^`.
-   The root `README.md` precedence table doesn't mention `??` at all. Worth
-   deciding (design call, add to §1 if you want it there) where it should
-   actually sit — most languages put null-coalescing near the bottom, close
-   to ternary/assignment.
-2. `error.py`'s `IqaloxRuntimeError.__str__`/`__repr__` just call `super()`,
+**`??` precedence.** Decided: put it where most languages put it (JS, C# —
+just above the conditional operator, below logical OR). Moved out of
+`multiplication()` into its own `null_coalescing()` level, inserted between
+`ternary` and `logic_or`: `ternary → null_coalescing → logic_or → logic_and →
+equality → ...`, left-associative like every other binary operator in this
+parser. `README.md`'s precedence table updated to include it.
+
+### Still open
+
+1. `error.py`'s `IqaloxRuntimeError.__str__`/`__repr__` just call `super()`,
    i.e. they're no-ops — fine to leave, but not worth keeping if nobody
    relies on the override.
 

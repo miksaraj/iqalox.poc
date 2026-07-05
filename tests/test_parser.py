@@ -1,6 +1,6 @@
 from conftest import parse
 
-from expression import Literal, Logical, Break, Continue, Ternary, Variable
+from expression import Literal, Logical, Binary, Break, Continue, Ternary, Variable
 from statement import For, Expression
 from token import TokenType
 
@@ -27,6 +27,19 @@ def test_logical_or_and_precedence():
     assert expr.operator.type == TokenType.OR
     assert isinstance(expr.left, Logical) and expr.left.operator.type == TokenType.AND
     assert isinstance(expr.right, Logical) and expr.right.operator.type == TokenType.AND
+
+
+def test_null_coalescing_binds_looser_than_logical_and_tighter_than_ternary():
+    # `??` sits between `logic_or` and `ternary`: logical operators group
+    # first (`a ?? (b or c)`), and `??` itself groups before the ternary
+    # gets to see it (`(a ?? b) ? c : d`).
+    expr = single_expr("a ?? b or c")
+    assert isinstance(expr, Binary) and expr.operator.type == TokenType.DOUBLE_QUESTION_MARK
+    assert isinstance(expr.right, Logical) and expr.right.operator.type == TokenType.OR
+
+    expr = single_expr("a ?? b ? c : d")
+    assert isinstance(expr, Ternary)
+    assert isinstance(expr.left, Binary) and expr.left.operator.type == TokenType.DOUBLE_QUESTION_MARK
 
 
 def test_logical_sits_between_ternary_and_equality():

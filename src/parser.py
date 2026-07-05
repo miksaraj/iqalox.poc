@@ -141,7 +141,7 @@ class Parser:
         return expr
 
     def ternary(self) -> Optional[Expr]:
-        expr = self.logic_or()
+        expr = self.null_coalescing()
 
         if self.match(TokenType.QUESTION_MARK):
             left_operator = self.previous()
@@ -154,6 +154,16 @@ class Parser:
             right_operator = self.previous()
             right = self.expression()
             expr = Ternary(expr, left_operator, expr, right_operator, right)
+
+        return expr
+
+    def null_coalescing(self) -> Optional[Expr]:
+        expr = self.logic_or()
+
+        while self.match(TokenType.DOUBLE_QUESTION_MARK):
+            operator = self.previous()
+            right = self.logic_or()
+            expr = Binary(expr, operator, right)
 
         return expr
 
@@ -215,7 +225,6 @@ class Parser:
                 TokenType.STAR,
                 TokenType.PERCENT,
                 TokenType.POWER,
-                TokenType.DOUBLE_QUESTION_MARK
         ):
             operator = self.previous()
             right = self.increment()
