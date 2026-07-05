@@ -14,19 +14,19 @@ class StmtVisitor(ABC):
         pass
 
     @abstractmethod
-    def visit_print_stmt(self, expr: 'Stmt') -> Any:
-        pass
-
-    @abstractmethod
-    def visit_concat_stmt(self, expr: 'Stmt') -> Any:
-        pass
-
-    @abstractmethod
     def visit_var_stmt(self, expr: 'Stmt') -> Any:
         pass
 
     @abstractmethod
     def visit_for_stmt(self, expr: 'Stmt') -> Any:
+        pass
+
+    @abstractmethod
+    def visit_function_stmt(self, expr: 'Stmt') -> Any:
+        pass
+
+    @abstractmethod
+    def visit_return_stmt(self, expr: 'Stmt') -> Any:
         pass
 
 
@@ -52,22 +52,6 @@ class Expression(Stmt):
         return visitor.visit_expression_stmt(self)
 
 
-class Print(Stmt):
-    def __init__(self, expression: Expr) -> None:
-        self.expression = expression
-
-    def accept(self, visitor: StmtVisitor) -> None:
-        return visitor.visit_print_stmt(self)
-
-
-class Concat(Stmt):
-    def __init__(self, expression: Expr) -> None:
-        self.expression = expression
-
-    def accept(self, visitor: StmtVisitor) -> None:
-        return visitor.visit_concat_stmt(self)
-
-
 class Var(Stmt):
     def __init__(self, name: Token, initializer: Expr, is_mutable: bool) -> None:
         self.name = name
@@ -87,4 +71,23 @@ class For(Stmt):
 
     def accept(self, visitor: StmtVisitor) -> None:
         return visitor.visit_for_stmt(self)
+
+
+class Function(Stmt):
+    def __init__(self, name: Token, params: List[Token], body: List[Stmt]) -> None:
+        self.name = name
+        self.params = params
+        self.body = body
+
+    def accept(self, visitor: StmtVisitor) -> None:
+        return visitor.visit_function_stmt(self)
+
+
+class Return(Stmt):
+    def __init__(self, keyword: Token, value: Expr) -> None:
+        self.keyword = keyword
+        self.value = value
+
+    def accept(self, visitor: StmtVisitor) -> None:
+        return visitor.visit_return_stmt(self)
 

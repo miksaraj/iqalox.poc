@@ -1,11 +1,12 @@
 from typing import Any, List
 
 from expression import Expr, ExprVisitor, Binary, Logical, Unary, Literal, Grouping, Ternary, Vector, Variable, \
-    Assign, Break, Continue
-from statement import Stmt, StmtVisitor, Expression, Print, Concat, Var, Block, For
+    Assign, Break, Continue, Call
+from statement import Stmt, StmtVisitor, Expression, Var, Block, For, Function, Return
 from token import Token, TokenType
 from error import IqaloxRuntimeError
 from environment import Environment, VariableData
+from callable import IqaloxCallable, NativeFunction, IqaloxFunction
 
 
 class BreakSignal(Exception):
@@ -16,9 +17,25 @@ class ContinueSignal(Exception):
     pass
 
 
+class ReturnSignal(Exception):
+    def __init__(self, value: Any) -> None:
+        self.value = value
+
+
+def _native_print(interpreter: 'Interpreter', arguments: List[Any]) -> None:
+    print(interpreter.stringify(arguments[0]))
+    return None
+
+
+def _native_concat(interpreter: 'Interpreter', arguments: List[Any]) -> str:
+    return ''.join(interpreter.stringify(value) for value in arguments[0])
+
+
 class Interpreter(ExprVisitor, StmtVisitor):
     def __init__(self) -> None:
         self.environment = Environment()
+        self.environment.define('print', VariableData(NativeFunction('print', 1, _native_print), is_mutable=False))
+        self.environment.define('concat', VariableData(NativeFunction('concat', 1, _native_concat), is_mutable=False))
 
     def execute(self, stmt: Stmt) -> None:
         stmt.accept(self)
@@ -43,6 +60,8 @@ class Interpreter(ExprVisitor, StmtVisitor):
             print("Runtime error: 'break' used outside of a loop.")
         except ContinueSignal:
             print("Runtime error: 'continue' used outside of a loop.")
+        except ReturnSignal:
+            print("Runtime error: 'return' used outside of a function.")
 
     @staticmethod
     def stringify(obj: Any) -> str:
@@ -94,15 +113,16 @@ class Interpreter(ExprVisitor, StmtVisitor):
         self.evaluate(stmt.expression)
         return None
 
-    def visit_print_stmt(self, stmt: Print) -> None:
-        value = self.evaluate(stmt.expression)
-        print(self.stringify(value))
+    def visit_function_stmt(self, stmt: Function) -> None:
+        function = IqaloxFunction(stmt, self.environment)
+        self.environment.define(stmt.name.lexeme, VariableData(function, is_mutable=False))
         return None
 
-    def visit_concat_stmt(self, stmt: Concat) -> Any:
-        return ''.join(
-            [self.stringify(value) for value in self.evaluate(stmt.expression)]
-        )
+    def visit_return_stmt(self, stmt: Return) -> None:
+        value = None
+        if stmt.value is not None:
+            value = self.evaluate(stmt.value)
+        raise ReturnSignal(value)
 
     def visit_var_stmt(self, stmt: Var) -> None:
         value = None
@@ -182,6 +202,24 @@ class Interpreter(ExprVisitor, StmtVisitor):
 
     def visit_continue_expr(self, expr: Continue) -> Any:
         raise ContinueSignal()
+
+    def visit_call_expr(self, expr: Call) -> Any:
+        callee = self.evaluate(expr.callee)
+        arguments = [self.evaluate(argument) for argument in expr.arguments]
+        # The parser only ever builds a Call with a Variable callee (see
+        # Parser.call()), so its name token doubles as this call's location
+        # for error reporting.
+        name_token = expr.callee.name
+
+        if not isinstance(callee, IqaloxCallable):
+            raise IqaloxRuntimeError(name_token, f"'{name_token.lexeme}' is not callable.")
+
+        if len(arguments) != callee.arity():
+            raise IqaloxRuntimeError(
+                name_token, f'Expected {callee.arity()} argument(s) but got {len(arguments)}.'
+            )
+
+        return callee.call(self, arguments)
 
     def visit_variable_expr(self, expr: Variable) -> Any:
         return self.environment.get(expr.name)

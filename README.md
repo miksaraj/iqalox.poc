@@ -22,13 +22,15 @@ _Please note: Iqalox is in planning phase, so no implementation has been written
 
 ## Precedence Rules ##
 
-|      Name      |     Operators     | Associates |
-|:--------------:|:-----------------:|:----------:|
-|     Unary      |      `!` `-`      |   Right    |
-|   Increment    |     `++` `--`     |   Right    |
-| Multiplication |    `/` `*` `%`    |    Left    |
-|    Addition    |      `-` `+`      |    Left    |
-|   Comparison   | `>` `>=` `<` `<=` |    Left    |
-|    Equality    |     `==` `!=`     |    Left    |
-|    Ternary     |       `? :`       |   Right    |
-|     Comma      |        `,`        |    Left    |
+|       Name       |     Operators     | Associates |
+|:----------------:|:-----------------:|:----------:|
+|      Unary       |      `!` `-`      |   Right    |
+|    Increment     |     `++` `--`     |   Right    |
+|  Multiplication  |    `/` `*` `%`    |    Left    |
+|     Addition     |      `-` `+`      |    Left    |
+|    Comparison    | `>` `>=` `<` `<=` |    Left    |
+|     Equality     |     `==` `!=`     |    Left    |
+|  Logical AND/OR  |     `and` `or`    |    Left    |
+| Null-coalescing  |       `??`        |    Left    |
+|     Ternary      |       `? :`       |   Right    |
+|      Comma       |        `,`        |    Left    |

@@ -1,3 +1,4 @@
+import sys
 from sys import argv
 
 from scanner import Scanner
@@ -5,6 +6,16 @@ from parser import Parser
 from token import Token, TokenType
 from interpreter import Interpreter
 from error import IqaloxRuntimeError
+
+# scanner.py/parser.py/interpreter.py each do a lazy `import iqalox` to call
+# back into Iqalox.error()/runtime_error() (avoiding a circular top-level
+# import). When this file is launched directly (`python3 iqalox.py ...`),
+# Python registers it as `__main__`, not `iqalox` -- so that lazy import
+# would otherwise re-execute this whole file under a second module name,
+# creating a second, independent Iqalox class whose had_error/
+# had_runtime_error never reach the one main() actually uses. Pre-registering
+# this module under both names keeps it a single, shared module either way.
+sys.modules.setdefault('iqalox', sys.modules[__name__])
 
 
 class Iqalox:

@@ -124,6 +124,17 @@ examples... since while was removed from the language specification").
 `whileStmt` and `ifStmt` (superseded by decision 1) — both removed from the
 grammar draft as part of this update.
 
+**Flagging, not deciding: function parameters are immutable by default.**
+There's no grammar for marking an individual parameter mutable (`fun f(mut x)`
+doesn't exist), so implementing `fun f(a) {...}` had to pick *something* for
+whether `a` can be reassigned inside the body. Went with immutable — matching
+the already-decided default for `var` — since no existing example reassigns
+a parameter and it's the more conservative/consistent choice, not because
+it's obviously the only right answer. If you want mutable-by-default
+parameters, or a `mut` marker in the parameter list, this is a one-line
+change (`is_mutable=False` in `IqaloxFunction.call()`, `src/callable.py`)
+plus a small grammar addition for the marker case.
+
 ## 2. Status of 0.1-poc feature list
 
 Legend: ✅ done · 🟡 partial/buggy · ⛔ not started
@@ -139,14 +150,15 @@ Legend: ✅ done · 🟡 partial/buggy · ⛔ not started
 | Chainable ternary (elvis `?:` too) instead of if/else | ✅ | `Ternary` node, both `? :` and `?:` forms parse and evaluate; nesting gives chaining. `break`/`continue` work as branches because they're expressions now (see above), not because `Ternary` itself changed. |
 | Support for standard methods | ⛔ | Baseline Lox method dispatch on classes (decision 6) — depends on classes existing at all. |
 | No `+` string concat | 🟡 | Unchanged from before — `+` on two strings raises a runtime error today only as a side effect of numeric type-checking, not an intentional string-specific rule. |
-| `print` / `concat` as builtin functions | ⛔ | Still dedicated `Stmt` subclasses — depends on functions/calls existing (§4 step 5) and its own migration (§4 step 6). |
-| Pipe operator `\|>` | ⛔ | Token exists; not parsed at all. Depends on `print`/`concat` being callable values and on functions existing. |
+| `print` / `concat` as builtin functions | ✅ | Registered as `NativeFunction` instances (arity 1 each) in the global environment at `Interpreter.__init__`; `print`/`concat` are no longer keywords at all (removed from `_keywords`, scan as plain `IDENTIFIER`) — ordinary, shadowable bindings, called through the exact same `Call` grammar as user-defined functions. |
+| Pipe operator `\|>` | ⛔ | Still unparsed — see §3's new finding: the scanner can't even tokenize `\|>` today, a separate bug from "not parsed," to fix when this lands. |
 | Ignore operator `_` | ⛔ | Token exists (`UNDERSCORE`); no parsing/semantics. |
-| Nullable infix `??` | ✅ | Parsed in `multiplication()` (questionable precedence placement, see §3) and evaluated in `visit_binary_expr`. |
-| Comma operator | ✅ | `comma()` in parser, precedence matches the table in the root `README.md`. |
-| Immutability by default (`mut`) | ✅ | `VariableData.is_mutable`, enforced in `Environment.assign`. The `var IDENTIFIER mut? = expr` parse path had a double-`advance()` bug that made `mut` declarations unparseable in practice — fixed, see §3. |
+| Nullable infix `??` | ✅ | Own `null_coalescing()` precedence level, between `ternary` and `logic_or` (just above the conditional operator, below logical OR/AND — see §3). |
+| Comma operator | ✅ | `comma()` in parser, precedence matches the table in the root `README.md`. Also fixed: see §3's vector-literal bugs — a stray comma-suppression bug in this same function silently corrupted multi-element vector literals. |
+| Immutability by default (`mut`) | ✅ | `VariableData.is_mutable`, enforced in `Environment.assign`. The `var IDENTIFIER mut? = expr` parse path had a double-`advance()` bug that made `mut` declarations unparseable in practice — fixed, see §3. Function parameters are immutable by default too (no grammar yet for a `mut` parameter) — an assumption, not a design decision, flagged in §1. |
 | `for` loops | ✅ | Full grammar (initializer/condition/increment all optional, per the drafted grammar minus the removed `whileStmt`). Loop-scoped `Environment` wraps the initializer; body executes via the normal `Block` mechanics. |
 | Logical `and`/`or` | ✅ | `Logical` expr node, short-circuit evaluation, sits between `ternary` and `equality` in precedence (`ternary → logic_or → logic_and → equality`). |
+| Functions (`fun`, calls, `return`, closures) | ✅ | `Function`/`Call`/`Return` AST nodes; `IqaloxFunction`/`NativeFunction` runtime callables in `src/callable.py`; closures work via capturing `self.environment` at declaration time (same object the function's name gets `define`d into, so recursion works); `Call` uses the paren-free grammar from decision 4 directly — no parenthesized form was ever built. |
 
 Mixin support and trait support are **out of scope for 0.1-poc** (deferred to
 0.2, decision 5) and are intentionally not in this table.
@@ -156,8 +168,7 @@ baseline, still **not implemented**:
 
 | Missing baseline | Notes |
 |---|---|
-| Functions (`fun`, calls, `return`, closures) | No `Function`/`Call`/`Return` AST nodes, no parsing. Needed for essentially all of `functions.iqx` and for the pipe operator to be useful. |
-| Classes (`class`, methods, instances, `init`, `super`, `self`) | No AST nodes, no parsing. Needed for `classes.iqx`/`inheritance.iqx`. |
+| Classes (`class`, methods, instances, `init`, `super`, `self`) | No AST nodes, no parsing. Needed for `classes.iqx`/`inheritance.iqx`. `.` member access (`instance.method args`) doesn't exist in the `call()` grammar yet either — `call → IDENTIFIER arguments?` only, no `("." IDENTIFIER arguments?)*` chaining — add it alongside classes, not before there's a receiver to chain off of. |
 
 ## 3. Known bugs
 
@@ -246,15 +257,72 @@ design questions, so fixed directly rather than routed for sign-off:
    outside of a loop, which is a plain `Exception` internally and has no
    token to build a "proper" error from).
 
-### Still open (not addressed in this batch)
+### Resolved 2026-07-05 (second batch)
 
-1. **`??` precedence.** `DOUBLE_QUESTION_MARK` is matched inside
-   `multiplication()`, i.e. it currently binds as tightly as `*`/`/`/`%`/`^`.
-   The root `README.md` precedence table doesn't mention `??` at all. Worth
-   deciding (design call, add to §1 if you want it there) where it should
-   actually sit — most languages put null-coalescing near the bottom, close
-   to ternary/assignment.
-2. `error.py`'s `IqaloxRuntimeError.__str__`/`__repr__` just call `super()`,
+**`??` precedence.** Decided: put it where most languages put it (JS, C# —
+just above the conditional operator, below logical OR). Moved out of
+`multiplication()` into its own `null_coalescing()` level, inserted between
+`ternary` and `logic_or`: `ternary → null_coalescing → logic_or → logic_and →
+equality → ...`, left-associative like every other binary operator in this
+parser. `README.md`'s precedence table updated to include it.
+
+### Fixed as part of implementing steps 5-6 (third batch, functions/print-concat)
+
+More of the same pattern as the first batch: implementing and actually
+testing functions/calls surfaced more bugs that had nothing to do with
+functions themselves.
+
+1. **Multi-element vector literals were broken.** `comma()`'s handling of
+   `self.comma_as_operator = False` (set while parsing `[...]`) did
+   `self.advance()` unconditionally and then re-parsed and *discarded* the
+   previously-parsed element, rather than just leaving the separating comma
+   alone for the vector loop to consume. `[1, 2, 3]` silently dropped `1`
+   and then failed outright on the comma before `3` ("Expect expression").
+   Fixed by making `comma()` just delegate straight to `ternary()` when
+   disabled, and having the vector-literal loop in `primary()` explicitly
+   consume `element ("," element)*` itself.
+2. **Single-element (and any) vector literals were *also* broken**, separately:
+   the loop `while not self.match(TokenType.RIGHT_BRACKET): ...` already
+   consumes the closing `]` as its own exit condition, but the code then did
+   an unconditional `self.consume(TokenType.RIGHT_BRACKET, ...)` right after
+   — trying to consume a second `]` that was never there, erroring on
+   whatever token actually followed the vector. Fixed alongside #1 by
+   checking for the empty-vector case up front and consuming `]` exactly
+   once at the end.
+3. **Running `iqalox.py` directly as the entry point split `Iqalox`'s error
+   state into two independent copies.** `scanner.py`/`parser.py`/
+   `interpreter.py` each do a lazy `import iqalox` to call back into
+   `Iqalox.error()`/`runtime_error()`. When `iqalox.py` is launched with
+   `python3 iqalox.py ...`, Python registers the running file as `__main__`,
+   *not* as `iqalox` — so that lazy import doesn't find an already-loaded
+   module and re-executes the whole file under the separate name `iqalox`,
+   creating a second `Iqalox` class with its own independent `had_error`/
+   `had_runtime_error`/`interpreter`. Error *messages* still printed fine
+   (that just needs a `print` call), but `had_error` on the copy `run_file()`
+   actually checks never got updated — so scripts with scan/parse errors
+   kept partially interpreting instead of aborting, and the process always
+   exited `0` instead of `65`/`70`. This is exactly the mechanism decision
+   2's immutability enforcement (and now arity/"not callable" errors) relies
+   on to actually stop a program, so it mattered concretely here, not just
+   cosmetically. Fixed with `sys.modules.setdefault('iqalox', sys.modules[__name__])`
+   near the top of `iqalox.py`, so both names resolve to the one module
+   regardless of how it was launched. Note: this bug is invisible to the
+   pytest suite, since tests never run `iqalox.py` as `__main__` — worth
+   remembering if a future bug seems to only reproduce "from the CLI."
+4. **The pipe operator token can't be scanned at all**, discovered (but not
+   fixed — out of scope until step 7) while checking why `functions.iqx`/
+   `control_flow.iqx`/`loops.iqx` still don't run: `scan_token()`'s dispatch
+   requires the *single* character just consumed to itself be an element of
+   `ONE_OR_MORE_CHARACTER_TOKENS` before it looks for a longer match, but
+   `|` alone isn't listed there (only the full `'|>'` is) — every other
+   multi-char operator works because its first character is *also* listed
+   standalone (e.g. both `'-'` and `'--'` are present). `|` alone hits
+   "Unexpected character" every time. Whoever picks up step 7 will need this
+   fixed first, or `|>` can never be tokenized.
+
+### Still open
+
+1. `error.py`'s `IqaloxRuntimeError.__str__`/`__repr__` just call `super()`,
    i.e. they're no-ops — fine to leave, but not worth keeping if nobody
    relies on the override.
 
@@ -264,16 +332,17 @@ With §1 resolved, all of the following can proceed without further design
 sign-off — flag anything that turns up a *new* design question rather than
 deciding it inline (per `CLAUDE.md`).
 
-**Steps 1-4, plus step 8, are done** (branch `claude/0.1-poc-control-flow`,
-2026-07-05). Step 8 (prefix `++`/`--` mutation) was pulled forward from its
-original position because `for` loops are untestable — infinite-looping —
-without a working increment, and every existing loop example relies on
-`++i`/`++j`/`++k`. See §2/§3 for what actually landed and what bugs surfaced
-along the way, and §5 for the new test suite. `loops.iqx` and `functions.iqx`
-had their loop counters updated to declare `mut` (a direct, non-design
-consequence of the already-decided immutability rule, not a new decision) —
-they still won't fully run end-to-end because they also depend on the pipe
-operator and/or functions/classes (steps 5-7, 10), which remain undone.
+**Steps 1-4, 8, 5, and 6 are done** (branches `claude/0.1-poc-control-flow`
+and `claude/0.1-poc-functions`, 2026-07-05). Step 8 (prefix `++`/`--`
+mutation) was pulled forward from its original position because `for` loops
+are untestable — infinite-looping — without a working increment, and every
+existing loop example relies on `++i`/`++j`/`++k`. See §2/§3 for what
+actually landed and what bugs surfaced along the way, and §5 for the test
+suite. `functions.iqx`/`control_flow.iqx`/`loops.iqx` still won't fully run
+end-to-end — they depend on the pipe operator (step 7) and/or classes
+(step 10), which remain undone; `classes.iqx`/`inheritance.iqx` need classes
+outright. Verified via the actual CLI (`iqalox.py`), not just pytest, for
+each of these — see §3 bug #3 (module-duplication) for why that mattered.
 
 1. ~~**Fix known bugs**~~ — done, see §3.
 2. ~~**Logical `and`/`or`**~~ — done.
@@ -287,51 +356,68 @@ operator and/or functions/classes (steps 5-7, 10), which remain undone.
    (plain `Exception` subclasses in `interpreter.py`), which propagates
    naturally up through however many nested expression evaluations until
    `visit_for_stmt`'s per-iteration `try/except` catches it.
-5. **Functions** (`fun`, `Call`, `Return`, closures over `Environment`) —
-   standard Lox mechanics; needed for almost everything else including the
-   pipe operator and for `print`/`concat` to become callable. The `Call`
-   grammar itself is the paren-free form from decision 4 (fixed-arity
-   juxtaposition, `()` only as the explicit zero-arg marker, comma-separated
-   2+ args) — there is no separate parenthesized-call form to build first
-   and migrate away from; build the paren-free grammar directly.
-6. **Promote `print`/`concat` to builtin functions** (decision 4) — register
-   them as native function values in the global environment (rather than
-   `Print`/`Concat` statement AST nodes), retire the dedicated
-   `print`/`concat` statement grammar in `parser.py`, and remove `Print`/
-   `Concat` from `tools/generate_ast.py`'s `STATEMENTS` dict once nothing
-   depends on them. They use the exact same call grammar as user-defined
-   functions (step 5) — no special-casing needed now that no call takes
-   parens.
-7. **Pipe operator `|>`** — once functions and step 6 land, desugar
-   `a |> f` to a call `f(a)`.
+5. ~~**Functions**~~ — done. `Function`/`Call`/`Return` AST nodes;
+   `IqaloxCallable`/`NativeFunction`/`IqaloxFunction` in the new
+   `src/callable.py`; `Parser.call()` implements the paren-free grammar
+   directly (`call → IDENTIFIER arguments?`, no `.` chaining yet — that's
+   classes' job, step 10). `ReturnSignal` (an `Exception`, like
+   `BreakSignal`/`ContinueSignal`) carries the return value up to
+   `IqaloxFunction.call()`. See §1's flagged assumption on parameter
+   mutability.
+6. ~~**Promote `print`/`concat` to builtin functions**~~ — done.
+   `Print`/`Concat` statement nodes are gone from `tools/generate_ast.py`
+   and `parser.py`; `print`/`concat` are no longer keywords at all (removed
+   from `token.py`'s `_keywords`, so they scan as plain `IDENTIFIER` and are
+   ordinary, shadowable global bindings) — registered as `NativeFunction`
+   instances in `Interpreter.__init__`.
+7. **Pipe operator `|>`** — functions and step 6 are done, so this is
+   unblocked; desugar `a |> f` to a call `f(a)`. First needs the scanner fix
+   from §3 bug #4 (`|` isn't scannable at all yet) or it can never tokenize.
 8. ~~**Prefix `++`/`--` mutation**~~ — done (pulled forward, see above).
 9. **Ignore operator `_`** — per decision 1, needs to work as a ternary
    branch (a no-op arm).
 10. **Classes** — `class`, `extends`, `init`, methods, `super`, `self` (not
     `this`, decision 3). Getters/setters and mixins/traits explicitly stay
-    out of scope (0.2, decision 5).
+    out of scope (0.2, decision 5). Also where `.` member-access chaining
+    needs adding to `Parser.call()` (`call → IDENTIFIER arguments? ( "."
+    IDENTIFIER arguments? )*` — the second half doesn't exist yet, see §2).
 11. **Sync `langspec/SYNTAX_GRAMMAR.md` and `langspec/README.md`** with
     whatever actually got built. The grammar draft has already been patched
-    for the `while`/`if`/`this` removals (§1), but still needs real
-    `printStmt`→builtin-call, ternary-with-statement-branches, function, and
-    class grammar once those land.
-12. ~~**Backfill pytest coverage**~~ — started, see §5. Keep extending it as
-    steps 5+ land rather than after the fact.
+    for the `while`/`if`/`this` removals (§1), but still needs the real
+    paren-free `call`/`arguments`/`argument` grammar (drafted in decision 4,
+    now actually implemented — the draft's old parenthesized `call` rule is
+    stale), `funDecl`/`function` (already drafted, still accurate), and
+    ternary-with-expression-branches (not "statement" branches — see decision
+    1's engineering note) once class grammar lands too.
+12. ~~**Backfill pytest coverage**~~ — extended again this batch (functions,
+    calls, closures, recursion, vector-literal regressions), see §5. Keep
+    extending as steps 7+ land rather than after the fact.
 
 Steps 2–3 have no dependency on anything else in this list and could start
 immediately.
 
 ## 5. Test suite
 
-`tests/` (pytest, per `CLAUDE.md`) now covers the scanner/parser/interpreter
-behavior from steps 1-4 and 8: implicit semicolons and empty-statement
+`tests/` (pytest, per `CLAUDE.md`) covers the scanner/parser/interpreter
+behavior from steps 1-4, 8, 5, and 6: implicit semicolons and empty-statement
 tolerance, single-character identifier/number scanning, line and block
 comments (including the terminator regression), `true`/`false`/`nil` literal
-values, logical `and`/`or` short-circuiting and precedence, `for` loops with
-all clauses present/omitted, `break`/`continue` as bare statements and as
-ternary branches, and prefix `++`/`--` mutation plus the immutable-target
-runtime error. Run with `pytest` from the repo root (`pytest.ini` sets
-`pythonpath = src`).
+values, logical `and`/`or` short-circuiting and precedence, `??`'s new
+precedence, `for` loops with all clauses present/omitted, `break`/`continue`
+as bare statements and as ternary branches, prefix `++`/`--` mutation plus
+the immutable-target runtime error, the full paren-free call grammar (zero/
+one/multi-arg, grouped compound arguments, nested calls, bare-reference-vs-
+call disambiguation), function declarations/closures/recursion/return,
+native `print`/`concat`, arity and not-callable errors, and vector-literal
+regressions (empty/single/multi-element). Run with `pytest` from the repo
+root (`pytest.ini` sets `pythonpath = src`).
+
+Deliberately **not** covered by this suite: anything requiring the actual
+`iqalox.py` CLI process (module-duplication bug in §3, exit codes) — pytest
+never runs `iqalox.py` as `__main__`, so that class of bug is invisible to
+it by construction. Spot-checked manually via `subprocess.run(['python3',
+'iqalox.py', ...])` instead; worth doing the same for any future change
+that touches `Iqalox`/`main()`/error-flag plumbing specifically.
 
 One infrastructure wrinkle worth knowing about: `src/token.py` shadows the
 Python standard library's `token` module. Pytest's own bootstrap imports the
