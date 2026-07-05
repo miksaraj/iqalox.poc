@@ -9,7 +9,7 @@ def token_types(source: str):
 def test_newline_becomes_semicolon():
     assert token_types("var x = 1\nprint x") == [
         TokenType.VAR, TokenType.IDENTIFIER, TokenType.EQUAL, TokenType.NUMBER, TokenType.SEMICOLON,
-        TokenType.PRINT, TokenType.IDENTIFIER, TokenType.EOF,
+        TokenType.IDENTIFIER, TokenType.IDENTIFIER, TokenType.EOF,
     ]
 
 
@@ -18,7 +18,7 @@ def test_blank_lines_do_not_duplicate_semicolons_meaninglessly():
     # it must not poison the scan of what follows.
     tokens = token_types("var x = 1\n\nprint x")
     assert tokens.count(TokenType.SEMICOLON) == 2
-    assert TokenType.PRINT in tokens
+    assert TokenType.IDENTIFIER in tokens
 
 
 def test_single_character_identifiers_and_numbers():
@@ -40,22 +40,22 @@ def test_line_comment_is_skipped():
     # the comment line still yields its own (empty-statement) semicolon,
     # same as it would for a blank line.
     tokens = token_types("# a comment\nprint 1")
-    assert tokens == [TokenType.SEMICOLON, TokenType.PRINT, TokenType.NUMBER, TokenType.EOF]
+    assert tokens == [TokenType.SEMICOLON, TokenType.IDENTIFIER, TokenType.NUMBER, TokenType.EOF]
 
 
 def test_block_comment_is_skipped():
     tokens = token_types("<# a\nmultiline\ncomment #>\nprint 1")
-    assert tokens == [TokenType.SEMICOLON, TokenType.PRINT, TokenType.NUMBER, TokenType.EOF]
+    assert tokens == [TokenType.SEMICOLON, TokenType.IDENTIFIER, TokenType.NUMBER, TokenType.EOF]
 
 
 def test_block_comment_terminator_requires_adjacent_hash_and_angle():
     # Regression test: the terminator loop used to stop on a lone '#' or on
     # any character followed by '>', not just on the literal "#>" sequence.
     tokens = token_types("<# 100% not > done # yet #>\nprint 1")
-    assert tokens == [TokenType.SEMICOLON, TokenType.PRINT, TokenType.NUMBER, TokenType.EOF]
+    assert tokens == [TokenType.SEMICOLON, TokenType.IDENTIFIER, TokenType.NUMBER, TokenType.EOF]
 
 
 def test_block_comment_tracks_line_numbers():
     tokens = Scanner("<# line one\nline two #>\nprint 1").scan_tokens()
-    print_token = next(t for t in tokens if t.type == TokenType.PRINT)
+    print_token = next(t for t in tokens if t.type == TokenType.IDENTIFIER)
     assert print_token.line == 3

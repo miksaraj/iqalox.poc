@@ -43,7 +43,8 @@ def test_break_stops_the_loop_immediately():
 
 
 def test_prefix_increment_mutates_and_returns_new_value(capsys):
-    run("var x mut = 1\nprint ++x\nprint x")
+    # `++x` isn't a primary, so it needs grouping parens as a call argument.
+    run("var x mut = 1\nprint (++x)\nprint x")
     assert capsys.readouterr().out.splitlines() == ["2", "2"]
 
 
@@ -77,7 +78,8 @@ def test_logical_and_returns_right_operand_when_left_truthy():
 
 
 def test_false_and_nil_are_falsy(capsys):
-    run("print false or nil\nprint false or 1")
+    # `or`/`and` aren't primaries either -- same grouping requirement.
+    run("print (false or nil)\nprint (false or 1)")
     assert capsys.readouterr().out.splitlines() == ["nil", "1"]
 
 

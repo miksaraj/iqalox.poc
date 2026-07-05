@@ -48,6 +48,10 @@ class ExprVisitor(ABC):
     def visit_continue_expr(self, expr: 'Expr') -> Any:
         pass
 
+    @abstractmethod
+    def visit_call_expr(self, expr: 'Expr') -> Any:
+        pass
+
 
 class Expr(ABC):
     @abstractmethod
@@ -151,4 +155,13 @@ class Continue(Expr):
 
     def accept(self, visitor: ExprVisitor) -> None:
         return visitor.visit_continue_expr(self)
+
+
+class Call(Expr):
+    def __init__(self, callee: Expr, arguments: List[Expr]) -> None:
+        self.callee = callee
+        self.arguments = arguments
+
+    def accept(self, visitor: ExprVisitor) -> None:
+        return visitor.visit_call_expr(self)
 

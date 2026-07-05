@@ -1,7 +1,7 @@
 from conftest import parse
 
-from expression import Literal, Logical, Binary, Break, Continue, Ternary, Variable
-from statement import For, Expression
+from expression import Literal, Logical, Binary, Break, Continue, Call, Grouping, Ternary, Variable, Vector
+from statement import For, Function, Return, Expression
 from token import TokenType
 
 
@@ -108,3 +108,78 @@ def test_immutable_declaration_parses():
 def test_blank_lines_between_statements_do_not_error():
     stmts = parse("var x = 1\n\n\nprint x")
     assert len(stmts) == 2
+
+
+def test_function_declaration_parses_params_and_body():
+    stmts = parse("fun add(a, b) { return a + b; }")
+    assert len(stmts) == 1
+    fn = stmts[0]
+    assert isinstance(fn, Function)
+    assert fn.name.lexeme == "add"
+    assert [p.lexeme for p in fn.params] == ["a", "b"]
+    assert len(fn.body) == 1
+    assert isinstance(fn.body[0], Return)
+
+
+def test_zero_arg_call_requires_empty_parens():
+    call = single_expr("f()")
+    assert isinstance(call, Call)
+    assert call.callee.name.lexeme == "f"
+    assert call.arguments == []
+
+
+def test_bare_identifier_is_not_a_call():
+    # No `()` and nothing recognizable as an argument follows -- `f` alone
+    # is a value reference, not an invocation (needed so functions can be
+    # passed around without being called, e.g. `return adder`).
+    expr = single_expr("f")
+    assert isinstance(expr, Variable)
+
+
+def test_single_arg_call_needs_no_parens():
+    call = single_expr("f 1")
+    assert isinstance(call, Call)
+    assert len(call.arguments) == 1
+    assert isinstance(call.arguments[0], Literal) and call.arguments[0].value == 1.0
+
+
+def test_multi_arg_call_is_comma_separated_without_wrapping_parens():
+    call = single_expr("f 1, 2, 3")
+    assert isinstance(call, Call)
+    assert [a.value for a in call.arguments] == [1.0, 2.0, 3.0]
+
+
+def test_compound_argument_needs_grouping_parens():
+    # `f - 1` is subtraction (f minus 1), never a call to f with a bare
+    # unary/binary expression as its argument.
+    expr = single_expr("f - 1")
+    assert isinstance(expr, Binary) and expr.operator.type == TokenType.MINUS
+
+    call = single_expr("f (n - 1)")
+    assert isinstance(call, Call)
+    assert len(call.arguments) == 1
+    assert isinstance(call.arguments[0], Grouping)
+
+
+def test_nested_call_needs_no_extra_parens():
+    # `concat` immediately followed by a vector literal is itself a complete
+    # call, which then becomes print's one argument.
+    call = single_expr("print concat [1, 2]")
+    assert isinstance(call, Call) and call.callee.name.lexeme == "print"
+    assert len(call.arguments) == 1
+    inner = call.arguments[0]
+    assert isinstance(inner, Call) and inner.callee.name.lexeme == "concat"
+    assert isinstance(inner.arguments[0], Vector)
+
+
+def test_vector_literal_with_multiple_elements():
+    # Regression test: `comma()`'s handling of `comma_as_operator = False`
+    # used to discard the first element and choke on a 3rd+ element.
+    vector = single_expr("[1, 2, 3]")
+    assert isinstance(vector, Vector)
+    assert [v.value for v in vector.values] == [1.0, 2.0, 3.0]
+
+
+def test_empty_and_single_element_vector_literals():
+    assert single_expr("[]").values == []
+    assert [v.value for v in single_expr("[1]").values] == [1.0]

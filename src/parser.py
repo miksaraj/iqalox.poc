@@ -1,10 +1,18 @@
 from typing import List, Optional
 
 from expression import Expr, Binary, Logical, Unary, Literal, Grouping, Ternary, Vector, Variable, Assign, Break, \
-    Continue
-from statement import Stmt, Expression, Print, Concat, Var, Block, For
+    Continue, Call
+from statement import Stmt, Expression, Var, Block, For, Function, Return
 from token import Token, TokenType
 from error import ParseError
+
+# Deliberately excludes operator tokens like MINUS: `f - 1` is subtraction,
+# never a call to `f` with argument `-1` (that needs `f (-1)`) -- this is
+# what keeps `x - 1` and `f 1` unambiguous without lookahead past one token.
+ARGUMENT_START_TOKENS = (
+    TokenType.LEFT_PAREN, TokenType.LEFT_BRACKET, TokenType.FALSE, TokenType.TRUE, TokenType.NIL,
+    TokenType.NUMBER, TokenType.STRING, TokenType.IDENTIFIER, TokenType.BREAK, TokenType.CONTINUE,
+)
 
 
 class Parser:
@@ -27,6 +35,8 @@ class Parser:
 
     def declaration(self) -> Optional[Stmt]:
         try:
+            if self.match(TokenType.FUN):
+                return self.function_declaration('function')
             if self.match(TokenType.VAR):
                 return self.var_declaration()
             return self.statement()
@@ -34,18 +44,43 @@ class Parser:
             self.synchronize()
             return None
 
+    def function_declaration(self, kind: str) -> Stmt:
+        name = self.consume(TokenType.IDENTIFIER, f"Expect {kind} name.")
+        self.consume(TokenType.LEFT_PAREN, f"Expect '(' after {kind} name.")
+
+        parameters: List[Token] = []
+        if not self.check(TokenType.RIGHT_PAREN):
+            while True:
+                parameters.append(self.consume(TokenType.IDENTIFIER, "Expect parameter name."))
+                if not self.match(TokenType.COMMA):
+                    break
+
+        self.consume(TokenType.RIGHT_PAREN, "Expect ')' after parameters.")
+        self.consume(TokenType.LEFT_BRACE, f"Expect '{{' before {kind} body.")
+        body = self.block()
+
+        return Function(name, parameters, body)
+
     def statement(self) -> Optional[Stmt]:
         if self.match(TokenType.SEMICOLON):
             return None
-        if self.match(TokenType.PRINT):
-            return self.print_statement()
-        if self.match(TokenType.CONCAT):
-            return self.concat_statement()
         if self.match(TokenType.FOR):
             return self.for_statement()
+        if self.match(TokenType.RETURN):
+            return self.return_statement()
         if self.match(TokenType.LEFT_BRACE):
             return Block(self.block())
         return self.expression_statement()
+
+    def return_statement(self) -> Stmt:
+        keyword = self.previous()
+
+        value = None
+        if not self.check(TokenType.SEMICOLON):
+            value = self.expression()
+
+        self.consume(TokenType.SEMICOLON, "Expect line break or ';' after return value.")
+        return Return(keyword, value)
 
     def for_statement(self) -> Optional[Stmt]:
         self.consume(TokenType.LEFT_PAREN, "Expect '(' after 'for'.")
@@ -70,16 +105,6 @@ class Parser:
         body = self.statement()
 
         return For(initializer, condition, increment, body)
-
-    def print_statement(self) -> Optional[Stmt]:
-        value = self.expression()
-        self.consume(TokenType.SEMICOLON, "Expect line break or ';' after value.")
-        return Print(value)
-
-    def concat_statement(self) -> Optional[Stmt]:
-        expr = self.expression()
-        self.consume(TokenType.SEMICOLON, "Expect line break or ';' after value.")
-        return Concat(expr)
 
     def var_declaration(self) -> Optional[Stmt]:
         name = self.consume(TokenType.IDENTIFIER, "Expect variable name.")
@@ -127,13 +152,16 @@ class Parser:
         return expr
 
     def comma(self) -> Optional[Expr]:
+        # While disabled (inside a `[...]` vector literal), a single element
+        # is just a ternary -- the comma between elements is the vector
+        # loop's own separator, not this operator, and is left untouched
+        # for that loop to consume.
+        if not self.comma_as_operator:
+            return self.ternary()
+
         expr = self.ternary()
 
-        if not self.comma_as_operator:
-            self.advance()
-            expr = self.ternary()
-
-        while self.comma_as_operator and self.match(TokenType.COMMA):
+        while self.match(TokenType.COMMA):
             operator = self.previous()
             right = self.ternary()
             expr = Binary(expr, operator, right)
@@ -248,7 +276,38 @@ class Parser:
             right = self.unary()
             return Unary(operator, right)
 
+        return self.call()
+
+    def call(self) -> Optional[Expr]:
+        # No call takes parentheses. `f()` is the explicit zero-arg marker;
+        # `f a`, `f a, b` (fixed-arity, comma-separated, no wrapping parens)
+        # are calls with arguments; a bare `f` with nothing recognizable as
+        # an argument following it is just a value reference, not a call.
+        if self.check(TokenType.IDENTIFIER):
+            if self.check_at(1, TokenType.LEFT_PAREN) and self.check_at(2, TokenType.RIGHT_PAREN):
+                name = self.advance()
+                self.advance()
+                self.advance()
+                return Call(Variable(name), [])
+
+            if self.starts_argument(self.peek_at(1)):
+                name = self.advance()
+                arguments = [self.argument()]
+                while self.match(TokenType.COMMA):
+                    arguments.append(self.argument())
+                return Call(Variable(name), arguments)
+
         return self.primary()
+
+    def argument(self) -> Optional[Expr]:
+        # A grouped expression, a nested call, or a bare primary -- `call()`
+        # already covers all three, falling through to `primary()`, which
+        # handles `"(" expression ")"` as a `Grouping`.
+        return self.call()
+
+    @staticmethod
+    def starts_argument(token: Token) -> bool:
+        return token.type in ARGUMENT_START_TOKENS
 
     def primary(self) -> Optional[Expr]:
         if self.match(TokenType.FALSE):
@@ -277,11 +336,13 @@ class Parser:
             exprs = []
             self.comma_as_operator = False
 
-            while not self.match(TokenType.RIGHT_BRACKET):
+            if not self.check(TokenType.RIGHT_BRACKET):
                 exprs.append(self.expression())
+                while self.match(TokenType.COMMA):
+                    exprs.append(self.expression())
 
-            self.consume(TokenType.RIGHT_BRACKET, "Expect ']' after expression.")
             self.comma_as_operator = True
+            self.consume(TokenType.RIGHT_BRACKET, "Expect ']' after vector elements.")
             return Vector(exprs)
 
         raise self.error(self.peek(), "Expect expression.")
@@ -305,6 +366,9 @@ class Parser:
             return False
         return self.peek().type == _type
 
+    def check_at(self, offset: int, _type: TokenType) -> bool:
+        return self.peek_at(offset).type == _type
+
     def advance(self) -> Token:
         if not self.is_at_end():
             self.current += 1
@@ -315,6 +379,10 @@ class Parser:
 
     def peek(self) -> Token:
         return self.tokens[self.current]
+
+    def peek_at(self, offset: int) -> Token:
+        index = min(self.current + offset, len(self.tokens) - 1)
+        return self.tokens[index]
 
     def previous(self) -> Optional[Token]:
         return self.tokens[self.current - 1]
@@ -337,7 +405,6 @@ class Parser:
                 TokenType.FUN,
                 TokenType.VAR,
                 TokenType.FOR,
-                TokenType.PRINT,
                 TokenType.RETURN
             ]:
                 return

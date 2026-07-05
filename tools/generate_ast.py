@@ -33,15 +33,16 @@ EXPRESSIONS: AST_DICT = {
     'Variable': ('name: Token',),
     'Break': (),
     'Continue': (),
+    'Call': ('callee: Expr', 'arguments: List[Expr]'),
 }
 
 STATEMENTS: AST_DICT = {
     'Block': ('statements: List[Stmt]',),
     'Expression': ('expression: Expr',),
-    'Print': ('expression: Expr',),
-    'Concat': ('expression: Expr',),
     'Var': ('name: Token', 'initializer: Expr', 'is_mutable: bool'),
     'For': ('initializer: Stmt', 'condition: Expr', 'increment: Expr', 'body: Stmt'),
+    'Function': ('name: Token', 'params: List[Token]', 'body: List[Stmt]'),
+    'Return': ('keyword: Token', 'value: Expr'),
 }
 
 INDENTATION = '    '

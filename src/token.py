@@ -48,14 +48,12 @@ class TokenType(str, Enum):
     FOR = 'for'
     NIL = 'nil'
     OR = 'or'
-    PRINT = 'print'
     RETURN = 'return'
     SUPER = 'super'
     SELF = 'self'
     TRUE = 'true'
     VAR = 'var'
     WITH = 'with'
-    CONCAT = 'concat'
     MODULE = 'module'
     TRAIT = 'trait'
     EXTENDS = 'extends'
@@ -93,8 +91,8 @@ class TokenType(str, Enum):
 
 
 _keywords: Tuple = (
-    'and', 'class', 'false', 'fun', 'for', 'nil', 'or', 'print', 'return', 'super', 'self', 'true', 'var', 'with',
-    'concat', 'module', 'trait', 'extends', 'break', 'continue', 'use', 'mut'
+    'and', 'class', 'false', 'fun', 'for', 'nil', 'or', 'return', 'super', 'self', 'true', 'var', 'with',
+    'module', 'trait', 'extends', 'break', 'continue', 'use', 'mut'
 )
 
 KEYWORDS: Dict[str, TokenType] = {key: TokenType(key) for key in _keywords}
