@@ -112,15 +112,19 @@ STRING_STARTERS: Tuple = ("'", '"')
 
 
 class Token:
-    def __init__(self, token_type: TokenType, lexeme: str, literal: Any, line: int):
+    def __init__(self, token_type: TokenType, lexeme: str, literal: Any, line: int, column: int = 1):
         self.type = token_type
         self.lexeme = lexeme
         self.literal = literal
         self.line = line
+        # 1-indexed column of the lexeme's first character within its line.
+        # Defaults to 1 for synthetic tokens that aren't tied to real source
+        # text; every token the Scanner actually produces sets this for real.
+        self.column = column
 
     def __str__(self) -> str:
-        return f"{self.type}: {self.lexeme}, {self.literal}, {self.line}"
+        return f"{self.type}: {self.lexeme}, {self.literal}, {self.line}:{self.column}"
 
     def __repr__(self) -> str:
-        properties = f"{self.type}, {self.lexeme}, {self.literal}, {self.line}"
+        properties = f"{self.type}, {self.lexeme}, {self.literal}, {self.line}:{self.column}"
         return f'{self.__class__.__name__}({properties})'

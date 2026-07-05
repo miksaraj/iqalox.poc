@@ -444,6 +444,32 @@ the real CLI for the first time — meaning **every example script in
    fully implemented one layer up. Fixed by adding both to
    `SINGLE_CHARACTER_TOKENS`.
 
+### Fixed post-0.1.0-poc: GitHub issues #1 and #2 (seventh batch)
+
+1. **Issue #1, "Improve error reporting to show the user exactly where the
+   error is."** `Token` gained a 1-indexed `column` field; `Scanner` tracks
+   `line_start`/`start_line`/`start_column` so every token (including ones
+   spanning a multi-line string or block comment) reports the position it
+   *started* at, not wherever scanning happened to end up. `Iqalox.run()`
+   now keeps `source_lines` around, and `Iqalox.report()`/`runtime_error()`
+   print the offending source line plus a `^` underline spanning the whole
+   lexeme, not just a bare line number. Along the way, fixed a related
+   cosmetic wart in the same code path: an implicit semicolon's lexeme is a
+   literal `'\n'`, which used to split the `at '...'` error text across two
+   lines — now displayed as the word `newline`.
+2. **Issue #2, "Handle a run of one or more invalid tokens as a single
+   error."** `Scanner.scan_token()`'s fallback branch (genuinely
+   unrecognized characters, e.g. `@`) now keeps consuming characters while
+   they're *also* unrecognized (`is_recognized()`) before reporting, so
+   `@@@` is one error naming the whole run, not three separate
+   "Unexpected character" reports.
+
+Both were pre-existing `TODO [#1]`/`TODO [#2]` comments in `iqalox.py`/
+`scanner.py` referencing the actual GitHub issue numbers — straightforward
+engineering fixes, not design questions, so implemented directly rather
+than routed for sign-off. See `tests/test_scanner.py` and the new
+`tests/test_error_reporting.py` for coverage.
+
 ### Still open
 
 1. `error.py`'s `IqaloxRuntimeError.__str__`/`__repr__` just call `super()`,
@@ -552,13 +578,23 @@ undefined-property/non-instance/non-class-superclass error cases), and
 arithmetic/comparison/logical operators including `%`, `^`, `??`, elvis
 `?:`, `!`, division-by-zero, and non-number-operand errors
 (`tests/test_operators.py`, added during the final documentation/coverage
-pass — see §3's sixth batch for the scanner bug it turned up). Run with
-`pytest` from the repo root (`pytest.ini` sets `pythonpath = src`).
+pass — see §3's sixth batch for the scanner bug it turned up), token column
+tracking and invalid-character-run coalescing (`tests/test_scanner.py`, see
+§3's seventh batch), and source-excerpt/caret error reporting exercised
+through the real `Iqalox` class rather than just the scanner/parser
+directly (`tests/test_error_reporting.py` — note its `setup_function()`
+resets `Iqalox`'s class-level `interpreter`/`had_error`/`had_runtime_error`/
+`source_lines` state before each test, since that state is intentionally
+shared/static across calls in the real CLI and would otherwise leak
+between tests in the same file). Run with `pytest` from the repo root
+(`pytest.ini` sets `pythonpath = src`).
 
 Deliberately **not** covered by this suite: anything requiring the actual
-`iqalox.py` CLI process (module-duplication bug in §3, exit codes) — pytest
-never runs `iqalox.py` as `__main__`, so that class of bug is invisible to
-it by construction. Spot-checked manually via `subprocess.run(['python3',
+`iqalox.py` CLI *process* (module-duplication bug in §3, exit codes) —
+pytest never runs `iqalox.py` as `__main__`, so that class of bug is
+invisible to it by construction (`tests/test_error_reporting.py` exercises
+the `Iqalox` class's methods directly, which is different from running the
+file as a subprocess). Spot-checked manually via `subprocess.run(['python3',
 'iqalox.py', ...])` instead; worth doing the same for any future change
 that touches `Iqalox`/`main()`/error-flag plumbing specifically.
 

@@ -19,10 +19,31 @@ class Scanner:
         self.start = 0
         self.current = 0
         self.line = 1
+        # Source offset where the current line began -- lets column_at() turn
+        # an absolute offset into a 1-indexed column within that line.
+        self.line_start = 0
+        # Line/column of the token currently being scanned, captured once at
+        # the top of scan_tokens()'s loop -- used (rather than self.line/
+        # column_at(self.start) at add_token() time) so a token that itself
+        # spans multiple lines (e.g. a multi-line string) is still reported
+        # at the position it *started*, not wherever scanning ended up.
+        self.start_line = 1
+        self.start_column = 1
 
     @property
     def current_token(self) -> str:
         return self.source[self.start:self.current]
+
+    def column_at(self, offset: int) -> int:
+        return offset - self.line_start + 1
+
+    def advance_newline(self) -> None:
+        # Call right after advance() has consumed a '\n', so self.current
+        # already points just past it -- keeps self.line_start/self.line in
+        # sync wherever a newline is consumed outside the main scan_token()
+        # dispatch (inside strings and block comments).
+        self.line += 1
+        self.line_start = self.current
 
     def is_at_end(self) -> bool:
         return self.current >= len(self.source)
@@ -32,7 +53,7 @@ class Scanner:
         return self.current_token
 
     def add_token(self, token_type: TokenType, literal: Any = None) -> None:
-        self.tokens.append(Token(token_type, self.current_token, literal, self.line))
+        self.tokens.append(Token(token_type, self.current_token, literal, self.start_line, self.start_column))
 
     def match(self, expected: str) -> bool:
         if self.is_at_end() or self.source[self.current] != expected:
@@ -63,14 +84,35 @@ class Scanner:
     def is_alpha_numeric(self, c: str = None) -> bool:
         return self.is_alpha(c) or self.is_digit(c)
 
+    def is_recognized(self, c: str) -> bool:
+        # Anything scan_token()'s dispatch would actually know what to do
+        # with -- used to find where a run of otherwise-unrecognized
+        # characters ends (see the fallback branch in scan_token()).
+        return (
+            c in SINGLE_CHARACTER_TOKENS
+            or c in ONE_OR_MORE_CHARACTER_TOKENS
+            or c in WHITESPACE
+            or c in STRING_STARTERS
+            or c == TokenType.NEWLINE
+            or self.is_digit(c)
+            or self.is_alpha(c)
+        )
+
     def string(self, char: str) -> None:
         while self.peek() != char and not self.is_at_end():
             if self.peek() == '\n':
-                self.line += 1
-            self.advance()
+                self.advance()
+                self.advance_newline()
+            else:
+                self.advance()
         if self.is_at_end():
             import iqalox
-            iqalox.Iqalox.error(Token(TokenType.EOF, '', None, self.line), "Unterminated string.")
+            # Reports at the opening quote's own position (not wherever
+            # end-of-file was actually reached), since that's where the user
+            # needs to look to fix it.
+            iqalox.Iqalox.error(
+                Token(TokenType.STRING, char, None, self.start_line, self.start_column), "Unterminated string."
+            )
             return
         self.advance()
         value = self.source[self.start + 1:self.current - 1]
@@ -110,8 +152,10 @@ class Scanner:
                 elif token == TokenType.BLOCK_COMMENT_START:
                     while not (self.peek() == '#' and self.peek_next() == '>') and not self.is_at_end():
                         if self.peek() == '\n':
-                            self.line += 1
-                        self.advance()
+                            self.advance()
+                            self.advance_newline()
+                        else:
+                            self.advance()
                     self.advance()
                     self.advance()
             else:
@@ -121,12 +165,15 @@ class Scanner:
                     # `token` didn't extend into a longer valid token (e.g. a
                     # bare '|' not followed by '>') and isn't valid on its own.
                     import iqalox
-                    iqalox.Iqalox.error(Token(TokenType.NULL_CHAR, c, None, self.line), f"Unexpected character: {c}")
+                    iqalox.Iqalox.error(
+                        Token(TokenType.NULL_CHAR, c, None, self.start_line, self.start_column),
+                        f"Unexpected character: {c}",
+                    )
         elif c in WHITESPACE:
             return
         elif c == TokenType.NEWLINE:
             self.add_token(TokenType.SEMICOLON)
-            self.line += 1
+            self.advance_newline()
         elif c in STRING_STARTERS:
             self.string(c)
         elif self.is_digit(c):
@@ -134,13 +181,23 @@ class Scanner:
         elif self.is_alpha(c):
             self.identifier()
         else:
-            # TODO [#2]: handle a run of one or more invalid tokens as a single error.
+            # A character with no recognized meaning on its own. Keep
+            # consuming as long as what follows is *also* unrecognized, so a
+            # whole run of garbage characters (e.g. `@@@`) is reported as one
+            # error instead of one per character.
+            while not self.is_at_end() and not self.is_recognized(self.peek()):
+                self.advance()
             import iqalox
-            iqalox.Iqalox.error(Token(TokenType.NULL_CHAR, c, None, self.line), f"Unexpected character: {c}")
+            iqalox.Iqalox.error(
+                Token(TokenType.NULL_CHAR, self.current_token, None, self.start_line, self.start_column),
+                f"Unexpected character{'s' if len(self.current_token) > 1 else ''}: {self.current_token}",
+            )
 
     def scan_tokens(self) -> List[Token]:
         while not self.is_at_end():
             self.start = self.current
+            self.start_line = self.line
+            self.start_column = self.column_at(self.start)
             self.scan_token()
-        self.tokens.append(Token(TokenType.EOF, "", None, self.line))
+        self.tokens.append(Token(TokenType.EOF, "", None, self.line, self.column_at(self.current)))
         return self.tokens

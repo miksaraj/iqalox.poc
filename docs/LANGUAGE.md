@@ -496,6 +496,19 @@ recover from either kind:
   extending a non-class. Running a file that hits one of these exits with
   status `70`, after whatever output was already produced.
 
+Both kinds also print the offending source line itself, with a `^`
+underline pointing at exactly where the error starts (spanning the whole
+lexeme, not just its first character):
+
+```
+[line 2] Error at '@@@': Unexpected characters: @@@
+    var y = @@@ 2
+            ^^^
+```
+
+A run of consecutive unrecognized characters (`@@@` above) is reported as
+**one** error, not one per character.
+
 There is no `try`/`catch`/`throw` construct in the language itself.
 
 ## 13. Known limitations
@@ -546,8 +559,9 @@ These are documented tradeoffs and open items, not undiscovered bugs — see
    this is noted rather than fixed.
 10. **No concurrency, no exception handling, no reflection/metaprogramming**
     exist at the language level (see [§1](#1-introduction-and-classification)).
-11. **Error reporting doesn't point at the exact error location** beyond a
-    line number — no column, no source-line excerpt.
+11. **Error location is line/column only, with a single-line source
+    excerpt.** There's no multi-line context, no "did you mean," and no
+    IDE-style rich diagnostics — just the offending line and a caret.
 
 ## 14. Grammar and precedence reference
 
