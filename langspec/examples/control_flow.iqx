@@ -3,6 +3,6 @@ fun ifEqualOr(a, b) {
     [a, equality, b] |> concat |> print
 }
 
-ifEqualOr(2, 5)
-ifEqualOr(5, 2)
-ifEqualOr(2, 2)
+ifEqualOr 2, 5
+ifEqualOr 5, 2
+ifEqualOr 2, 2
