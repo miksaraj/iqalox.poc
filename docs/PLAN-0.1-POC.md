@@ -6,73 +6,86 @@ living document — update the status table and the open-questions list as work
 lands or decisions get made. See `CLAUDE.md` for why the open questions are
 listed rather than answered here.
 
-## 1. Open design decisions (blocking — need your call before implementing)
+## 1. Design decisions (resolved)
 
-These aren't engineering choices; each one changes how the language behaves.
-Flagging them instead of guessing, per `CLAUDE.md`.
+These aren't engineering choices; each one changes how the language behaves,
+so they were routed to the repo owner per `CLAUDE.md` rather than guessed at.
+Resolved 2026-07-05:
 
-1. **Does ternary fully replace `if`/`else`, including for statement-like
-   things?** `langspec/examples/functions.iqx` and `loops.iqx` use `print k`,
-   `continue`, `break`, and `_` (ignore) directly as ternary branches, e.g.:
+1. **Ternary fully replaces `if`/`else`, including for statement-like
+   branches.** `continue`, `break`, and calls with side effects (`print(...)`)
+   must all be usable as ternary branches, e.g.:
    ```
-   (k == 0 or k == 5) ? continue : (k == 10) ? break : print k
+   (k == 0 or k == 5) ? continue : (k == 10) ? break : print(k)
    ```
-   Today, `Print` is a `Stmt`, and `continue`/`break`/`_` don't exist as AST
-   nodes at all. For the examples to parse as written, either (a) these need
-   to become expressions (changing `print` from a statement to an
-   expression-producing builtin, and giving `continue`/`break`/`_` expression
-   forms), or (b) the ternary needs to be able to take statements as
-   branches, or (c) the examples are aspirational and should be rewritten
-   once the real answer is chosen. Which?
+   Engineering consequence: the ternary's middle/right branches can't be
+   restricted to the `Expr` hierarchy the way `Ternary` is defined today —
+   they need to accept statement-like constructs too (at minimum `break`/
+   `continue` control-flow signals, plus ordinary expression-statements now
+   that `print`/`concat` are calls rather than dedicated statements — see
+   decision 4). The cleanest fit is probably: parse ternary branches via a
+   grammar rule that covers both plain expressions and `break`/`continue`;
+   evaluate `break`/`continue` branches by raising the same control-flow
+   signal a loop body would use (see §4 step 4), letting it propagate up
+   through ternary evaluation to the enclosing `for`. A ternary with a
+   `break`/`continue` branch has no meaningful "value" on that arm — that's
+   fine, since taking that arm never falls through to produce one.
 
-2. **Prefix `++`/`--`: does it mutate?** `unary()`/`visit_unary_expr`
-   currently parse `++x` as a `Unary` node and evaluate it as `float(x) + 1`
-   — a pure computation with no assignment back to `x`. That's not what
-   "prefix increment operator" means in the feature list, and it silently
-   diverges from every example (`++i` in `for` headers, `++c |> print` in
-   `createCounter`) which assume it mutates. Should `++x`/`--x`:
-   - require an assignable target (a `Variable`, presumably a property access
-     later) and assign the incremented value back, evaluating to the new
-     value (standard prefix-increment semantics), and
-   - raise a runtime error if the target is immutable (no `mut`)?
+2. **Prefix `++`/`--` uses standard mutating semantics.** `++x` assigns
+   `x + 1` back to `x` and evaluates to the new value (matching every example
+   that uses it: `++i` in `for` headers, `++c |> print` in `createCounter`).
+   Reassigning an immutable (no `mut`) target should **preferably** be a
+   compile-time error. Note: there is currently no static analysis/resolution
+   pass in this codebase (no Lox-style `Resolver`) — one doesn't exist until
+   the "disallow unused variables" work in 0.3/0.5 introduces it. Recommended
+   approach for 0.1-poc: implement immutable-target rejection as a **runtime**
+   error for now (reusing the existing `Environment.assign` mechanism, which
+   already does exactly this for plain `=` assignment), and fold true
+   compile-time enforcement into whatever static-analysis pass 0.3 introduces
+   rather than building a one-off resolver just for this. Flagging this as a
+   deliberate interim tradeoff, not a silent downgrade of the requirement.
+   Also: `increment()` in the parser must reject non-assignable operands
+   (only `Variable`, and later property-access, targets — not arbitrary
+   expressions like `++5`).
 
-   If yes (which the examples assume), this also means `increment()` in the
-   parser needs to reject non-assignable operands rather than accepting any
-   unary expression.
+3. **The self-reference keyword is `self`, not `this`.** `src/token.py`'s
+   `TokenType.SELF = 'self'` is canonical; every `this` reference in current
+   (non-archived) langspec docs/examples was outdated and has been corrected
+   (see `langspec/examples/classes.iqx`, `langspec/SYNTAX_GRAMMAR.md`).
+   Archived snapshots under `langspec/archived/` are left as-is (historical
+   record).
 
-3. **Self-reference keyword: `this` or `self`?** `src/token.py` defines
-   `TokenType.SELF = 'self'` (no `this` keyword exists at all), but
-   `langspec/examples/classes.iqx` uses `this.name`. One of these is wrong.
-   Which keyword is canonical?
+4. **`print` and `concat` are promoted to ordinary builtin functions**, not
+   statement keywords. Consequence worked out from this, not re-litigated:
+   every other function call in the examples already uses standard
+   parenthesized call syntax (`add5(1)`, `fib(n - 2)`, `math.square(3)`), so
+   `print`/`concat` calls now follow the same convention —
+   `print(x)` / `concat([a, b])` — rather than the old bare `print x` /
+   `concat [...]` statement forms. All current (non-archived) example
+   scripts have been updated to add the parens at direct call sites; bare
+   `concat`/`print` used as a pipe target (`|> print`) is unaffected, since
+   that's just a first-class function value reference, not a call.
+   `src/statement.py`'s `Print`/`Concat` statement nodes will need to go away
+   once function calls exist and `print`/`concat` are registered as builtin
+   function values instead (§4 below).
 
-4. **Is `concat` a statement or a stdlib function value?** `src/statement.py`
-   / `src/parser.py` currently implement `concat [...]` as a dedicated
-   statement (`Concat`, parallel to `Print`). But the examples pipe into it
-   as if it were an ordinary callable: `[a, equality, b] |> concat |> print`
-   and `concat ["Factorial of ", j, "is: ", fact] |> print`. A pipe operator
-   needs `concat` (and `print`, per question 1) to be values it can call —
-   which a hardcoded statement keyword isn't. Do we:
-   - keep `concat`/`print` as statements for 0.1-poc and treat the piped
-     examples as not-yet-valid syntax to fix later, or
-   - promote them to ordinary (builtin) functions now, which is also more
-     consistent with `ROADMAP.md`'s 0.3 note that `concat` should eventually
-     be "a standard library method" anyway?
+5. **Mixins and traits are deferred out of 0.1-poc**, moved to `0.2` in
+   `ROADMAP.md`. The PHP-vs-Scala-style implementation question from the
+   original notes is unresolved and doesn't need to be until that work
+   starts; `module`/`trait`/`use`/`with`/`extends` tokens already exist but
+   have no grammar or semantics yet, and none should be built for 0.1-poc.
 
-5. **Mixins vs. traits implementation strategy.** The original notes
-   explicitly leave this open: PHP-style static mixins at class declaration
-   (`with`), Scala-style dynamic traits, or a mix (PHP-style for `with` at
-   declaration, Scala-style for dynamic use via `use`). `module`, `trait`,
-   `use`, `with`, and `extends` tokens already exist; no grammar or semantics
-   are implemented yet. Needs a decision before any grammar work here starts.
+6. **"Support for standard methods" means baseline Lox method dispatch** —
+   plain method definitions on classes, called via `instance.method(...)`.
+   No built-in methods on primitive values (e.g. `.length()` on a string) are
+   in scope for 0.1-poc; that's stdlib territory for a later version.
 
-6. **"Support for standard methods"** (from the original notes, kept
-   verbatim in `ROADMAP.md`) is ambiguous: built-in methods on primitive
-   values/arrays (e.g. calling `.length()` on a string), or just "class
-   instance methods work" (i.e. the baseline Lox method-dispatch mechanics)?
-   Given getters/setters are separately marked as pushed out to 0.2+, my
-   guess is this means the latter (plain method definitions/dispatch on
-   classes) — but confirm before treating any primitive `.method()` call
-   syntax as in-scope for 0.1-poc.
+Additionally confirmed by re-reading history: `while` was **deliberately
+removed** from the language (commit `1a22361`, "Removed while loop from
+examples... since while was removed from the language specification").
+`for` is the only loop construct. `langspec/SYNTAX_GRAMMAR.md` still listed
+`whileStmt` and `ifStmt` (superseded by decision 1) — both removed from the
+grammar draft as part of this update.
 
 ## 2. Status of 0.1-poc feature list
 
@@ -80,31 +93,35 @@ Legend: ✅ done · 🟡 partial/buggy · ⛔ not started
 
 | Feature | Status | Notes |
 |---|---|---|
-| Array support (vectors) | 🟡 | `Vector` expression + `visit_vector_expr` work for literals (`[1, 2, 3]`). No indexing, no mutation, no stdlib methods. Matrices are explicitly 0.2 scope. |
+| Array support (vectors) | 🟡 | `Vector` expression + `visit_vector_expr` work for literals (`[1, 2, 3]`). No indexing, no mutation, no stdlib methods. Matrices/manipulation stdlib are 0.2 scope. |
 | Block comments `<# ... #>` | 🟡 | Tokens exist and scanning is wired up, but the terminator-detection loop looks buggy — see §3.1. |
 | Implicit semicolons | ✅ | Newline → `SEMICOLON` token in `Scanner.scan_token`. |
-| `continue` / `break` statements | ⛔ | Tokens exist (`TokenType.BREAK`/`CONTINUE`); no AST nodes, no parsing, no interpreter support. Depends on open question 1. |
-| Prefix `++`/`--` | 🟡 | Parses, but doesn't mutate — see open question 2. |
+| `continue` / `break` statements | ⛔ | Tokens exist (`TokenType.BREAK`/`CONTINUE`); no AST nodes, no parsing, no interpreter support. Must be usable as ternary branches per decision 1 — see §4 step 4. |
+| Prefix `++`/`--` | 🟡 | Parses, but doesn't mutate yet. Needs real assign-back semantics + immutable-target error per decision 2 — see §4 step 7. |
 | `extends` for inheritance | 🟡 | Token exists; no `class` declaration parsing/interpretation at all yet. |
-| Chainable ternary (elvis `?:` too) instead of if/else | ✅ | `Ternary` node, both `? :` and `?:` forms parse and evaluate; nesting via recursive `expression()` calls gives chaining. |
-| Support for standard methods | ⛔ | Depends on classes existing at all, and on open question 6. |
-| No `+` string concat | 🟡 | `+` on two strings currently just does Python string concatenation in `visit_binary_expr` (`check_number_operands` isn't even invoked for `PLUS` in a string-aware way — actually `check_number_operands` *is* called for `PLUS`, so `"a" + "b"` currently raises a runtime error). So the restriction is arguably already enforced, but only as a side effect of numeric type-checking, not an intentional string-specific rule — worth an explicit test once `concat` (open question 4) is settled. |
-| Pipe operator `\|>` | ⛔ | Token exists; not parsed at all (no rule calls it). Depends on open question 4 (need callable `concat`/`print` for the example scripts to make sense) and on functions existing (§2, functions row). |
-| Ignore operator `_` | ⛔ | Token exists (`UNDERSCORE`); no parsing/semantics. Depends on open question 1. |
+| Chainable ternary (elvis `?:` too) instead of if/else | 🟡 | `Ternary` node, both `? :` and `?:` forms parse and evaluate for plain expressions; nesting gives chaining. Doesn't yet accept statement-like branches (`break`/`continue`) per decision 1 — see §4 step 1. |
+| Support for standard methods | ⛔ | Baseline Lox method dispatch on classes (decision 6) — depends on classes existing at all. |
+| No `+` string concat | 🟡 | `+` on two strings currently just does Python string concatenation in `visit_binary_expr` (`check_number_operands` isn't even invoked for `PLUS` in a string-aware way — actually `check_number_operands` *is* called for `PLUS`, so `"a" + "b"` currently raises a runtime error). So the restriction is arguably already enforced, but only as a side effect of numeric type-checking, not an intentional string-specific rule — worth an explicit test once `concat` exists as a builtin. |
+| `print` / `concat` as builtin functions | ⛔ | Currently `Print`/`Concat` are dedicated `Stmt` subclasses (statement keywords), per decision 4 these need to become ordinary builtin function values instead — depends on functions/calls existing (§4 step 5) and needs its own small migration (§4 step 6). |
+| Pipe operator `\|>` | ⛔ | Token exists; not parsed at all (no rule calls it). Depends on `print`/`concat` being callable values and on functions existing. |
+| Ignore operator `_` | ⛔ | Token exists (`UNDERSCORE`); no parsing/semantics. Needs to work as a ternary branch per decision 1. |
 | Nullable infix `??` | ✅ | Parsed in `multiplication()` (questionable precedence placement, see §3.2) and evaluated in `visit_binary_expr`. |
-| Mixin support | ⛔ | Depends on open question 5. |
-| Trait support | ⛔ | Depends on open question 5. |
 | Comma operator | ✅ | `comma()` in parser, precedence matches the table in the root `README.md`. |
 | Immutability by default (`mut`) | ✅ | `VariableData.is_mutable`, enforced in `Environment.assign`; `var_declaration` requires either `mut` or an initializer. |
 
+Mixin support and trait support are **out of scope for 0.1-poc** (deferred to
+0.2, decision 5) and are intentionally not in this table.
+
 Not on the 0.1-poc list but required by the example scripts and by Lox
-baseline, currently **not implemented at all**:
+baseline, currently **not implemented at all** (treat as in-scope per the
+"assume Lox/example-script features are wanted unless they contradict an
+explicit plan" rule — none of these contradict anything):
 
 | Missing baseline | Notes |
 |---|---|
-| `for` loops | Grammar drafted in `langspec/SYNTAX_GRAMMAR.md`, not implemented in `parser.py`. Needed for `loops.iqx` and most of `functions.iqx`. |
+| `for` loops | Grammar drafted in `langspec/SYNTAX_GRAMMAR.md`, not implemented in `parser.py`. Needed for `loops.iqx` and most of `functions.iqx`. `while` is *not* in scope — it was deliberately removed from the language (see §1). |
 | Functions (`fun`, calls, `return`, closures) | No `Function`/`Call`/`Return` AST nodes, no parsing. Needed for essentially all of `functions.iqx` and for the pipe operator to be useful. |
-| Classes (`class`, methods, instances, `init`, `super`) | No AST nodes, no parsing. Needed for `classes.iqx`/`inheritance.iqx`. |
+| Classes (`class`, methods, instances, `init`, `super`, `self`) | No AST nodes, no parsing. Needed for `classes.iqx`/`inheritance.iqx`. |
 | Logical `and`/`or` | Tokens exist, grammar drafted, not implemented (`loops.iqx` uses `k == 0 or k == 5`). |
 
 ## 3. Known bugs / cleanup (not design questions — just fix)
@@ -134,35 +151,47 @@ baseline, currently **not implemented at all**:
 
 ## 4. Suggested sequencing
 
-Once §1 is resolved:
+With §1 resolved, all of the following can proceed without further design
+sign-off — flag anything that turns up a *new* design question rather than
+deciding it inline (per `CLAUDE.md`).
 
 1. **Fix known bugs** (§3.1 at minimum — it silently corrupts anything after
    a block comment).
-2. **Logical `and`/`or`** — small, unblocks `loops.iqx`, no open design
-   question attached.
-3. **`for` loops** — per the drafted grammar; needed before `break`/`continue`
-   are meaningful.
-4. **`break`/`continue`** — once question 1 is answered, implement as
-   statements or expressions accordingly (typically via a control-flow
-   exception caught by the loop, à la Lox's `return`).
+2. **Logical `and`/`or`** — small, unblocks `loops.iqx`.
+3. **`for` loops** — per the drafted grammar (minus the removed `whileStmt`);
+   needed before `break`/`continue` are meaningful.
+4. **`break`/`continue`** — per decision 1, these need to work both as
+   ordinary loop-body statements and as ternary branches. Implement via a
+   control-flow exception (à la Lox's `return`) raised from either a
+   statement position or from `visit_ternary_expr` when that branch is
+   chosen, caught by the enclosing `for`'s execution loop.
 5. **Functions** (`fun`, `Call`, `Return`, closures over `Environment`) —
    standard Lox mechanics; needed for almost everything else including the
-   pipe operator.
-6. **Pipe operator `|>`** — once functions exist and question 4 (concat/print
-   as values) is settled, desugar `a |> f` to a call.
-7. **Prefix `++`/`--` mutation** — once question 2 is answered, fix
-   `visit_unary_expr` (and `increment()` if the operand must be assignable).
-8. **Ignore operator `_`** — once question 1 is answered.
-9. **Classes** — `class`, `extends`, `init`, methods, `super` — once question
-   3 (`this`/`self`) is answered. Getters/setters explicitly stay out of
-   scope (0.2+).
-10. **Mixins/traits** — once question 5 is answered; likely the largest
-    single chunk of remaining grammar work.
+   pipe operator and for `print`/`concat` to become callable.
+6. **Promote `print`/`concat` to builtin functions** (decision 4) — register
+   them as native function values in the global environment (rather than
+   `Print`/`Concat` statement AST nodes), retire the dedicated
+   `print`/`concat` statement grammar in `parser.py`, and remove `Print`/
+   `Concat` from `tools/generate_ast.py`'s `STATEMENTS` dict once nothing
+   depends on them.
+7. **Pipe operator `|>`** — once functions and step 6 land, desugar
+   `a |> f` to a call `f(a)`.
+8. **Prefix `++`/`--` mutation** — per decision 2: assign the incremented
+   value back to the target in `visit_unary_expr`, reject non-assignable
+   operands in `increment()`, and raise on an immutable target (runtime for
+   now, see decision 2 for why compile-time is deferred).
+9. **Ignore operator `_`** — per decision 1, needs to work as a ternary
+   branch (a no-op arm).
+10. **Classes** — `class`, `extends`, `init`, methods, `super`, `self` (not
+    `this`, decision 3). Getters/setters and mixins/traits explicitly stay
+    out of scope (0.2, decision 5).
 11. **Sync `langspec/SYNTAX_GRAMMAR.md` and `langspec/README.md`** with
-    whatever actually got built (the grammar doc currently doesn't even
-    have array/vector syntax, `mut`, or the elvis form).
+    whatever actually got built. The grammar draft has already been patched
+    for the `while`/`if`/`this` removals (§1), but still needs real
+    `printStmt`→builtin-call, ternary-with-statement-branches, function, and
+    class grammar once those land.
 12. **Backfill pytest coverage** under `tests/` for scanner/parser/interpreter
     as each piece above lands, rather than after the fact.
 
-Steps 2–3 and 5 have no open design dependency and could start immediately;
-everything else is gated on the corresponding item in §1.
+Steps 2–3 have no dependency on anything else in this list and could start
+immediately.

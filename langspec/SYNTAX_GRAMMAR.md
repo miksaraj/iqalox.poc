@@ -2,6 +2,14 @@
 *WIP*
 * Missing at least array and hash map specific syntax and the new
     standard library statements
+* There is no `if`/`while` statement: the chainable ternary operator
+    (see `expression`/`ternary` below) replaces `if`/`else` entirely,
+    including for statement-like branches such as `break`/`continue`;
+    `while` was removed from the language outright (`for` is the only
+    loop construct). `printStmt` below is stale — `print`/`concat` are
+    being promoted to ordinary builtin functions rather than statement
+    keywords; this production still needs a rewrite once that lands
+    (see `docs/PLAN-0.1-POC.md`).
 ##
     program         → declaration* EOF ;
     
@@ -18,22 +26,18 @@
     
     statement       → exprStmt
                     | forStmt
-                    | ifStmt
                     | printStmt
                     | returnStmt
-                    | whileStmt
                     | block ;
                     
     exprStmt        → expression ";?" ;                    
     forStmt         → "for" "(" ( varDecl | exprStmt | ";" )
                                 expression? ";?"
                                 expression? ")" statement ;
-    ifStmt          → "if" "(" expression ")" statement ( "else" statement )? ;
     printStmt       → "print" expression ";?" ;
     returnStmt      → "return" expression? ";?" ;
     continueStmt    → "continue" ";?" ;
     breakStmt       → "break" ";?" ;
-    whileStmt       → "while" "(" expression ")" statement ; 
     block           → "{" declaration* "}" ;
     
     expression      → assignment ;
@@ -52,6 +56,6 @@
     unary           → ( "!" | "-" | "++" | "--" ) unary | call ;
     call            → primary ( "(" arguments? ")" | "." IDENTIFIER )* ;
     arguments       → expression ( "," expression )* ;
-    primary         → "true" | "false" | "nil" | "this" | "undef"
+    primary         → "true" | "false" | "nil" | "self" | "undef"
                     | NUMBER | STRING | IDENTIFIER | "(" expression ")"
                     | "super" "." IDENTIFIER ;

@@ -37,26 +37,49 @@ tree-walk interpreter. See `docs/PLAN-0.1-POC.md` for the detailed, current
 status of this milestone (what's implemented, what's open, what design
 decisions are still pending).
 
-- Array support (vectors — as literal expressions, not yet the full
-  stdlib/matrix story, see 0.2)
+New/changed vs. Lox:
+
+- Array support (vector literals — kept in 0.1-poc even though the original
+  notes marked this for `0.2-poc+`, since basic vector literals already
+  exist in the code; the full array-manipulation stdlib, list comprehensions,
+  and matrices stay in 0.2)
 - Block comments (`<# ... #>`)
 - Implicit semicolons
-- `continue` and `break` statements
-- Prefix increment/decrement operators (`++` / `--`)
+- `continue` and `break` statements — usable as ternary branches (see below)
+- Prefix increment/decrement operators (`++` / `--`) with standard
+  mutating semantics; reassigning an immutable (`mut`-less) target is an
+  error, ideally caught at compile time (see `docs/PLAN-0.1-POC.md`)
 - `extends` instead of `<`/`>` for inheritance
-- Chainable ternary operator (`? :` / elvis `?:`) in place of `if`/`else`
-- Support for standard methods (on classes — exact scope still open, see plan doc)
+- Chainable ternary operator (`? :` / elvis `?:`) **completely replaces**
+  `if`/`else` — including for statement-like branches (`continue`, `break`,
+  function calls with side effects). There is no `if` statement.
+- `while` does not exist — `for` is the only loop construct
+- `print` and `concat` are ordinary (builtin) functions, not statement
+  keywords — call them like any other function (`print(x)`,
+  `concat([a, b])`), or reference them by name as pipe/callback targets
 - No string concatenation via `+` (arrays/strings use array-manipulation
-  facilities instead)
+  facilities/`concat` instead)
 - Pipe operator (`|>`)
 - Ignore operator (`_`)
 - Nullable infix operator (`??`)
-- Mixin support (`class A extends B with C`, `A with B`)
-- Trait support (PHP-style: `trait A {...}` / `class B { use A }`) — final
-  choice between PHP-style static mixins, Scala-style dynamic traits, or a mix
-  is still open
 - Comma operator
 - Immutability by default (`mut` keyword to opt in to mutability)
+- The self-reference keyword is `self` (not `this`)
+
+Lox baseline mechanics the examples assume and that 0.1-poc therefore also
+covers (not "new" features, but not yet implemented either — see the plan doc):
+
+- `for` loops
+- Functions, calls, `return`, and closures
+- Logical `and` / `or`
+- Classes: declarations, fields, methods, constructors (`init`), single
+  inheritance via `extends`, and `super` — i.e. baseline Lox method dispatch,
+  nothing fancier (no forced getters/setters, no mixins/traits — see 0.2)
+
+Explicitly **deferred out of 0.1-poc** (see 0.2): mixin support
+(`class A extends B with C`, `A with B`) and trait support
+(`trait A {...}` / `class B { use A }`) — the PHP-vs-Scala-style
+implementation question is real but doesn't need answering yet.
 
 ### 0.1
 
@@ -68,10 +91,27 @@ Everything targeted for `0.1-poc`, actually complete and hardened, plus:
 
 ### 0.2 *(formerly `0.2-poc`)*
 
+Everything originally marked "push to `0.2-poc+`" in the source planning
+notes that didn't get pulled forward into 0.1-poc, plus mixin/trait support
+(deferred out of 0.1-poc — see above; bundled here as the natural home for
+"class system completeness" work, alongside the other items below that were
+already headed for this version):
+
 - Matrix support (alongside existing vector/array support)
 - Array-manipulation standard library, including list comprehensions
   (`[x + y | x <- xs, y <- ys, x not y]`-style) and Julia-inspired
   single/multi-dimensional array manipulation
+- Anonymous function literals (lambdas/closures) — distinct from the named
+  nested-function closures already in 0.1-poc
+- Variadic unpacking (`...` operator)
+- Getters and setters — whether these are *forced* (mandatory encapsulation,
+  no direct property access) or optional convenience methods is still an
+  open question; related to the private-by-default property question raised
+  for the old v0.3 (now 0.4, see below)
+- Mixin support (`class A extends B with C`, `A with B`) and trait support
+  (PHP-style `trait A {...}` / `class B { use A }`) — implementation
+  strategy (PHP-style static mixins, Scala-style dynamic traits, or a mix)
+  still needs to be decided when this work starts
 
 ### 0.3 *(formerly `0.2`)*
 

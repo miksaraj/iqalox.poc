@@ -35,16 +35,16 @@ fun fib(n) {
 
 var add5 = makeAdder(5)
 
-print add5(1)
-print add5(100)
+print(add5(1))
+print(add5(100))
 
-print fact(7)
-print fact
+print(fact(7))
+print(fact)
 
 var count = createCounter()
 count()
 count()
-print count
+print(count)
 
 test(count)
 

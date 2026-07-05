@@ -1,26 +1,26 @@
 # superclass A
 class A {
     show() {
-        print "A"
+        print("A")
     }
 
     test() {
-        print "Hey there, stranger!"
+        print("Hey there, stranger!")
     }
 }
 
 # subclass B of superclass A
 class B extends A {
     init() {
-        print "This is the initializer."
+        print("This is the initializer.")
     }
 
     subShow() {
-        print "B"
+        print("B")
     }
 
     test() {
-        print "About to call superclass version of test."
+        print("About to call superclass version of test.")
         super.test()
     }
 }
@@ -31,8 +31,8 @@ var x = B()
 x.show()
 x.subShow()
 
-print B
-print x
+print(B)
+print(x)
 
 x.test()
 
@@ -41,14 +41,14 @@ C().test()
 # A little bit tastier example...
 class Doughnut {
     cook() {
-        print "Fry until golden brown."
+        print("Fry until golden brown.")
     }
 }
 
 class BostonCream extends Doughnut {
     cook() {
         super.cook()
-        print "Stuff with tasty cream."
+        print("Stuff with tasty cream.")
     }
 }
 
