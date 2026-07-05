@@ -195,6 +195,7 @@ Legend: ✅ done · 🟡 partial/buggy · ⛔ not started
 | Ignore operator `_` | ✅ | Zero-field `Ignore` expr (same pattern as `Break`/`Continue`), usable anywhere an expression is; evaluates to `nil` with no side effect. |
 | Nullable infix `??` | ✅ | Own `null_coalescing()` precedence level, between `ternary` and `logic_or` (just above the conditional operator, below logical OR/AND — see §3). |
 | Comma operator | ✅ | `comma()` in parser, precedence matches the table in the root `README.md`. Also fixed: see §3's vector-literal bugs — a stray comma-suppression bug in this same function silently corrupted multi-element vector literals. |
+| Modulo `%` / power `^` | ✅ | Predates this project's Python implementation; sat at the same precedence level as `*`/`/` in `multiplication()`, but was unreachable from source text until the sixth-batch scanner fix (see §3) — never had a test or example exercising it before this pass. |
 | Immutability by default (`mut`) | ✅ | `VariableData.is_mutable`, enforced in `Environment.assign`. The `var IDENTIFIER mut? = expr` parse path had a double-`advance()` bug that made `mut` declarations unparseable in practice — fixed, see §3. Function parameters are immutable by default too (no grammar yet for a `mut` parameter) — an assumption, not a design decision, flagged in §1. |
 | `for` loops | ✅ | Full grammar (initializer/condition/increment all optional, per the drafted grammar minus the removed `whileStmt`). Loop-scoped `Environment` wraps the initializer; body executes via the normal `Block` mechanics. |
 | Logical `and`/`or` | ✅ | `Logical` expr node, short-circuit evaluation, sits between `ternary` and `equality` in precedence (`ternary → logic_or → logic_and → equality`). |
@@ -428,6 +429,21 @@ the real CLI for the first time — meaning **every example script in
 `langspec/examples/` now runs end-to-end successfully** (verified with
 `python3 iqalox.py <file>`, exit code 0 for all five).
 
+### Fixed during the final documentation/coverage pass (sixth batch)
+
+1. **`%` (modulo) and `^` (power) could never actually be scanned**, despite
+   full parser (`multiplication()`) and interpreter (`visit_binary_expr`)
+   support existing since before this project's Python implementation began
+   (`bd33b39`, the original scaffolding commit). `token.py`'s
+   `SINGLE_CHARACTER_TOKENS` never listed `'%'`/`'^'`, so the scanner's
+   dispatch treated both as "unexpected character" — every `a % b`/`a ^ b`
+   in the entire history of this codebase would have failed to parse. Found
+   while writing `tests/test_operators.py` to close a coverage gap (no
+   example or test exercised either operator), not by design review — this
+   is a scanner bug, not a design question, since the operators were already
+   fully implemented one layer up. Fixed by adding both to
+   `SINGLE_CHARACTER_TOKENS`.
+
 ### Still open
 
 1. `error.py`'s `IqaloxRuntimeError.__str__`/`__repr__` just call `super()`,
@@ -532,8 +548,12 @@ ignore operator (bare, as a ternary branch, no side effect), and classes
 and free reassignment, method dispatch and overriding, inheritance and
 `super` — including that `super` resolves lexically rather than by the
 calling instance's actual class — arity derived from `init`, and the
-undefined-property/non-instance/non-class-superclass error cases). Run
-with `pytest` from the repo root (`pytest.ini` sets `pythonpath = src`).
+undefined-property/non-instance/non-class-superclass error cases), and
+arithmetic/comparison/logical operators including `%`, `^`, `??`, elvis
+`?:`, `!`, division-by-zero, and non-number-operand errors
+(`tests/test_operators.py`, added during the final documentation/coverage
+pass — see §3's sixth batch for the scanner bug it turned up). Run with
+`pytest` from the repo root (`pytest.ini` sets `pythonpath = src`).
 
 Deliberately **not** covered by this suite: anything requiring the actual
 `iqalox.py` CLI process (module-duplication bug in §3, exit codes) — pytest

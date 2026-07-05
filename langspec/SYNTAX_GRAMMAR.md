@@ -32,13 +32,18 @@
     its own parens (`(B "Bea").greet()`), to chain immediately. See
     `docs/PLAN-0.1-POC.md` §1/§2 for the full explanation; not fixed, since
     a real fix needs a grammar decision, not just a parser patch.
-* The `assignment`/`ternary`/logical/`null_coalescing` chain below is still
-    stale relative to `src/parser.py` in its details (predates most of the
-    features documented in `docs/PLAN-0.1-POC.md`) — the shape of `call`,
-    `pipe`, and the declaration/statement productions are current as of
-    this writing; the rest of the expression-precedence chain still needs
-    a real pass (in particular: `null_coalescing` isn't shown at all yet,
-    and `ternary`'s own definition doesn't reflect the elvis `?:` form).
+* The full expression-precedence chain below (`assignment` down to
+    `primary`) is current as of this writing, including `comma`,
+    `null_coalescing`, and the elvis `?:` form of `ternary`. See the root
+    `README.md`'s precedence table for the same chain presented
+    tightest-to-loosest instead of loosest-to-tightest.
+* `%` (modulo) and `^` (power) sit at the same precedence level as `/`/`*`
+    (both left-associative), inside `multiplication` below.
+* No `undef` literal exists in 0.1-poc (an earlier draft of `primary` listed
+    one). "Accessing an uninitialized variable is a runtime error (implicit
+    `undef`, not implicit `nil`)" is `ROADMAP.md`'s `0.1` scope, one step
+    past this PoC — not implemented here, so left out of the grammar until
+    it lands.
 ##
     program         → declaration* EOF ;
     
@@ -66,20 +71,24 @@
     block           → "{" declaration* "}" ;
     
     expression      → assignment ;
-    
-    assignment      → ( call "." )? IDENTIFIER "=" assignment ( ternary )?
+
+    assignment      → ( call "." )? IDENTIFIER "=" assignment
                     | pipe ;
     pipe            → comma ( "|>" IDENTIFIER )* ;
-                    
-    ternary         → expression "?" expression? ":" expression ;
+    comma           → ternary ( "," ternary )* ;
+
+    ternary         → null_coalescing ( "?" expression ":" expression
+                                       | "?:" expression )? ;
+    null_coalescing → logic_or ( "??" logic_or )* ;
     logic_or        → logic_and ( "or" logic_and )* ;
     logic_and       → equality ( "and" equality )* ;
     equality        → comparison ( ( "!=" | "==" ) comparison )* ;
     comparison      → addition ( ( ">" | ">=" | "<" | "<=" ) addition )* ;
     addition        → multiplication ( ( "-" | "+" ) multiplication )* ;
-    multiplication  → unary ( ( "/" | "*" ) unary )* ;
-    
-    unary           → ( "!" | "-" | "++" | "--" ) unary | call ;
+    multiplication  → increment ( ( "/" | "*" | "%" | "^" ) increment )* ;
+    increment       → ( "++" | "--" ) unary | unary ;
+
+    unary           → ( "!" | "-" ) unary | call ;
     call            → call_head ( "." IDENTIFIER arguments? )* ;
     call_head       → IDENTIFIER arguments?
                     | primary ;
@@ -88,7 +97,7 @@
     argument        → "(" expression ")"
                     | primary
                     | call ;
-    primary         → "true" | "false" | "nil" | "self" | "undef"
+    primary         → "true" | "false" | "nil" | "self"
                     | "break" | "continue" | "_"
                     | NUMBER | STRING | IDENTIFIER | "(" expression ")"
                     | "[" ( expression ( "," expression )* )? "]"

@@ -97,7 +97,7 @@ _keywords: Tuple = (
 
 KEYWORDS: Dict[str, TokenType] = {key: TokenType(key) for key in _keywords}
 
-SINGLE_CHARACTER_TOKENS: Tuple = ('(', ')', '{', '}', '[', ']', ',', ';', '/', '\\', '*', '_')
+SINGLE_CHARACTER_TOKENS: Tuple = ('(', ')', '{', '}', '[', ']', ',', ';', '/', '\\', '*', '_', '%', '^')
 
 ONE_OR_MORE_CHARACTER_TOKENS: Tuple = (
     '!', '!=', '=', '==', '>', '>=', '<', '<=', '-', '--', '+',
