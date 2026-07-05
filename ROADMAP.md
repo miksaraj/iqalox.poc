@@ -73,6 +73,8 @@ New/changed vs. Lox:
 - Ignore operator (`_`)
 - Nullable infix operator (`??`)
 - Comma operator
+- Modulo (`%`) and power (`^`) arithmetic operators, at the same precedence
+  level as `*`/`/`
 - Immutability by default (`mut` keyword to opt in to mutability)
 - The self-reference keyword is `self` (not `this`)
 
