@@ -151,8 +151,8 @@ Legend: ✅ done · 🟡 partial/buggy · ⛔ not started
 | Support for standard methods | ⛔ | Baseline Lox method dispatch on classes (decision 6) — depends on classes existing at all. |
 | No `+` string concat | 🟡 | Unchanged from before — `+` on two strings raises a runtime error today only as a side effect of numeric type-checking, not an intentional string-specific rule. |
 | `print` / `concat` as builtin functions | ✅ | Registered as `NativeFunction` instances (arity 1 each) in the global environment at `Interpreter.__init__`; `print`/`concat` are no longer keywords at all (removed from `_keywords`, scan as plain `IDENTIFIER`) — ordinary, shadowable bindings, called through the exact same `Call` grammar as user-defined functions. |
-| Pipe operator `\|>` | ⛔ | Still unparsed — see §3's new finding: the scanner can't even tokenize `\|>` today, a separate bug from "not parsed," to fix when this lands. |
-| Ignore operator `_` | ⛔ | Token exists (`UNDERSCORE`); no parsing/semantics. |
+| Pipe operator `\|>` | ✅ | Desugars directly to a `Call` at parse time (`a \|> f` → `f(a)`, chains left-associatively) — no separate AST node or interpreter support needed. Scanner fix from §3 was a prerequisite (`\|` alone wasn't tokenizable). |
+| Ignore operator `_` | ✅ | Zero-field `Ignore` expr (same pattern as `Break`/`Continue`), usable anywhere an expression is; evaluates to `nil` with no side effect. |
 | Nullable infix `??` | ✅ | Own `null_coalescing()` precedence level, between `ternary` and `logic_or` (just above the conditional operator, below logical OR/AND — see §3). |
 | Comma operator | ✅ | `comma()` in parser, precedence matches the table in the root `README.md`. Also fixed: see §3's vector-literal bugs — a stray comma-suppression bug in this same function silently corrupted multi-element vector literals. |
 | Immutability by default (`mut`) | ✅ | `VariableData.is_mutable`, enforced in `Environment.assign`. The `var IDENTIFIER mut? = expr` parse path had a double-`advance()` bug that made `mut` declarations unparseable in practice — fixed, see §3. Function parameters are immutable by default too (no grammar yet for a `mut` parameter) — an assumption, not a design decision, flagged in §1. |
@@ -320,6 +320,48 @@ functions themselves.
    "Unexpected character" every time. Whoever picks up step 7 will need this
    fixed first, or `|>` can never be tokenized.
 
+### Fixed as part of implementing steps 7 and 9 (fourth batch, pipe/ignore)
+
+1. **The previous batch's bug #4 (pipe token unscannable), actually fixed
+   this time.** Added `'|'` to
+   `ONE_OR_MORE_CHARACTER_TOKENS` so the scanner's dispatch recognizes it as
+   the start of a possible `|>`. This introduced a new failure mode worth
+   guarding against: `'|'` alone (not followed by `>`) doesn't extend into
+   anything and isn't itself a valid `TokenType` value, so the existing
+   `self.add_token(TokenType(token))` call would raise an unguarded
+   `ValueError` instead of a clean scan error — every other multi-char token
+   in this table has its first character *also* independently valid, so this
+   case never came up before. Wrapped in `try/except ValueError`, reporting
+   "Unexpected character" the same way the rest of the scanner does.
+2. **`loops.iqx`'s `print i * i` was a latent regression from the previous
+   (functions/print-concat) batch**, not something new: `i * i` is a binary
+   expression, not a primary, so once `print` became an ordinary function
+   subject to the "compound arguments need grouping" rule, this line should
+   have been updated to `print (i * i)` at the same time as `fact (n - 1)`
+   and `fib (n - 2)` were — it was simply missed because it doesn't look
+   like a call at a glance. Caught by actually running `loops.iqx` after
+   implementing pipe (which was the file's last remaining blocker) and
+   getting "Operands must be numbers" instead of squares. Fixed.
+
+With this batch, `functions.iqx`, `control_flow.iqx`, and `loops.iqx` all
+run to completion via the real CLI for the first time (verified with
+`python3 iqalox.py <file>`, exit code 0, sensible output — including the
+pre-existing, not-mine-to-fix quirks already in those examples: `fib`
+multiplies instead of adding its recursive calls, and `adder(i)` ignores
+its own parameter and always returns `n + 1`). `classes.iqx`/`inheritance.iqx`
+still correctly fail cleanly (exit 65) pending classes (step 10).
+
+### Noticed, not fixed (out of scope for this batch)
+
+**Identifiers starting with `_` don't scan correctly.** `_` is listed in
+`SINGLE_CHARACTER_TOKENS`, checked *before* the alpha/identifier dispatch in
+`scan_token()`, so a name like `_foo` tokenizes as a bare `UNDERSCORE`
+followed by a separate `foo` identifier, not one `_foo` identifier. This
+predates the ignore operator and is unrelated to it (this batch only needed
+a *bare*, standalone `_` to scan correctly, which it already did) — no
+example or test needs a leading-underscore identifier today, so this is
+noted for whenever it actually blocks something, not fixed speculatively.
+
 ### Still open
 
 1. `error.py`'s `IqaloxRuntimeError.__str__`/`__repr__` just call `super()`,
@@ -332,17 +374,18 @@ With §1 resolved, all of the following can proceed without further design
 sign-off — flag anything that turns up a *new* design question rather than
 deciding it inline (per `CLAUDE.md`).
 
-**Steps 1-4, 8, 5, and 6 are done** (branches `claude/0.1-poc-control-flow`
-and `claude/0.1-poc-functions`, 2026-07-05). Step 8 (prefix `++`/`--`
-mutation) was pulled forward from its original position because `for` loops
-are untestable — infinite-looping — without a working increment, and every
-existing loop example relies on `++i`/`++j`/`++k`. See §2/§3 for what
-actually landed and what bugs surfaced along the way, and §5 for the test
-suite. `functions.iqx`/`control_flow.iqx`/`loops.iqx` still won't fully run
-end-to-end — they depend on the pipe operator (step 7) and/or classes
-(step 10), which remain undone; `classes.iqx`/`inheritance.iqx` need classes
-outright. Verified via the actual CLI (`iqalox.py`), not just pytest, for
-each of these — see §3 bug #3 (module-duplication) for why that mattered.
+**All steps except 10, 11, and 12 (classes, doc sync, further test backfill)
+are done** (branches `claude/0.1-poc-control-flow`,
+`claude/0.1-poc-functions`, `claude/0.1-poc-pipe-ignore`, 2026-07-05). Step 8
+(prefix `++`/`--` mutation) was pulled forward from its original position
+because `for` loops are untestable — infinite-looping — without a working
+increment, and every existing loop example relies on `++i`/`++j`/`++k`. See
+§2/§3 for what actually landed and what bugs surfaced along the way, and §5
+for the test suite. As of the pipe/ignore batch, `functions.iqx`,
+`control_flow.iqx`, and `loops.iqx` all run to completion end-to-end for the
+first time — only `classes.iqx`/`inheritance.iqx` still need classes
+(step 10). Verified every batch via the actual CLI (`iqalox.py`), not just
+pytest — see §3 bug #3 (module-duplication) for why that mattered.
 
 1. ~~**Fix known bugs**~~ — done, see §3.
 2. ~~**Logical `and`/`or`**~~ — done.
@@ -370,25 +413,29 @@ each of these — see §3 bug #3 (module-duplication) for why that mattered.
    from `token.py`'s `_keywords`, so they scan as plain `IDENTIFIER` and are
    ordinary, shadowable global bindings) — registered as `NativeFunction`
    instances in `Interpreter.__init__`.
-7. **Pipe operator `|>`** — functions and step 6 are done, so this is
-   unblocked; desugar `a |> f` to a call `f(a)`. First needs the scanner fix
-   from §3 bug #4 (`|` isn't scannable at all yet) or it can never tokenize.
+7. ~~**Pipe operator `|>`**~~ — done. Desugars straight to a `Call` at parse
+   time in the new `Parser.pipe()` (sits between `assignment` and `comma`
+   in precedence — looser than everything except assignment) — no separate
+   AST node or interpreter support needed. Required the scanner fix from §3
+   bug #4 first (`|` wasn't scannable at all), which surfaced a second,
+   related scanner bug (unguarded `ValueError` on a bare `|`) — see §3.
 8. ~~**Prefix `++`/`--` mutation**~~ — done (pulled forward, see above).
-9. **Ignore operator `_`** — per decision 1, needs to work as a ternary
-   branch (a no-op arm).
+9. ~~**Ignore operator `_`**~~ — done. Zero-field `Ignore` expr, same
+   pattern as `Break`/`Continue`; evaluates to `nil`.
 10. **Classes** — `class`, `extends`, `init`, methods, `super`, `self` (not
     `this`, decision 3). Getters/setters and mixins/traits explicitly stay
     out of scope (0.2, decision 5). Also where `.` member-access chaining
     needs adding to `Parser.call()` (`call → IDENTIFIER arguments? ( "."
     IDENTIFIER arguments? )*` — the second half doesn't exist yet, see §2).
 11. **Sync `langspec/SYNTAX_GRAMMAR.md` and `langspec/README.md`** with
-    whatever actually got built. The grammar draft has already been patched
-    for the `while`/`if`/`this` removals (§1), but still needs the real
-    paren-free `call`/`arguments`/`argument` grammar (drafted in decision 4,
-    now actually implemented — the draft's old parenthesized `call` rule is
-    stale), `funDecl`/`function` (already drafted, still accurate), and
-    ternary-with-expression-branches (not "statement" branches — see decision
-    1's engineering note) once class grammar lands too.
+    whatever actually got built. Patched so far: `while`/`if`/`this`
+    removals, the real paren-free `call`/`arguments`/`argument` grammar,
+    `pipe`, and `_` in `primary`. Still stale: the
+    `assignment`/`ternary`/logical/`null_coalescing` precedence chain's
+    details (`null_coalescing` isn't shown at all; `ternary` doesn't reflect
+    the elvis `?:` form) — none of that blocks anything, it's just
+    documentation debt to pay down, ideally alongside class grammar (which
+    will also need `.` added to `call`).
 12. ~~**Backfill pytest coverage**~~ — extended again this batch (functions,
     calls, closures, recursion, vector-literal regressions), see §5. Keep
     extending as steps 7+ land rather than after the fact.
@@ -399,18 +446,20 @@ immediately.
 ## 5. Test suite
 
 `tests/` (pytest, per `CLAUDE.md`) covers the scanner/parser/interpreter
-behavior from steps 1-4, 8, 5, and 6: implicit semicolons and empty-statement
+behavior from every batch so far: implicit semicolons and empty-statement
 tolerance, single-character identifier/number scanning, line and block
 comments (including the terminator regression), `true`/`false`/`nil` literal
-values, logical `and`/`or` short-circuiting and precedence, `??`'s new
+values, logical `and`/`or` short-circuiting and precedence, `??`'s
 precedence, `for` loops with all clauses present/omitted, `break`/`continue`
 as bare statements and as ternary branches, prefix `++`/`--` mutation plus
 the immutable-target runtime error, the full paren-free call grammar (zero/
 one/multi-arg, grouped compound arguments, nested calls, bare-reference-vs-
 call disambiguation), function declarations/closures/recursion/return,
-native `print`/`concat`, arity and not-callable errors, and vector-literal
-regressions (empty/single/multi-element). Run with `pytest` from the repo
-root (`pytest.ini` sets `pythonpath = src`).
+native `print`/`concat`, arity and not-callable errors, vector-literal
+regressions (empty/single/multi-element), the pipe operator (single call,
+chaining, non-identifier-target rejection, full-expression left side), and
+the ignore operator (bare, as a ternary branch, no side effect). Run with
+`pytest` from the repo root (`pytest.ini` sets `pythonpath = src`).
 
 Deliberately **not** covered by this suite: anything requiring the actual
 `iqalox.py` CLI process (module-duplication bug in §3, exit codes) — pytest

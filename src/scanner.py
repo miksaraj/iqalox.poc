@@ -115,7 +115,13 @@ class Scanner:
                     self.advance()
                     self.advance()
             else:
-                self.add_token(TokenType(token))
+                try:
+                    self.add_token(TokenType(token))
+                except ValueError:
+                    # `token` didn't extend into a longer valid token (e.g. a
+                    # bare '|' not followed by '>') and isn't valid on its own.
+                    import iqalox
+                    iqalox.Iqalox.error(Token(TokenType.NULL_CHAR, c, None, self.line), f"Unexpected character: {c}")
         elif c in WHITESPACE:
             return
         elif c == TokenType.NEWLINE:

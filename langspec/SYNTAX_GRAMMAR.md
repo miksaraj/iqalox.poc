@@ -19,11 +19,13 @@
     arguments?`) — no `.` member-access chaining yet (`instance.method
     args`); that needs classes (not yet implemented) to have a receiver
     to chain off of.
-* The `assignment`/`comma`/`ternary`/logical/`null_coalescing` chain below
-    is still stale relative to `src/parser.py` (predates most of the
-    features documented in `docs/PLAN-0.1-POC.md`) — the shape of `call`
-    and the declaration/statement productions are current as of this
-    writing; the expression-precedence chain still needs a real pass.
+* The `assignment`/`ternary`/logical/`null_coalescing` chain below is still
+    stale relative to `src/parser.py` in its details (predates most of the
+    features documented in `docs/PLAN-0.1-POC.md`) — the shape of `call`,
+    `pipe`, and the declaration/statement productions are current as of
+    this writing; the rest of the expression-precedence chain still needs
+    a real pass (in particular: `null_coalescing` isn't shown at all yet,
+    and `ternary`'s own definition doesn't reflect the elvis `?:` form).
 ##
     program         → declaration* EOF ;
     
@@ -53,7 +55,8 @@
     expression      → assignment ;
     
     assignment      → ( call "." )? IDENTIFIER "=" assignment ( ternary )?
-                    | logic_or ;
+                    | pipe ;
+    pipe            → comma ( "|>" IDENTIFIER )* ;
                     
     ternary         → expression "?" expression? ":" expression ;
     logic_or        → logic_and ( "or" logic_and )* ;
@@ -71,7 +74,7 @@
                     | primary
                     | call ;
     primary         → "true" | "false" | "nil" | "self" | "undef"
-                    | "break" | "continue"
+                    | "break" | "continue" | "_"
                     | NUMBER | STRING | IDENTIFIER | "(" expression ")"
                     | "[" ( expression ( "," expression )* )? "]"
                     | "super" "." IDENTIFIER ;

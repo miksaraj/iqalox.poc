@@ -33,6 +33,7 @@ EXPRESSIONS: AST_DICT = {
     'Variable': ('name: Token',),
     'Break': (),
     'Continue': (),
+    'Ignore': (),
     'Call': ('callee: Expr', 'arguments: List[Expr]'),
 }
 
