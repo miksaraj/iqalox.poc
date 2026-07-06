@@ -262,9 +262,11 @@ end-to-end. CI (`.github/workflows/ci.yml`) runs both toolchains' own test
 suites, the round-trip script, and (newly, since this was the project's
 first workflow) `poc/`'s existing pytest suite plus every
 `langspec/examples/*.iqx` script — all `uses:` steps pinned to a full
-commit SHA per `CLAUDE.md`. Environment note: this environment needed
-`dotnet-sdk-8.0` and `catch2` installed via `apt`; CMake/GCC/Clang were
-already present (see §8's original findings).
+commit SHA per `CLAUDE.md`. Targets **.NET 10 / F# 10** (the current LTS
+as of this writing — not .NET 8, which this phase briefly and mistakenly
+targeted before being corrected). Environment note: this environment
+needed `dotnet-sdk-10.0` and `catch2` installed via `apt`; CMake/GCC/Clang
+were already present (see §8's original findings).
 
 **Phase 2 — Scanner (F#).** Port `0.1-poc`'s scanner design — its two
 post-release bugfixes (accurate line/column tracking; coalescing runs of

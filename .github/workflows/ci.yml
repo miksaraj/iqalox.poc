@@ -27,7 +27,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: "10.0.x"
       - name: Build
         run: dotnet build compiler/Iqalox.sln
       - name: Test
@@ -41,7 +41,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: "10.0.x"
       - name: Install Catch2
         run: sudo apt-get update && sudo apt-get install -y catch2
       - name: Run round-trip smoke test
