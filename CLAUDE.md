@@ -40,9 +40,11 @@ standard library API shape, and breaking changes between versions.
 ## Implementation language
 
 Only the **0.1-poc** (and any other explicitly-labeled `-poc` milestone) is
-implemented in Python. The implementation language for the real, non-PoC
-releases has not been decided — don't assume Python carries forward, and don't
-make that decision unprompted.
+implemented in Python. The real, non-PoC implementation starting at `0.1` is
+a **compiler frontend in F#** plus a **bytecode VM backend in modern C++
+(C++23)** — see `docs/PLAN-0.1.md` for the full plan. Don't assume this
+extends to hypothetical future versions beyond `0.1` unprompted; that
+hasn't been decided.
 
 ## Architecture (current PoC)
 
