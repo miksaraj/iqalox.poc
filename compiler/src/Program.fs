@@ -42,7 +42,7 @@ let main argv =
 
                     if not codegenErrors.IsEmpty then
                         for e in codegenErrors do
-                            eprintfn "Error: %s" e.Message
+                            eprintfn "[line %d] Error: %s" e.Line e.Message
                         65
                     else
                         write chunk outputPath

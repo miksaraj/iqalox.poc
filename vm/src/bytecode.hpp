@@ -11,13 +11,15 @@ class Vm;
 
 namespace iqalox::bytecode {
 
-// Bytecode format v1 -- see `compiler/src/Bytecode.fs`'s module doc
+// Bytecode format v2 -- see `compiler/src/Bytecode.fs`'s module doc
 // comment for the authoritative on-disk layout (this mirrors it exactly;
-// `compiler/` writes, `vm/` reads). Supersedes format v0, Phase 1's
-// minimal round-trip proof (a single opcode: push a string constant,
-// print it, halt) now that `compiler/`'s codegen (Phase 5) actually
-// produces real programs.
-[[maybe_unused]] constexpr uint8_t kFormatVersion = 1;
+// `compiler/` writes, `vm/` reads). v2 adds a per-instruction-byte source
+// line table (see `Chunk::lines`) so a runtime fault can report a real
+// `[line N]`, closing a real diagnostics gap v1 (Phases 1-9) left open.
+// Supersedes format v0, Phase 1's minimal round-trip proof (a single
+// opcode: push a string constant, print it, halt) now that `compiler/`'s
+// codegen (Phase 5) actually produces real programs.
+[[maybe_unused]] constexpr uint8_t kFormatVersion = 2;
 
 // One-to-one with `compiler/src/Bytecode.fs`'s `opcodeOf` -- same names,
 // same byte values.

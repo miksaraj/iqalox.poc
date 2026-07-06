@@ -69,7 +69,21 @@ void Vm::writeUpvalue(ObjUpvalue* upvalue, const Value& value) {
     }
 }
 
-void Vm::runtimeError(const std::string& message) { throw RuntimeError(message); }
+void Vm::runtimeError(const std::string& message) {
+    // `frames` is only ever empty here for the top-level script's own
+    // `call()` inside `interpret()`, before `run()`'s loop -- and that
+    // call's arity always matches (0 == 0), so it can never actually
+    // throw. Guarded anyway rather than assumed.
+    if (frames.empty()) {
+        throw RuntimeError(message);
+    }
+    const CallFrame& frame = frames.back();
+    const auto& lines = frame.closure->function->chunk.lines;
+    if (frame.currentInstructionIp < lines.size()) {
+        throw RuntimeError(message + "\n[line " + std::to_string(lines[frame.currentInstructionIp]) + "]");
+    }
+    throw RuntimeError(message);
+}
 
 void Vm::checkNotUndef(const Value& value, const std::string& globalName) {
     if (!isUndef(value)) return;
@@ -261,6 +275,13 @@ void Vm::run() {
         if (frame.ip >= frame.closure->function->chunk.code.size()) {
             runtimeError("Malformed chunk: ran off the end without a RETURN.");
         }
+        // Captured before reading the opcode/operand bytes below, so
+        // `runtimeError` can still find this instruction's own line after
+        // `ip` has advanced past it (or after a callee this instruction
+        // invoked has pushed further frames of its own -- `frames.back()`
+        // during a callee's own arity/stack-overflow check is still this
+        // frame, since that check runs before the new one is pushed).
+        frame.currentInstructionIp = frame.ip;
         auto op = static_cast<OpCode>(readByte(frame));
 
         switch (op) {

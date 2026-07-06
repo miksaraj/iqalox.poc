@@ -574,25 +574,29 @@ recover from either kind:
   malformed ternary), resolve errors (e.g. reassigning an immutable
   variable, using `super` outside a subclass), and codegen errors (e.g.
   `break` outside a loop). `iqaloxc` reports each as `[line N] Error:
-  message` to stderr and exits with status `65` — codegen errors currently
-  print without a line number at all (see [§13](#13-known-limitations)).
-  Compilation never reaches the VM at all if any stage reports an error.
+  message` to stderr and exits with status `65`. Compilation never
+  reaches the VM at all if any stage reports an error.
 - **Runtime errors** — e.g. assigning to an immutable variable was already
   caught above, but wrong arity, dividing by zero, a non-number operand to
   an arithmetic/comparison operator, an undefined variable/property,
   reading a `var mut` before its first assignment, extending a non-class,
-  calling a non-callable value. `iqaloxvm` reports the message to stderr
-  and exits with status `70`, after whatever output was already produced.
+  calling a non-callable value. `iqaloxvm` reports the message plus
+  `[line N]` to stderr and exits with status `70`, after whatever output
+  was already produced. The line comes from a per-instruction-byte line
+  table the bytecode format carries alongside the instructions themselves
+  (format v2, `compiler/src/Bytecode.fs`) — every emitted instruction is
+  stamped with whichever source token `Codegen.fs` most recently had in
+  view, the same way `clox` stamps every byte it emits with the parser's
+  current line.
 
-**New for `0.1` (a real gap, not a design choice)**: unlike `0.1-poc`,
-which prints `[line N] Error at 'x': message` plus a caret-underlined
-source excerpt for *both* compile-time and runtime errors, `0.1`'s
-compile-time errors print only `[line N] Error: message` (no offending
-token text, no source excerpt), and `0.1`'s runtime errors currently print
-**no line number at all** — the VM doesn't yet track which source line a
-given bytecode instruction came from. See
-[§13](#13-known-limitations) for the full accounting; this is flagged as a
-known regression in diagnostic quality, not a silent one.
+**Remaining, smaller gap versus `0.1-poc`**: `0.1-poc` additionally shows
+*which token* triggered the error (`Error at 'x': ...`) plus a caret-
+underlined source excerpt, for both compile-time and runtime errors. `0.1`
+has real line numbers for both now, but not yet the token text or source
+excerpt — the VM in particular has no access to the original source text
+at all (it only ever receives a compiled `.iqbc` file), so reproducing
+`0.1-poc`'s excerpt there would need embedding source text in the bytecode
+format, not just a line table. See [§13](#13-known-limitations) item 7.
 
 There is no `try`/`catch`/`throw` construct in the language itself.
 
@@ -625,19 +629,21 @@ each was arrived at.
    dispatch.
 6. **No concurrency, no exception handling, no reflection/metaprogramming**
    exist at the language level (see [§1](#1-introduction-and-classification)).
-7. **Diagnostic quality regressed relative to `0.1-poc` for this release.**
+7. **No token text or source excerpt on errors, unlike `0.1-poc`.**
    `0.1-poc` reports both compile-time and runtime errors as `[line N]
    Error at 'x': message` plus a caret-underlined single-line source
-   excerpt. `0.1` currently reports compile-time errors as a bare `[line N]
-   Error: message` (scan/parse/resolve stages only — codegen errors have
-   no line number at all), and runtime errors with **no line number
-   whatsoever**, since the VM doesn't yet associate bytecode instructions
-   with their originating source line. This is a real, confirmed
-   regression surfaced while writing this document (not caught by the
-   Phase 9 conformance suite, which only diffs successful-run stdout, not
-   error-path stderr/exit codes) — worth a follow-up phase to add line
-   tracking through `Codegen.fs`/`Bytecode.fs`/the VM before treating
-   `0.1`'s error UX as done.
+   excerpt. `0.1` reports a real `[line N]` for every error kind
+   (including runtime errors, via a per-instruction-byte line table in the
+   bytecode format itself — format v2, `compiler/src/Bytecode.fs`), but
+   not yet the offending token's text or a source excerpt. This was
+   originally a bigger, confirmed regression (no line number *at all* on
+   runtime errors or codegen errors) found while writing this document,
+   not caught by the Phase 9 conformance suite (which only diffs
+   successful-run stdout, not error-path stderr/exit codes) — the line-
+   number part is now fixed; the excerpt/token-text part remains open,
+   and for the VM specifically would need embedding source text in the
+   bytecode format (it only ever receives a compiled `.iqbc` file, never
+   the original source), not just a line table.
 8. **Leading-underscore identifiers scan correctly here but not in
    `0.1-poc`.** Fixed in `compiler/src/Scanner.fs` (`docs/PLAN-0.1.md`
    Phase 2) but not carried back into `poc/`, since decoupling

@@ -405,8 +405,8 @@ type private ParserState(tokens: Token[]) =
         if matchAny [ False ] then Literal(BoolValue false)
         elif matchAny [ True ] then Literal(BoolValue true)
         elif matchAny [ Nil ] then Literal NilValue
-        elif matchAny [ Break ] then BreakExpr
-        elif matchAny [ Continue ] then ContinueExpr
+        elif matchAny [ Break ] then BreakExpr(previous ())
+        elif matchAny [ Continue ] then ContinueExpr(previous ())
         elif matchAny [ Underscore ] then Ignore
         elif matchAny [ Self ] then SelfExpr(previous ())
         elif matchAny [ Super ] then

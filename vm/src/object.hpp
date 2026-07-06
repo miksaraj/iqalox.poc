@@ -66,6 +66,13 @@ struct UpvalueDescriptor {
 struct Chunk {
     std::vector<uint8_t> code;
     std::vector<Value> constants;
+    // `lines[i]` is the source line `code[i]` came from -- one entry per
+    // *byte*, not per instruction (redundant, but lets a runtime fault
+    // look up its line with a direct `lines[ip]`, no opcode-width
+    // decoding needed at the point of the fault). See
+    // `compiler/src/Bytecode.fs`'s doc comment for the on-disk layout this
+    // mirrors, and `Vm::runtimeError` for the lookup itself.
+    std::vector<uint16_t> lines;
 };
 
 struct ObjFunction : Obj {

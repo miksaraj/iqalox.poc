@@ -165,6 +165,33 @@ TEST_CASE("division by zero is a runtime error", "[vm]") {
     REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
 }
 
+TEST_CASE("a runtime error reports the source line the faulting instruction came from", "[vm]") {
+    // Regression test for the diagnostics gap found while writing
+    // docs/LANGUAGE.md's Phase 10 entry: runtime errors used to carry no
+    // line number at all. `Chunk::lines` is one u16 per *byte* of `code`
+    // (docs/PLAN-0.1.md's Phase 10 entry) -- hand-populated here since
+    // ChunkBuilder, unlike the real compiler, has no source lines of its
+    // own to derive them from.
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t zero = b.addNumberConstant(0);
+    b.emitU16(OpCode::Constant, one);  // bytes 0-2
+    b.emitU16(OpCode::Constant, zero);  // bytes 3-5
+    b.emit(OpCode::Divide);  // byte 6
+
+    auto* fn = b.build();
+    fn->chunk.lines.assign(fn->chunk.code.size(), 1);
+    fn->chunk.lines[6] = 42;  // Divide's own opcode byte
+
+    try {
+        vm.interpret(fn);
+        FAIL("expected a RuntimeError");
+    } catch (const RuntimeError& error) {
+        REQUIRE(std::string(error.what()).find("[line 42]") != std::string::npos);
+    }
+}
+
 TEST_CASE("adding a non-number is a runtime error", "[vm]") {
     Vm vm;
     ChunkBuilder b(vm);

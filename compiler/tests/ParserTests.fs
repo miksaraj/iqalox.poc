@@ -75,16 +75,25 @@ let ``logical sits between ternary and equality`` () =
 
 [<Fact>]
 let ``break and continue are expressions`` () =
-    Assert.Equal(BreakExpr, singleExpr "break")
-    Assert.Equal(ContinueExpr, singleExpr "continue")
+    match singleExpr "break" with
+    | BreakExpr _ -> ()
+    | e -> failwith $"expected BreakExpr, got %A{e}"
+    match singleExpr "continue" with
+    | ContinueExpr _ -> ()
+    | e -> failwith $"expected ContinueExpr, got %A{e}"
 
 [<Fact>]
 let ``break and continue are usable as ternary branches`` () =
     match singleExpr "a ? continue : b ? break : c" with
     | Ternary(_, _, middle, _, right) ->
-        Assert.Equal(ContinueExpr, middle)
+        match middle with
+        | ContinueExpr _ -> ()
+        | e -> failwith $"expected ContinueExpr, got %A{e}"
         match right with
-        | Ternary(_, _, innerMiddle, _, _) -> Assert.Equal(BreakExpr, innerMiddle)
+        | Ternary(_, _, innerMiddle, _, _) ->
+            match innerMiddle with
+            | BreakExpr _ -> ()
+            | e -> failwith $"expected BreakExpr, got %A{e}"
         | e -> failwith $"expected Ternary, got %A{e}"
     | e -> failwith $"expected Ternary, got %A{e}"
 

@@ -52,8 +52,8 @@ type BoundExpr =
     | BTernary of left: BoundExpr * leftOperator: Token * middle: BoundExpr * rightOperator: Token * right: BoundExpr
     | BVector of values: BoundExpr list
     | BVariable of binding: VariableBinding * name: Token
-    | BBreak
-    | BContinue
+    | BBreak of keyword: Token
+    | BContinue of keyword: Token
     | BIgnore
     | BCall of callee: BoundExpr * arguments: BoundExpr list
     | BGet of obj: BoundExpr * name: Token

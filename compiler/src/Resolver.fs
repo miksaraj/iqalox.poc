@@ -256,8 +256,8 @@ type private Resolver(globals: Dictionary<string, bool>) =
         | Variable name ->
             let binding, _ = resolveReference name.Lexeme
             BVariable(binding, name)
-        | BreakExpr -> BBreak
-        | ContinueExpr -> BContinue
+        | BreakExpr keyword -> BBreak keyword
+        | ContinueExpr keyword -> BContinue keyword
         | Ignore -> BIgnore
         | Call(callee, arguments) -> BCall(this.ResolveExpr callee, arguments |> List.map this.ResolveExpr)
         | Get(obj, name) -> BGet(this.ResolveExpr obj, name)
