@@ -810,14 +810,28 @@ instances/bound methods. `test_vm.cpp`'s hand-built-`Chunk` `ChunkBuilder`
 helper moved into a shared `chunk_builder.hpp` so `test_classes.cpp`
 could reuse it rather than duplicating it.
 
-**Phase 9 — Conformance testing against `langspec/examples/`.** Since
-those `.iqx` files are language-level, not `0.1-poc`-implementation-
+~~**Phase 9 — Conformance testing against `langspec/examples/`.**~~ Done.
+Since those `.iqx` files are language-level, not `0.1-poc`-implementation-
 specific, they're natural cross-implementation fixtures: same input, same
 expected output, run through both `poc/` and the new `compiler/`+`vm/`
-pipeline. Behavioral drift is either an intentional
-`0.1-poc` limitation being fixed (expected — note where `0.1` deliberately
-diverges) or a real regression worth catching immediately, not something
-to let slide.
+pipeline. `scripts/conformance-test.sh` builds `compiler/`+`vm/`, then for
+every `langspec/examples/*.iqx` fixture runs it through both `poc/src/
+iqalox.py` and the compiled `compiler/`+`vm/` pipeline, diffing stdout
+byte-for-byte and failing loudly (with the actual `diff -u` output) on any
+mismatch across *all* fixtures before exiting non-zero, rather than
+stopping at the first one. Distinct from Phase 7's
+`scripts/phase7-run-smoke-test.sh`, which only checks that `compiler/`+
+`vm/` runs each fixture to completion (exit 0) — this script is the
+actual regression safety net across the two otherwise-independent
+implementations that §7 called for. Wired into CI as a new `conformance`
+job in `.github/workflows/ci.yml`, depending on the existing `compiler`
+and `vm` jobs (their build artifacts aren't shared across jobs, so
+`conformance` rebuilds both itself, same as `run-smoke-test` already
+does). At the time this landed, all six existing fixtures already matched
+byte-for-byte (as hand-verified during Phases 7/8) and continue to; no
+behavioral drift, intentional or otherwise, has surfaced yet — the value
+of this phase is having the check run automatically on every push/PR
+going forward, not a backlog of divergences it caught.
 
 **Phase 10 — Documentation.** `docs/LANGUAGE.md` either gains a `0.1`
 addendum or forks into a versioned doc once `0.1` actually reaches parity
