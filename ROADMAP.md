@@ -121,23 +121,26 @@ Everything originally marked "push to `0.2-poc+`" in the source planning
 notes that didn't get pulled forward into 0.1-poc, plus mixin/trait support
 (deferred out of 0.1-poc — see above; bundled here as the natural home for
 "class system completeness" work, alongside the other items below that were
-already headed for this version):
+already headed for this version). See `docs/PLAN-0.2.md` for the full
+plan — design decisions, open questions, and phased sequencing:
 
-- Matrix support (alongside existing vector/array support)
-- Array-manipulation standard library, including list comprehensions
-  (`[x + y | x <- xs, y <- ys, x not y]`-style) and Julia-inspired
-  single/multi-dimensional array manipulation
-- Anonymous function literals (lambdas/closures) — distinct from the named
-  nested-function closures already in 0.1-poc
-- Variadic unpacking (`...` operator)
-- Getters and setters — whether these are *forced* (mandatory encapsulation,
-  no direct property access) or optional convenience methods is still an
-  open question; related to the private-by-default property question raised
-  for the old v0.3 (now 0.4, see below)
+- Matrix support (alongside existing vector/array support) — as nested
+  vectors plus a dedicated stdlib, not new literal syntax
+- Array-manipulation standard library, including indexing (`v[i]`),
+  cons (`[item | list]`), and list comprehensions (`[expr | x <- xs]`,
+  single-generator for this version)
+- Anonymous function literals ("lambdas": `(a, b) -> expr`) — distinct
+  from the named nested-function closures already in 0.1-poc
+- Variadic unpacking (`...` operator) — vector-literal spread
+  (`[...a, ...b]`) only for this version
+- Getters and setters — **forced** (mandatory encapsulation, no direct
+  property access without a declared accessor), via `get`/`set` blocks on
+  a property declaration; related to the private-by-default property
+  question raised for the old v0.3 (now 0.4, see below)
 - Mixin support (`class A extends B with C`, `A with B`) and trait support
-  (PHP-style `trait A {...}` / `class B { use A }`) — implementation
-  strategy (PHP-style static mixins, Scala-style dynamic traits, or a mix)
-  still needs to be decided when this work starts
+  (`trait A {...}` / `class B { use A }`) — resolved as a split by which
+  keyword is used: `trait`/`use` is Scala-style dynamic linearization,
+  `with`-only mixins are PHP-style static copying
 
 ### 0.3 *(formerly `0.2`)*
 
