@@ -143,7 +143,11 @@ behavior.
   per instruction, reusing the line+column model `0.1-poc` just finished
   hardening — see the two most recent PoC releases). Versioned from day
   one so frontend and backend can evolve independently without silently
-  desyncing.
+  desyncing. (Superseded by format v1 once Phase 5 needed a real one —
+  see that phase's entry in §6 for the full opcode set and
+  `compiler/src/Bytecode.fs`'s own doc comment for the on-disk layout. No
+  debug-info side table yet; deferred until something actually consumes
+  it.)
 - This split means `compiler/`'s tests can assert against the bytecode it
   produces (a disassembler/pretty-printer, no C++ VM needed yet), and
   `vm/`'s tests can hand-assemble small bytecode fixtures directly (no F#
@@ -407,7 +411,11 @@ check these statically either): `break`/`continue` outside a loop,
 adding compile-time tracking for them would need new state
 (loop-depth/inside-function counters) that nothing else in this resolver
 needs, unlike `self`/`super`, which reuse the exact same machinery already
-built for ordinary variable resolution at zero extra cost.
+built for ordinary variable resolution at zero extra cost. (Update, Phase
+5: `break`/`continue` outside a loop ended up checked at compile time after
+all — `Codegen.fs` already needs its own loop-context stack to patch jump
+targets, so the check was effectively free there. `return` outside a
+function remains unchecked, same reasoning as before.)
 
 95 F# tests total (up from 75), covering locals/upvalues (including a
 doubly-nested closure capturing a grandparent's local through an
@@ -415,12 +423,111 @@ upvalue-of-an-upvalue)/globals resolution, both immutability-enforcement
 cases, redeclaration, self-referencing classes, and all four `self`/
 `super` scoping scenarios.
 
-**Phase 5 — Code generation (F#), bytecode format v1.** Full opcode set
-covering every `0.1-poc` expression/statement plus classes/closures.
-`undef` becomes a real runtime `Value` case, emitted as the initial value
-for any `mut`-without-initializer declaration; reading a slot still holding
-it is a runtime error. Scoped to `var` bindings only (decision 6) — fields
-keep `0.1-poc`'s existing always-mutable, no-pre-declaration model.
+~~**Phase 5 — Code generation (F#), bytecode format v1.**~~ Done.
+`compiler/src/Bytecode.fs` was rewritten wholesale from Phase 1's minimal
+v0 straw-man (just enough to prove the round trip) to a real v1 format: a
+structured, index-based `Instruction`/`Chunk`/`Constant`/`FunctionProto`
+representation that `Codegen` builds and `Disassembler.fs` (new) prints
+directly, with jump targets as plain instruction-array indices — the
+*serialized* on-disk format (magic/version header, constant pool,
+length-prefixed instruction stream) only exists at the very end, in
+`Bytecode.write`, which is also where index-based jump targets get
+translated to the byte offsets the format actually stores. `vm/` still
+only reads v0 — rebuilding it for v1 is Phase 6's job, one phase behind by
+design, same relationship v0 had to Phase 1.
+
+`compiler/src/Codegen.fs` (`Codegen.compile : BoundStmt list -> Chunk *
+CodegenError list`) covers every `0.1-poc` expression/statement plus
+classes/closures/`undef`:
+
+- **No dedicated "store" instruction for a local's declaration.** Its
+  initializer's pushed value already sits in the stack slot `Resolver`
+  assigned it, since slots are handed out in strict push order; only
+  re-assignment needs an explicit, non-popping `SetLocal`/`SetUpvalue`
+  (assignment is itself an expression, so its value stays on the stack).
+  Globals are the mirror image: not stack-resident, so declaration pops
+  via `DefineGlobal` but assignment still doesn't pop.
+- **`undef`** is real: a `mut`-without-initializer `var` declaration emits
+  the new `Undef` opcode as its initial value instead of `Nil`. (Whether
+  reading a slot still holding it is a runtime error is `vm/`'s job,
+  Phase 6 — the frontend's only responsibility here is emitting the
+  distinct value.)
+- **A running `StackDepth` counter** (`Codegen`'s own, separate from
+  `Resolver`'s already-computed slot numbers) tracks how many values are
+  currently pushed, updated automatically by routing every emission
+  through one `Emit` method annotated with each opcode's net stack effect.
+  This is what lets block/function exits know how many slots to `PopN`,
+  and lets `break`/`continue` unwind the right number of slots inline at
+  their own jump site rather than sharing (and double-popping via) one
+  common loop-exit cleanup path. The one spot a purely sequential counter
+  isn't enough: a `for` loop's condition check and its "falsy, exit now"
+  landing point both flow from the same `JumpIfFalse`, but only the
+  fallthrough (truthy) path has popped the condition value by the time the
+  counter reaches the landing point textually — handled with an explicit
+  depth reset at that one merge point instead of assuming the linear walk
+  stays accurate.
+- **Three more real `poc` bugs**, fixed here rather than carried forward
+  (logged in `docs/PLAN-0.1-POC.md`'s running list, per the standing
+  policy of fixing correctly in the new stack while only *noting* — not
+  patching — `poc` itself): the comma operator always evaluated to `nil`
+  in `poc` (no interpreter case for it at all) — fixed with no dedicated
+  opcode needed, just `compile left; Pop; compile right`; `??` didn't
+  short-circuit in `poc` (both operands always evaluated) — fixed via a
+  new peek-based `JumpIfNotNil` opcode; elvis (`?:`) double-evaluated its
+  condition in `poc` (the parser reuses one AST node for both the
+  ternary's `left` and `middle`, but the interpreter evaluates each
+  independently) — fixed by telling elvis apart from a full ternary via
+  the operator token (`QuestionMarkColon` vs. `QuestionMark` — `middle`
+  can't be used to distinguish them, since `Resolver` re-resolves the
+  shared node into two structurally-identical-but-not-reference-equal
+  copies) and evaluating the condition exactly once.
+- **A real gap surfaced in already-merged Phase 4 code, fixed here**:
+  `Bound.BSuper` only carried `super`'s own resolved binding, not `self`'s
+  — fine for `super.method()` called directly inside a method (`self` is
+  always local slot 0 there), but wrong for a call from inside a closure
+  *nested within* a method, where `self` may itself need to be captured as
+  an upvalue. `poc`'s dynamic `Environment` chase gets this for free;
+  the compile-time slot/upvalue scheme doesn't unless it's tracked
+  explicitly. Fixed by having `Resolver.fs`'s `SuperExpr` case resolve
+  `self` independently of `super` (mirroring `clox`), and widening
+  `BSuper` to carry both bindings — a two-line `Resolver.fs` change plus a
+  `ResolverTests.fs` update, not a Codegen-only workaround.
+- **Class/method codegen** matches `clox`'s own approach: `Class`, then
+  (if the binding is global) `DefineGlobal`, then the superclass value if
+  any (this push *is* the synthetic `super` local `Resolver` already
+  allocates immediately next — no `Bound.fs` change needed to make the
+  slot numbers line up), then a temporary re-fetch of the class value so
+  each compiled method's trailing `Method` instruction can peek "the
+  class" at a fixed relative stack position regardless of what's
+  underneath, `Inherit` if there's a superclass, one `Closure`+`Method`
+  pair per method, and a final `Pop` discarding the temporary re-fetch
+  (not the class itself).
+- **`for` loop `break`/`continue`** unwind to two different depths —
+  `break` all the way to before the loop's own initializer (the for
+  statement's whole scope is exiting), `continue` only to just after the
+  initializer (preserving the loop variable, since the increment/condition
+  still need it) — and each unwinds inline at its own jump site rather
+  than funneling through the loop's shared "condition went false" exit
+  path, which avoids a double-pop that a naive single shared cleanup label
+  would otherwise cause.
+
+`compiler/src/Disassembler.fs` (new) is the primary way `CodegenTests.fs`
+verifies output, per this plan's own testing-strategy note in §7 — no C++
+VM needed. `compiler/src/Program.fs` is now a real `iqaloxc` CLI (source
+path + output path, running scan → parse → resolve → codegen → write,
+stopping and reporting at the first stage with errors) instead of Phase
+1's hardcoded demo chunk. `scripts/phase1-roundtrip-smoke-test.sh` (which
+depended on `vm/` understanding the same format the frontend now emits) is
+retired; `scripts/phase5-compile-smoke-test.sh` replaces it, compiling
+every `langspec/examples/*.iqx` fixture with the real CLI with no VM
+execution step, since `vm/` can't read v1 until Phase 6.
+
+116 F# tests total (up from 95), including a full v1 serialization suite
+(`BytecodeTests.fs`, rewritten for the new format) and `CodegenTests.fs`
+covering locals/globals/upvalues, all three bug fixes above, logical
+short-circuiting, prefix increment, a `for` loop's condition-exit and
+`break` paths converging on the same stack depth without double-popping,
+closures, and the `super.method()` self/super-independent-resolution fix.
 
 **Phase 6 — VM core (C++23).** Value representation (a tagged
 union/`std::variant` to start; NaN-boxing is a later optimization, not a

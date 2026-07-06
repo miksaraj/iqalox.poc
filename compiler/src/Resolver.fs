@@ -272,8 +272,15 @@ type private Resolver(globals: Dictionary<string, bool>) =
             match resolveReference "super" with
             | GlobalBinding _, None ->
                 error keyword "Can't use 'super' outside of a class with a superclass."
-                BSuper(GlobalBinding "super", keyword, method)
-            | binding, _ -> BSuper(binding, keyword, method)
+                BSuper(GlobalBinding "self", GlobalBinding "super", keyword, method)
+            | binding, _ ->
+                // Resolved independently of `super` itself (mirroring `clox`) so
+                // that a `super.method()` call from inside a closure nested
+                // *within* a method still finds the right `self` -- e.g. via an
+                // upvalue chain of its own -- rather than assuming `self` is
+                // always the current function's own slot 0.
+                let selfBinding, _ = resolveReference "self"
+                BSuper(selfBinding, binding, keyword, method)
 
 /// Resolves `stmts` into a `BoundStmt` list plus any resolution errors
 /// (compile-time immutability violations, redeclarations, `self`/`super`

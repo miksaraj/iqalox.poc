@@ -59,7 +59,7 @@ type BoundExpr =
     | BGet of obj: BoundExpr * name: Token
     | BSet of obj: BoundExpr * name: Token * value: BoundExpr
     | BSelf of binding: VariableBinding * keyword: Token
-    | BSuper of binding: VariableBinding * keyword: Token * method: Token
+    | BSuper of selfBinding: VariableBinding * binding: VariableBinding * keyword: Token * method: Token
 
 /// `LocalCount` is how many stack slots the VM must reserve for this
 /// function's frame (including its own implicit `self` slot for methods);
