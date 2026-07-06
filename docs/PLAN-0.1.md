@@ -316,12 +316,48 @@ bug 1 (the only one of these that's a real, user-facing defect in a
 since Phase 2's job is the new `0.1` scanner, not further `poc`
 maintenance.
 
-**Phase 3 — Parser & AST (F#).** AST as F# discriminated unions — a
-natural fit, and arguably simpler than `0.1-poc`'s generated-visitor-
-pattern approach (`tools/generate_ast.py`) since pattern matching replaces
-the visitor dispatch with no code-generation step needed. Port the full
-grammar from `langspec/SYNTAX_GRAMMAR.md` (paren-free calls, ternary/elvis,
-pipe, comma, null-coalescing, classes) — it's already fully specified.
+~~**Phase 3 — Parser & AST (F#).**~~ Done. `compiler/src/Ast.fs` defines
+`Expr`/`Stmt` as F# discriminated unions (plus a `FunctionDecl` record,
+shared between `Stmt.FunctionStmt` and `Stmt.ClassStmt`'s `methods` field
+for real type safety `poc`'s `List[Function]` type hint never enforced) —
+simpler than `0.1-poc`'s generated-visitor-pattern approach
+(`tools/generate_ast.py`), since pattern matching replaces the visitor
+dispatch with no code-generation step needed. `compiler/src/Parser.fs`
+ports the full grammar from `langspec/SYNTAX_GRAMMAR.md` (paren-free
+calls, ternary/elvis, pipe, comma, null-coalescing, classes, vector
+literals, `self`/`super`) — a recursive-descent parser matching
+`poc/src/parser.py`'s structure closely, with errors collected into a
+`ParseError list` (mirroring `Scanner.fs`'s `ScanError` pattern) rather
+than reported through `poc`'s global mutable singleton.
+
+Two implementation notes:
+- **A real naming collision, not a design question:** `Class`/`Var`/`For`/
+  `Return` (natural `Stmt` case names) and `Break`/`Continue`/`Self`/
+  `Super` (natural `Expr` case names) are *also* `TokenType` case names
+  (`Token.fs`). Both modules are opened together in `Parser.fs`, and F#
+  resolves a bare, ambiguous case name to whichever `open` came last —
+  silently breaking whichever module lost. Fixed by suffixing the
+  colliding `Ast.fs` cases (`ClassStmt`, `VarStmt`, `ForStmt`,
+  `ReturnStmt`, `BreakExpr`, `ContinueExpr`, `SelfExpr`, `SuperExpr`);
+  every unambiguous case name is left bare.
+- **A `poc` bug found while porting `primary()`'s vector-literal handling**,
+  fixed here rather than carried forward: `poc` toggles
+  `comma_as_operator` off, parses the elements, then toggles it back on —
+  but without a `try`/`finally` equivalent, a parse error partway through
+  a vector literal's elements (e.g. `[1, 2, bad+]`) leaves the comma
+  operator disabled for the *rest of the file*, since the restoring
+  assignment never runs after the exception unwinds past it. Fixed with a
+  `try`/`finally`. Also fixed in the same pass: `poc`'s `for_statement()`
+  assigns `body = self.statement()` with no `None` check, but
+  `statement()` returns `None` for a bare `;` body — constructing a `For`
+  node whose body is `None`, which crashes the interpreter later. Treated
+  as an empty block here instead. Neither needed design sign-off —
+  straightforward parser bugs, not language-design questions. See task
+  tracking for a proposed `poc` follow-up patch for both, mirroring how
+  the scanner bugs were handled.
+
+Regression tests for both in `compiler/tests/ParserTests.fs` (75 F# tests
+total, up from 36).
 
 **Phase 4 — Resolver / semantic analysis (F#).** Compile-time lexical
 scope and variable-slot resolution (locals get compile-time-known stack
