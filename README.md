@@ -1,18 +1,20 @@
-# Iqalox (Proof of Concept) #
+# Iqalox #
 
-This is a tree-walk interpretation implementation of Iqalox language in Python. It is a proof of concept preceding the
-proper bytecode compiler implementation.
+Iqalox is a programming language based on Lox, from Bob Nystrom's
+[Crafting Interpreters](http://craftinginterpreters.com/), mutated and extended to suit the author's
+preferences and interests. "*Iqalox*" is a play on the Kalaallisut word for Arctic char, *Eqaluk*, and *Lox*.
 
-"*Iqalox*" is a play on the Kalaallisut word for Arctic char, *Eqaluk*, and *Lox* from Bob Nystrom's
-[Crafting Interpreters](http://craftinginterpreters.com/). The language presented here is based on Nystrom's Lox
-but mutated and extended to suit the author's preferences and interests.
+This repository holds multiple implementations across Iqalox's versions:
+
+- `poc/` — the original `0.1-poc` proof of concept: a tree-walk interpreter in Python. Now frozen/reference,
+  since `0.1` below has reached feature parity with it.
+- `compiler/` + `vm/` — `0.1`, the real implementation: a compiler frontend (F#) that compiles to a bytecode
+  format executed by a stack-based virtual machine (modern C++). The current, primary implementation.
+
+See `ROADMAP.md` for the version plan, `docs/LANGUAGE.md` for the current (`0.1`) language reference, and
+`docs/LANGUAGE-POC.md` for the frozen `0.1-poc`-era one — both with examples and known limitations.
 
 You will find the **syntax grammar** in `langspec`. The **lexical grammar** and **precedence rules** are presented below.
-
-This repository holds a working tree-walk interpreter (in Python) implementing the
-current `0.1-poc` milestone — see `ROADMAP.md` for the version plan and
-`docs/LANGUAGE.md` for the full language documentation (with examples and known
-limitations).
 
 ## Lexical Grammar ##
 

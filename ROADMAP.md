@@ -30,12 +30,13 @@ pre-1.0 minor versions it takes to get there.
 
 ## Versions
 
-### 0.1-poc — *in progress*
+### 0.1-poc — *done*
 
-The current PoC target: address the most glaring gaps in Lox, in Python, as a
-tree-walk interpreter. See `docs/PLAN-0.1-POC.md` for the detailed, current
-status of this milestone (what's implemented, what's open, what design
-decisions are still pending).
+The original PoC target: address the most glaring gaps in Lox, in Python, as
+a tree-walk interpreter. See `docs/PLAN-0.1-POC.md` for the full
+implementation log. Now superseded by `0.1` below as the primary
+implementation, but kept in the repo (`poc/`) as a frozen, working reference
+— see `CLAUDE.md`.
 
 New/changed vs. Lox:
 
@@ -93,13 +94,15 @@ Explicitly **deferred out of 0.1-poc** (see 0.2): mixin support
 (`trait A {...}` / `class B { use A }`) — the PHP-vs-Scala-style
 implementation question is real but doesn't need answering yet.
 
-### 0.1 — *scaffolding in progress*
+### 0.1 — *done*
 
 The first real implementation — a compiler frontend (F#) plus a bytecode
 VM backend (C++23), superseding the `0.1-poc` tree-walk interpreter. See
-`docs/PLAN-0.1.md` for the detailed, current plan (architecture, phased
-sequencing, open questions). Everything targeted for `0.1-poc`, actually
-complete and hardened, plus:
+`docs/PLAN-0.1.md` for the full implementation log (all 10 phases done,
+including a cross-implementation conformance suite proving `compiler/`+
+`vm/` match `poc/`'s output byte-for-byte on every `langspec/examples/`
+fixture). Everything targeted for `0.1-poc`, actually complete and
+hardened, plus:
 
 - Accessing an uninitialized variable is a **runtime error** (implicit
   `undef`, not implicit `nil`) — a variable must be explicitly assigned
@@ -108,7 +111,11 @@ complete and hardened, plus:
 - Immutability enforced at compile time, not runtime-only.
 - Classes can reference themselves by name from inside their own methods.
 
-### 0.2 *(formerly `0.2-poc`)*
+See `docs/LANGUAGE.md` for the full `0.1` language reference, including a
+diagnostics-quality regression flagged there (§13) as a candidate for a
+follow-up phase rather than something silently left undocumented.
+
+### 0.2 *(formerly `0.2-poc`)* — *active target*
 
 Everything originally marked "push to `0.2-poc+`" in the source planning
 notes that didn't get pulled forward into 0.1-poc, plus mixin/trait support

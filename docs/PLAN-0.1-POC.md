@@ -494,7 +494,7 @@ all are straightforward scanning bugs, not language-design questions:
 2. **A leading-underscore identifier (`_foo`) misscanned** as a bare `_`
    (the ignore operator) followed by a separate `foo` identifier, since
    `_` was checked as its own token before the identifier dispatch ran — a
-   limitation `docs/LANGUAGE.md` §13 had explicitly flagged as
+   limitation `docs/LANGUAGE-POC.md` §13 had explicitly flagged as
    known-but-deprioritized. Fixed by checking whether an alphanumeric
    character follows before deciding `_` is standalone.
 3. **The `...` (ellipsis) token under-consumed by one character** — the
@@ -523,7 +523,7 @@ Also removed `Scanner.match()`, left dead by fix 3's rewrite (nothing else
 called it — `Parser.match()` is a separate, still-used method on a
 different class). Escape sequences were deliberately *not* added here:
 that's a genuinely new `0.1` feature (`docs/PLAN-0.1.md` decision 5), not
-a `0.1-poc` bug — `docs/LANGUAGE.md` §13 already documents their absence
+a `0.1-poc` bug — `docs/LANGUAGE-POC.md` §13 already documents their absence
 as an intentional limitation, and `0.1-poc` should keep behaving exactly
 as documented.
 

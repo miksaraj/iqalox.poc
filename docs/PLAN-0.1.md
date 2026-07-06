@@ -26,13 +26,13 @@ complete and hardened, plus":
 Confirmed in this planning round, `0.1` additionally includes:
 
 - **Escape sequences in string literals** (`\n`, `\t`, etc.) — `0.1-poc`
-  has none at all (`docs/LANGUAGE.md` §13, limitation 1).
+  has none at all (`docs/LANGUAGE-POC.md` §13, limitation 1).
 - **Immutability enforced at compile time**, not runtime-only — `0.1-poc`
   deliberately shipped the runtime-only version as an interim tradeoff
-  (`docs/PLAN-0.1-POC.md` decision 2; `docs/LANGUAGE.md` §13, limitation 4).
+  (`docs/PLAN-0.1-POC.md` decision 2; `docs/LANGUAGE-POC.md` §13, limitation 4).
 - **Classes can reference themselves by name from inside their own
   methods** — a real Lox capability that `0.1-poc` couldn't cleanly support
-  with its plain-`Environment` binding model (`docs/LANGUAGE.md` §13,
+  with its plain-`Environment` binding model (`docs/LANGUAGE-POC.md` §13,
   limitation 6). This restores existing Lox behavior; it isn't a new
   language feature being invented here.
 
@@ -68,12 +68,12 @@ Resolved in this planning round:
 5. **Escape sequences**: the common C-family set — `\n \t \r \\ \' \" \0` —
    plus a **hard compile error** on any unrecognized escape (e.g. `\q`).
    Matches the language's existing "operators raise rather than silently
-   coerce" strong-typing bias (`docs/LANGUAGE.md` §1). No `\xHH`/`\uXXXX`
+   coerce" strong-typing bias (`docs/LANGUAGE-POC.md` §1). No `\xHH`/`\uXXXX`
    escapes for `0.1`.
 6. **`undef` scope: `var`-declared bindings only, not object fields.**
    Fields keep `0.1-poc`'s existing model — they spring into existence on
    first `self.x = ...` write, readable any time after
-   (`docs/LANGUAGE.md` §13, limitation 5). Field pre-declaration and field
+   (`docs/LANGUAGE-POC.md` §13, limitation 5). Field pre-declaration and field
    immutability are deferred to `0.2`'s class-system-completeness work
    (getters/setters/mixins/traits already deferred there), not decided now.
 7. **Memory management: a mark-sweep tracing garbage collector**, matching
@@ -190,7 +190,8 @@ paths must track the move):
   needs to become "this repo holds multiple implementations: `poc/`
   (0.1-poc, Python, frozen/reference) and `0.1` (`compiler/` + `vm/`,
   in progress)."
-- `docs/LANGUAGE.md` — its `src/` path references (e.g. "runs successfully
+- `docs/LANGUAGE-POC.md` (then still named `docs/LANGUAGE.md`) — its `src/`
+  path references (e.g. "runs successfully
   against `src/iqalox.py`") become `poc/src/iqalox.py`.
 
 **Docs that stay as-is** (historical record, same principle already
@@ -215,43 +216,44 @@ conversation, not something this reorg needs to (or should) touch.
 
 ## 5. Feature checklist (parity target)
 
-Every row is "not started" — this is a from-scratch reimplementation in a
-new stack, not a port of Python code. Ticked off as `compiler/`+`vm/`
-together reach each one (verified via the shared `langspec/examples/`
-conformance suite, §7).
+**All rows done** as of Phase 9 (§6) — `compiler/`+`vm/` reach every one of
+these, verified via the shared `langspec/examples/` conformance suite (§7,
+`scripts/conformance-test.sh`): all six fixtures produce byte-for-byte
+identical output between `poc/` and `compiler/`+`vm/`, and between them
+exercise every row below at least once.
 
 | Feature | 0.1-poc reference | Status |
 |---|---|---|
-| Array support (vector literals) | `docs/PLAN-0.1-POC.md` §2 | ⛔ |
-| Block comments `<# ... #>` | | ⛔ |
-| Implicit semicolons | | ⛔ |
-| `continue` / `break` as expressions | | ⛔ |
-| Prefix `++`/`--` | | ⛔ |
-| `extends` / single inheritance / `super` | | ⛔ |
-| Chainable ternary incl. elvis `?:` | | ⛔ |
-| `print`/`concat` as ordinary builtin functions | | ⛔ |
-| Pipe operator `\|>` | | ⛔ |
-| Ignore operator `_` | | ⛔ |
-| Null-coalescing `??` | | ⛔ |
-| Modulo `%` / power `^` | | ⛔ |
-| Comma operator | | ⛔ |
-| Immutability by default (`mut`) | | ⛔ (see below: compile-time now) |
-| `for` loops | | ⛔ |
-| Logical `and`/`or` | | ⛔ |
-| Functions, closures, `return` | | ⛔ |
-| Classes, `init`, methods, `self` | | ⛔ |
-| No-parens paren-free call grammar | | ⛔ |
-| Accurate line/column error reporting | 0.1-poc's two post-release fixes | ⛔ (carry forward the design, don't re-discover the bugs) |
-| **New for 0.1:** `undef`, must-assign-before-read (`var` only, decision 6) | `ROADMAP.md` §0.1 | ⛔ |
-| **New for 0.1:** string escape sequences (decision 5) | | ⛔ |
-| **New for 0.1:** compile-time immutability enforcement | `docs/PLAN-0.1-POC.md` decision 2 | ⛔ |
-| **New for 0.1:** self-referencing classes | `docs/LANGUAGE.md` §13 limitation 6 | ⛔ |
+| Array support (vector literals) | `docs/PLAN-0.1-POC.md` §2 | ✅ Phase 5 (`Codegen.fs`) / Phase 6 (`ObjVector`) |
+| Block comments `<# ... #>` | | ✅ Phase 2 (`Scanner.fs`) |
+| Implicit semicolons | | ✅ Phase 2 (`Scanner.fs`) |
+| `continue` / `break` as expressions | | ✅ Phase 5 (`Codegen.fs`) / Phase 6 (`Vm`) |
+| Prefix `++`/`--` | | ✅ Phase 5 (`Codegen.fs`) |
+| `extends` / single inheritance / `super` | | ✅ Phase 8 |
+| Chainable ternary incl. elvis `?:` | | ✅ Phase 5 (`Codegen.fs`) |
+| `print`/`concat` as ordinary builtin functions | | ✅ Phase 7 |
+| Pipe operator `\|>` | | ✅ Phase 3 (`Parser.fs` desugars to a call at parse time) |
+| Ignore operator `_` | | ✅ Phase 3 (`Parser.fs`) / Phase 5 (`Codegen.fs`) |
+| Null-coalescing `??` | | ✅ Phase 5 (`Codegen.fs`, `JumpIfNotNil`) |
+| Modulo `%` / power `^` | | ✅ Phase 5 (`Codegen.fs`) |
+| Comma operator | | ✅ Phase 5 (`Codegen.fs`) |
+| Immutability by default (`mut`) | | ✅ Phase 4 (`Resolver.fs`, compile-time) |
+| `for` loops | | ✅ Phase 5 (`Codegen.fs`) / Phase 6 (`Vm`) |
+| Logical `and`/`or` | | ✅ Phase 5 (`Codegen.fs`) |
+| Functions, closures, `return` | | ✅ Phase 5 (`Codegen.fs`) / Phase 6 (`Vm`, `ObjClosure`/`ObjUpvalue`) |
+| Classes, `init`, methods, `self` | | ✅ Phase 8 |
+| No-parens paren-free call grammar | | ✅ Phase 3 (`Parser.fs`) |
+| Accurate line/column error reporting | 0.1-poc's two post-release fixes | ✅ Phase 2 (`Scanner.fs`/`Token.fs` carry forward both fixes' design: column tracking, coalescing invalid-character runs) |
+| **New for 0.1:** `undef`, must-assign-before-read (`var` only, decision 6) | `ROADMAP.md` §0.1 | ✅ Phase 4 (`Resolver.fs`) / Phase 6 (`UndefTag`, `Vm::checkNotUndef`) |
+| **New for 0.1:** string escape sequences (decision 5) | | ✅ Phase 2 (`Scanner.fs`) |
+| **New for 0.1:** compile-time immutability enforcement | `docs/PLAN-0.1-POC.md` decision 2 | ✅ Phase 4 (`Resolver.fs`) |
+| **New for 0.1:** self-referencing classes | `docs/LANGUAGE-POC.md` §13 limitation 6 | ✅ Phase 4 (`Resolver.fs`) / Phase 8 (`Vm`) |
 
-Known, deliberate `0.1-poc` limitations *not* being fixed as part of this
-list unless separately decided: the `.method()`-chaining-onto-an-argument
-ambiguity, no built-in methods on primitives, the leading-underscore
-identifier scan bug (`docs/LANGUAGE.md` §13) — all still open questions or
-low-priority items, not silently resolved here.
+Known, deliberate `0.1-poc` limitations *not* fixed as part of this list
+(not separately decided to change): the `.method()`-chaining-onto-an-
+argument ambiguity, no built-in methods on primitives, the leading-
+underscore identifier scan bug (`docs/LANGUAGE-POC.md` §13) — all still open
+questions or low-priority items, not silently resolved here.
 
 ## 6. Suggested sequencing
 
@@ -296,7 +298,7 @@ they're straightforward correctness bugs, not language-design questions:
 2. **A leading-underscore identifier (`_foo`) misscans** as a bare `_`
    (the ignore operator) followed by a separate `foo` identifier, since
    `_` is checked as its own token before the identifier dispatch runs —
-   a limitation `docs/LANGUAGE.md` §13 already flagged as known-but-
+   a limitation `docs/LANGUAGE-POC.md` §13 already flagged as known-but-
    deprioritized in `poc`. Fixed by checking whether an alphanumeric
    character follows before deciding `_` is standalone.
 3. **The `...` (ellipsis) token under-consumes by one character** — `poc`'s
@@ -388,7 +390,7 @@ from for this phase, so this one is new, not a port:
 - **Self-referencing classes**: a class's own name is declared (as an
   immutable global or local, matching where the `class` statement itself
   lives) *before* its method bodies are resolved, so a method can
-  reference its own enclosing class by name — the gap `docs/LANGUAGE.md`
+  reference its own enclosing class by name — the gap `docs/LANGUAGE-POC.md`
   §13 documented as a `0.1-poc` limitation is closed for `0.1`.
 - **`self`/`super`** are resolved through the exact same local/upvalue/
   global machinery as any other name, by looking up the synthetic names
@@ -833,11 +835,53 @@ behavioral drift, intentional or otherwise, has surfaced yet — the value
 of this phase is having the check run automatically on every push/PR
 going forward, not a backlog of divergences it caught.
 
-**Phase 10 — Documentation.** `docs/LANGUAGE.md` either gains a `0.1`
-addendum or forks into a versioned doc once `0.1` actually reaches parity
-plus the four new items — a late-phase task, done when it's true, not
-upfront. `ROADMAP.md` marks `0.1` delivered and moves the active-target
-goalposts to `0.2`.
+~~**Phase 10 — Documentation.**~~ Done. `docs/LANGUAGE.md` forks into a
+versioned doc, the option this section originally left open rather than
+an addendum to the existing file: the former `docs/LANGUAGE.md` is
+renamed `docs/LANGUAGE-POC.md` (frozen as the accurate reference for
+`poc/` specifically, which stays in the repo per `CLAUDE.md`) and a new
+`docs/LANGUAGE.md` is written from scratch for `0.1`, becoming the
+primary, actively-maintained reference. Every implementation-specific
+fact is rewritten for `0.1`'s actual architecture (bytecode-compiled +
+VM-executed, not tree-walked; a real mark-sweep GC in the VM, not
+delegated to a host language; lexical scoping resolved entirely at
+compile time via `Resolver.fs`'s slot/upvalue algorithm, not a runtime
+`Environment` chain) rather than mechanically copied, and the four
+`0.1`-only additions (`undef`/must-assign-before-read, string escape
+sequences, compile-time immutability enforcement, self-referencing
+classes) are folded into the relevant sections instead of bolted on as an
+addendum. §13's known-limitations list drops the three items `0.1`
+actually resolves and keeps everything still true.
+
+Writing this surfaced one real, previously-unnoticed gap, flagged rather
+than silently fixed or silently ignored: `0.1`'s runtime errors carry
+**no source line number at all** (`vm/src/vm.cpp`'s `runtimeError` just
+throws the message), and its compile-time errors print only a bare
+`[line N] Error: message` — no offending-token text, no caret-underlined
+source excerpt, and codegen errors have no line number either
+(`CodegenError` has no line field). `0.1-poc` has all of this (both of
+its own post-release GitHub issue fixes, `docs/PLAN-0.1-POC.md` §3, plus
+runtime-error line reporting), and the Phase 9 conformance suite didn't
+catch the regression because it only diffs successful-run stdout, never
+error-path stderr or exit codes. Recorded as `docs/LANGUAGE.md` §13 item
+7 (new-format limitation, not a `0.1-poc` one) — a candidate for a
+follow-up phase (line tracking through `Codegen.fs`/`Bytecode.fs`, a
+`currentLine`-equivalent in the VM's fetch-decode loop, and a nicer CLI
+format), not implemented here since it's a nontrivial cross-cutting
+change orthogonal to "write the docs."
+
+Every other cross-reference to the old `docs/LANGUAGE.md` path across
+this document, `CLAUDE.md`, and `README.md` is updated to point at
+whichever of `docs/LANGUAGE.md` (0.1-specific facts) or
+`docs/LANGUAGE-POC.md` (historical `0.1-poc`-era limitation numbers,
+preserved exactly as originally enumerated) is actually correct for that
+reference, so no link or `§N` cross-reference is left dangling or
+silently wrong. §5's feature checklist (this document) is also brought
+current here, having been left at "not started" for every row through
+Phases 2–9 despite all of them shipping; every row is verified against
+the actual `compiler/`/`vm/` source before being marked done, each with
+the phase(s) that landed it. `ROADMAP.md` marks `0.1` delivered and moves
+the active-target goalposts to `0.2`.
 
 ## 7. Testing strategy
 

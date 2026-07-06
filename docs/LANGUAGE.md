@@ -1,18 +1,31 @@
-# The Iqalox Language (0.1-poc)
+# The Iqalox Language (0.1)
 
-This is the complete reference for Iqalox as implemented by the `0.1-poc`
-tree-walk interpreter in `poc/src/`. It documents what the language
-**actually does today**, with runnable examples and an explicit list of
-known limitations — it does not speculate about `0.1`, `0.2`, or later
-versions except where noted for contrast. See `ROADMAP.md` for what's
-planned beyond this milestone, `docs/PLAN-0.1-POC.md` for the day-to-day
-`0.1-poc` implementation log and open design questions, and
-`docs/PLAN-0.1.md` for the real `0.1` implementation (compiler frontend in
-F#, bytecode VM backend in C++23) currently in progress alongside this one.
+> **For older versions, see:** [`docs/LANGUAGE-POC.md`](LANGUAGE-POC.md) for
+> `0.1-poc` (the Python tree-walk interpreter this version supersedes as
+> the primary reference — `poc/` stays in the repo as a working reference
+> implementation, per `CLAUDE.md`). Each version gets its own
+> `LANGUAGE-<version>.md` this way as Iqalox evolves; this file always
+> describes the current, actively-maintained version.
 
-Every code sample below is valid Iqalox and, unless marked otherwise, runs
-successfully against `poc/src/iqalox.py`. Longer, complete programs live
-under `langspec/examples/*.iqx`.
+This is the complete reference for Iqalox as implemented by `0.1` — a
+compiler frontend (`compiler/`, F#) that compiles `.iqx` source to a
+bytecode file, executed by a stack-based virtual machine (`vm/`, C++23).
+It documents what the language **actually does today**, with runnable
+examples and an explicit list of known limitations. `0.1` is, by design,
+everything `0.1-poc` had — same syntax, same semantics, same example
+programs — plus four additions (§4, §10, and noted throughout): `undef`/
+must-assign-before-read, string escape sequences, compile-time
+immutability enforcement, and self-referencing classes. See `ROADMAP.md`
+for what's planned beyond this milestone, `docs/PLAN-0.1.md` for the
+day-to-day `0.1` implementation log, and `docs/PLAN-0.1-POC.md` for the
+original `0.1-poc` design decisions this version inherits.
+
+Every code sample below is valid Iqalox and, unless marked otherwise,
+compiles and runs successfully via `compiler/src/Iqaloxc.fsproj` (or
+`iqaloxc`, once built) piped into `vm/build/iqaloxvm`. Longer, complete
+programs live under `langspec/examples/*.iqx` — the same fixtures run
+against `poc/` and checked byte-for-byte identical via
+`scripts/conformance-test.sh` (`docs/PLAN-0.1.md` Phase 9).
 
 ## Table of contents
 
@@ -35,12 +48,12 @@ under `langspec/examples/*.iqx`.
 
 Iqalox is Lox — the small teaching language from Bob Nystrom's *Crafting
 Interpreters* — mutated and extended by the repository owner into a
-personal language project. `0.1-poc` is a **tree-walk interpreter written
-in Python**, deliberately positioned as a proof of concept ahead of a
-future bytecode implementation (see `ROADMAP.md`'s architecture note); the
-implementation language for that future version is undecided.
+personal language project. `0.1` is the first real, non-proof-of-concept
+implementation: a **compiler frontend plus a bytecode virtual machine**,
+superseding `0.1-poc`'s tree-walk interpreter (see `ROADMAP.md`'s
+architecture note).
 
-Classifying `0.1-poc` along the axes commonly used to describe programming
+Classifying `0.1` along the axes commonly used to describe programming
 languages — all statements below describe this implementation as it
 exists today, not a permanent commitment for later Iqalox versions:
 
@@ -54,60 +67,77 @@ exists today, not a permanent commitment for later Iqalox versions:
 - **Typing discipline**: **dynamically typed**. There is no type
   declaration syntax anywhere in the grammar — variables, parameters, and
   fields hold whatever value is assigned, and type errors (e.g. `"a" + 1`)
-  surface as runtime errors, not at parse/scan time. Within that, Iqalox
-  leans **strong**: operators check operand types and raise
-  `IqaloxRuntimeError` rather than silently coercing between them (no
-  string-to-number or number-to-string coercion happens for `+`, `-`, `*`,
-  `/`, `%`, `^`, or the comparison operators).
-- **Memory management**: fully **automatic**, and not actually implemented
-  by Iqalox at all — every runtime value is a plain host-language (Python)
-  object (`float`, `str`, `bool`, `list`, or an `IqaloxInstance`/
-  `IqaloxFunction`/`IqaloxClass`), so allocation and collection are
-  entirely delegated to the Python runtime and its garbage collector. There
-  is no manual memory management, no pointers, and no language-level
-  concept of ownership or lifetimes.
-- **Execution model**: a classic **tree-walking interpreter** — source is
-  scanned into tokens, parsed directly into an AST (`poc/src/expression.py`/
-  `poc/src/statement.py`), and the AST is walked and evaluated node-by-node
-  via the visitor pattern (`poc/src/interpreter.py`). There is no bytecode,
-  no intermediate representation, and no JIT. (A bytecode-compiled
-  implementation is in progress for `0.1` — see `docs/PLAN-0.1.md`.)
+  surface as runtime errors, not at compile time. Within that, Iqalox
+  leans **strong**: operators check operand types and raise a runtime
+  error rather than silently coercing between them (no string-to-number or
+  number-to-string coercion happens for `+`, `-`, `*`, `/`, `%`, `^`, or the
+  comparison operators).
+- **Memory management**: fully **automatic**, via a real **mark-sweep
+  tracing garbage collector** built into the VM (`vm/src/vm.cpp`) — unlike
+  `0.1-poc`, which simply delegated to Python's own GC, `0.1`'s VM
+  allocates and traces every heap object (strings, vectors, functions,
+  closures, classes, instances) itself. There is no manual memory
+  management, no pointers, and no language-level concept of ownership or
+  lifetimes exposed to Iqalox source code.
+- **Execution model**: **ahead-of-time compiled to bytecode, then
+  interpreted by a stack-based virtual machine** — source is scanned,
+  parsed into an AST (`compiler/src/Ast.fs`), resolved into a bound tree
+  with every binding/scope/slot already determined
+  (`compiler/src/Bound.fs`), and lowered to a structured bytecode format
+  (`compiler/src/Bytecode.fs`, `compiler/src/Codegen.fs`) that the VM
+  (`vm/src/vm.cpp`) loads and executes via a fetch-decode-execute loop over
+  an explicit value stack and call-frame stack. There is no tree-walking,
+  no JIT, and no further optimization pass on the bytecode itself.
 - **Evaluation strategy**: **eager (strict)** evaluation everywhere except
-  the two short-circuiting logical operators `and`/`or`, which don't
-  evaluate their right operand unless needed. Function arguments are fully
-  evaluated before a call executes (**call-by-value** for the argument
-  slots themselves; since the values passed are host Python object
-  references, mutable values like vectors are shared by reference the way
-  they would be in Python).
-- **Scoping**: **lexical (static) scoping**. Each block, function call, and
-  `for` loop iteration creates a new `Environment` chained to the one
-  active where it's written in the source, and name lookup walks that
-  chain outward. Closures capture the environment active at the point a
-  function is *declared*, not where it's *called*. `super` resolution is
-  achieved the same way — via an extra environment layer injected at class
-  *declaration* time — so it resolves to the lexically enclosing class's
-  parent, never to the calling instance's actual runtime class (see
+  the short-circuiting operators — `and`/`or`, `??`, and the ternary/elvis
+  forms — which compile to conditional jumps rather than always evaluating
+  every operand (see [§5](#5-operators-and-precedence),
+  [§6](#6-control-flow)). Function arguments are fully evaluated before a
+  call executes (**call-by-value** for the argument slots themselves;
+  since the values passed may be references to heap objects, mutable
+  values like vectors are shared by reference).
+- **Scoping**: **lexical (static) scoping**, resolved entirely at compile
+  time. `compiler/src/Resolver.fs` assigns every local variable a fixed
+  stack slot and every non-local reference an upvalue, following the same
+  scope/slot/upvalue algorithm as `clox` (*Crafting Interpreters*); the VM
+  never does a name-based environment lookup at runtime for locals.
+  Closures capture the variables active at the point a function is
+  *declared*, not where it's *called* — implemented as `ObjUpvalue`s that
+  point directly at a stack slot until that slot goes out of scope, then
+  hold a closed-over copy. `super` resolution is **lexical**, the same as
+  `0.1-poc` — it resolves to the class the calling method is *written in*,
+  never to the calling instance's actual runtime class (see
   [§10](#10-classes-and-objects)).
-- **Name-binding / mutability default**: **immutable by default**. `var x
-  = 1` cannot be reassigned; `var x mut = 1` opts in to reassignment. This
-  extends to function parameters (also immutable inside the function body)
-  but *not* to object fields, which are always freely reassignable — a
-  deliberately asymmetric, explicitly-flagged design point (see
-  [§13](#13-known-limitations)).
+- **Name-binding / mutability default**: **immutable by default**, now
+  **enforced at compile time** rather than only at runtime — `var x = 1`
+  followed by `x = 2` is a compile-time error (`docs/PLAN-0.1-POC.md`
+  decision 2's runtime-only interim tradeoff is resolved for `0.1`). `var x
+  mut = 1` opts in to reassignment. This extends to function parameters
+  (also immutable inside the function body) but *not* to object fields,
+  which are always freely reassignable — the same deliberately asymmetric
+  design point as `0.1-poc` (see [§13](#13-known-limitations)). **New for
+  `0.1`**: a mutable variable declared without an initializer (`var x
+  mut`) starts as `undef`, not `nil` — reading it before its first
+  assignment is a runtime error, not a silent `nil` (see
+  [§4](#4-variables-and-mutability)).
 - **Object model**: **class-based** (not prototype-based), with **single
   inheritance** via `extends` and **nominal** dispatch — a method call
-  resolves by walking the instance's class and its superclass chain by
-  name, with no structural/duck-typed interface concept. The object model
-  is currently **partial**: user-defined classes produce real objects with
-  method dispatch, but the built-in value types (numbers, strings,
-  booleans, vectors) are plain values with **no methods of their own** —
-  there's no `"hello".length()`-style access on primitives in `0.1-poc`.
+  resolves against the instance's actual runtime class (`ObjClass`'s
+  `methods` map, populated by copying the superclass's methods at
+  `extends`-time), with no structural/duck-typed interface concept. The
+  object model is currently **partial**: user-defined classes produce real
+  objects with method dispatch, but the built-in value types (numbers,
+  strings, booleans, vectors) are plain values with **no methods of their
+  own** — there's no `"hello".length()`-style access on primitives.
+  **New for `0.1`**: a class can now reference itself by name from inside
+  its own methods (see [§10](#10-classes-and-objects)).
 - **Concurrency model**: **none**. Iqalox is single-threaded with no
   concurrency primitives, no `async`/`await`, and no scheduling model of
   any kind at this stage.
-- **Error-handling model**: internally, control flow and errors both use
-  host-language exceptions (`BreakSignal`/`ContinueSignal`/`ReturnSignal`/
-  `IqaloxRuntimeError`), but **none of this is exposed to Iqalox source
+- **Error-handling model**: internally, the compiler front-end accumulates
+  scan/parse/resolve/codegen errors as data (not exceptions), and the VM
+  signals runtime faults via a C++ exception (`RuntimeError`) caught once
+  at the top of `main`, but **none of this is exposed to Iqalox source
   code** — there is no `try`/`catch`/`throw` construct. A runtime error
   anywhere aborts the whole program (see [§12](#12-errors)).
 - **Metaprogramming/reflection**: **none**. No `eval`, no reflection API,
@@ -137,16 +167,18 @@ DIGIT       → '0'...'9'
 ```
 
 - **Numbers** are always floating-point — there is no separate integer
-  type (`5` and `5.0` are the same value). `stringify` drops a trailing
-  `.0` when printing, so `print 5` prints `5`, not `5.0`.
-- **Strings** may use single or double quotes interchangeably, but **no
-  escape sequences are processed** — a string is everything between the
-  matching quote characters, verbatim (see [§13](#13-known-limitations)).
+  type (`5` and `5.0` are the same value). Printing drops a trailing `.0`,
+  so `print 5` prints `5`, not `5.0` (see [§11](#11-the-standard-library-so-far)).
+- **Strings** may use single or double quotes interchangeably. **New for
+  `0.1`**: escape sequences are now processed inside string literals —
+  `\n` `\t` `\r` `\\` `\'` `\"` `\0` are recognized; any other character
+  after a backslash is a compile-time scan error. `0.1-poc` had no escape
+  processing at all (see [§13](#13-known-limitations)).
 - **Comments**: `# ...` runs to end of line; `<# ... #>` is a block comment
   and may span multiple lines. Neither nests.
-- **Implicit semicolons**: a newline is scanned as a `SEMICOLON` token,
-  exactly like a literal `;`. A blank line (or a comment-only line) becomes
-  a harmless empty statement, not an error.
+- **Implicit semicolons**: a newline is scanned as a statement terminator,
+  exactly like a literal `;`. A blank line (or a comment-only line)
+  becomes a harmless empty statement, not an error.
 - **Keywords** (cannot be used as identifiers): `and`, `class`, `false`,
   `fun`, `for`, `nil`, `or`, `return`, `super`, `self`, `true`, `var`,
   `extends`, `break`, `continue`, `mut`. (`with`, `module`, `trait`, `use`
@@ -156,7 +188,7 @@ DIGIT       → '0'...'9'
 
 ## 3. Values and types
 
-Iqalox has five kinds of runtime value in `0.1-poc`:
+Iqalox has five kinds of user-visible runtime value in `0.1`:
 
 | Type | Literal syntax | Example |
 |---|---|---|
@@ -171,6 +203,13 @@ function values (user-defined or native builtins) and class
 instances — see [§7](#7-functions-and-closures) and
 [§10](#10-classes-and-objects).
 
+**New for `0.1`**: there is also an internal `undef` value (distinct from
+`nil`), used to mark a mutable variable that hasn't been assigned yet.
+It is never actually observable in a running program — every read of a
+variable checks for `undef` first and raises a runtime error immediately,
+so it can't be printed, compared, passed to a function, or stored
+anywhere (see [§4](#4-variables-and-mutability)).
+
 **Truthiness**: only `nil` and `false` are falsy. Every other value — `0`,
 `""` (empty string), and `[]` (empty vector) included — is truthy:
 
@@ -180,17 +219,18 @@ print ("" ? "truthy" : "falsy")    # truthy
 print (nil ? "truthy" : "falsy")   # falsy
 ```
 
-**Equality** (`==`/`!=`) compares values directly (via the host language's
-own equality) and never raises — comparing a number to a string, for
-instance, is a well-defined `false`, not an error. **Ordering** comparisons
-(`>`, `>=`, `<`, `<=`) and **arithmetic** (`+`, `-`, `*`, `/`, `%`, `^`)
-require both operands to be numbers and raise `IqaloxRuntimeError`
-otherwise — there is no string comparison or string `+` concatenation (use
-`concat`, [§11](#11-the-standard-library-so-far)).
+**Equality** (`==`/`!=`) compares values directly and never raises —
+comparing a number to a string, for instance, is a well-defined `false`,
+not an error. **Ordering** comparisons (`>`, `>=`, `<`, `<=`) and
+**arithmetic** (`+`, `-`, `*`, `/`, `%`, `^`) require both operands to be
+numbers and raise a runtime error otherwise — there is no string
+comparison or string `+` concatenation (use `concat`,
+[§11](#11-the-standard-library-so-far)).
 
-Vectors are **literals only** in `0.1-poc`: `[1, 2, 3]` produces a value,
-but there is no indexing (`v[0]`), no mutation, no `length`, and no other
-vector-manipulation stdlib yet — that's `0.2` scope (`ROADMAP.md`).
+Vectors are **literals only** in `0.1`, same as `0.1-poc`: `[1, 2, 3]`
+produces a value, but there is no indexing (`v[0]`), no mutation, no
+`length`, and no other vector-manipulation stdlib yet — that's `0.2`
+scope (`ROADMAP.md`).
 
 ## 4. Variables and mutability
 
@@ -198,25 +238,39 @@ vector-manipulation stdlib yet — that's `0.2` scope (`ROADMAP.md`).
 var x = 1          # immutable -- must be initialized
 var y mut = 1      # mutable -- may be reassigned
 y = 2              # OK
-x = 2              # runtime error: assigning to immutable variable 'x'
+x = 2              # compile-time error: 'x' is immutable
 var z mut          # OK -- mutable declarations may omit the initializer,
-                    # z simply starts out nil
+                    # but z starts as undef, not nil (see below)
 ```
 
-An immutable (`var x`, no `mut`) declaration **must** have an initializer —
-`var x` with no `mut` and no `= ...` is a parse error, since there would be
-no way to ever give it a value. A mutable declaration may omit the
-initializer, in which case the variable starts as `nil`.
+An immutable (`var x`, no `mut`) declaration **must** have an
+initializer — `var x` with no `mut` and no `= ...` is a compile-time
+error, since there would be no way to ever give it a value. A mutable
+declaration may omit the initializer, in which case the variable starts
+as `undef`.
 
-Reassigning a variable that wasn't declared `mut` is a **runtime** error
-(`IqaloxRuntimeError`), not a compile-time one — `0.1-poc` has no static
-analysis pass to catch this earlier (see [§13](#13-known-limitations)).
+**New for `0.1`**: reassigning a variable that wasn't declared `mut` is
+now caught at **compile time** — `compiler/src/Resolver.fs` tracks each
+binding's mutability and reports an error before any bytecode is even
+generated, resolving `0.1-poc`'s documented interim tradeoff
+(`docs/PLAN-0.1-POC.md` decision 2) of only catching this at runtime.
 Function parameters are immutable inside the function body by the same
 rule, with no per-parameter `mut` syntax to opt out.
 
-Object fields (`self.x = ...`) are the one exception: they are **always**
-freely reassignable, with no `mut` concept at all (see
-[§13](#13-known-limitations) for why).
+**New for `0.1`**: reading a mutable variable before it's ever been
+assigned (`var z mut` then using `z` with no assignment in between) is a
+**runtime** error — `undef` is a distinct value from `nil`, and every
+variable read checks for it first. This is deliberately a runtime check,
+not a compile-time one: unlike immutability (which depends only on static
+structure — was there an initializer, is there a later assignment), a
+`var mut` binding's assignedness can depend on control flow the resolver
+doesn't model (e.g. a variable assigned inside one branch of a ternary but
+not another).
+
+Object fields (`self.x = ...`) are the one exception to all of the above:
+they are **always** freely reassignable, with no `mut` concept and no
+`undef` state at all (fields simply don't exist until first assigned —
+see [§13](#13-known-limitations) for why).
 
 ## 5. Operators and precedence
 
@@ -252,6 +306,14 @@ print (++x)            # 2 -- mutates x and evaluates to the new value
 print (--x)            # 1
 ```
 
+Every short-circuiting operator here (`??`, `and`, `or`, ternary/elvis)
+compiles to a conditional jump in the emitted bytecode — the right-hand
+side's bytecode is only reached, and thus only ever executed, when it's
+actually needed. Elvis (`a ?: b`) in particular evaluates its condition
+exactly once even though it's also the "then" value, via a jump that
+reuses the already-computed value rather than emitting the condition's
+bytecode twice.
+
 ## 6. Control flow
 
 **There is no `if`/`else` statement and no `while` loop.** Both are
@@ -282,10 +344,10 @@ print (name ?: "anonymous")   # Waddles
 
 `break` and `continue` are **expressions**, not statements — they're
 parsed the same way `_` (see below) is, which is exactly what makes them
-legal ternary branches. Evaluating one raises an internal signal that
-propagates up to the nearest enclosing `for` loop; using either outside of
-a loop is reported as a runtime error rather than crashing the
-interpreter.
+legal ternary branches. Each compiles to a jump out of (`break`) or back
+to the top of (`continue`) the nearest enclosing `for` loop's bytecode;
+using either outside of a loop is reported as a compile-time codegen
+error rather than crashing anything.
 
 `for` is the only loop construct, with the full three-clause C-style form,
 every clause optional:
@@ -295,7 +357,7 @@ for (var i mut = 0; i < 5; ++i) { print i; }
 for (;;) { break; }   # infinite loop, only escape is a break somewhere inside
 ```
 
-The **ignore operator** `_` is a expression that evaluates to `nil` with
+The **ignore operator** `_` is an expression that evaluates to `nil` with
 no side effect — useful as an explicit "do nothing" ternary branch:
 
 ```
@@ -321,7 +383,10 @@ print (apply makeFive)               # 5
 ```
 
 Closures capture their **defining** environment, and that capture is live
-(mutations to captured `mut` variables are visible across calls):
+(mutations to captured `mut` variables are visible across calls) — the VM
+implements this with `ObjUpvalue`, which points directly at the
+variable's stack slot for as long as that slot is live, then transitions
+to holding a closed-over copy once the enclosing call returns:
 
 ```
 fun createCounter() {
@@ -335,7 +400,7 @@ print count()   # 2
 ```
 
 Recursion works via the normal name-binding mechanism (a function's own
-name is bound in its enclosing environment before its body runs):
+name is bound in its enclosing scope before its body runs):
 
 ```
 fun fact(n) { return (n == 1) ? n : (n * fact (n - 1)); }
@@ -397,8 +462,8 @@ fun square(n) { return n * n; }
 ```
 
 The right-hand side of `|>` must be a bare function name (a variable
-reference) — `a |> 1` is a parse error, since `1` isn't something that can
-be called.
+reference) — `a |> 1` is a compile-time parse error, since `1` isn't
+something that can be called.
 
 ## 10. Classes and objects
 
@@ -420,9 +485,11 @@ duck.quack()                 # Waddles
   freely reassignable — there's no field-declaration syntax and no
   immutability concept for them (see [§13](#13-known-limitations)).
   Accessing an undefined property on an instance is a runtime error.
-- **Single inheritance** via `extends`; `IqaloxClass.find_method` walks
-  the superclass chain, so a subclass with no override of its own still
-  inherits the parent's method:
+- **Single inheritance** via `extends`. Unlike `0.1-poc`'s live
+  superclass-pointer-chain walk, `0.1`'s VM copies the superclass's whole
+  method table into the subclass once, at `extends`-time (`ObjClass`'s
+  `methods` map) — behaviorally identical, since Iqalox has no syntax for
+  adding methods to a class after it's declared:
 
 ```
 class A { greet() { print "A"; } }
@@ -436,21 +503,31 @@ B().greet()   # A -- B has no override, inherits A's
   three-level hierarchy where only the middle class overrides and calls
   `super` demonstrates this: the grandchild still ends up invoking the
   grandparent's method through the middle class's `super` call, regardless
-  of which subclass instance it's called on.
+  of which subclass instance it's called on. Ordinary (non-`super`) method
+  calls, in contrast, dispatch dynamically against the receiver's actual
+  runtime class — so an inherited method calling `self.method()` correctly
+  reaches a subclass's override.
 - **Extending a non-class value** (`class B extends NotAClass { }` where
   `NotAClass` isn't a class) is a runtime error, checked when the `class`
   statement executes.
+- **New for `0.1`**: a class can reference itself by name from inside its
+  own methods — `0.1-poc` had no placeholder-then-patch binding step to
+  support this (see [§13](#13-known-limitations) in
+  `docs/LANGUAGE-POC.md`); `0.1`'s resolver defines the class's own name
+  in scope before resolving its methods, so a method can look itself, or
+  another instance of the same class, up by name.
 - Printing a class value itself shows `<class Duck>`; printing an instance
   shows `<Duck instance>`.
-- **Out of scope for `0.1-poc`** (deferred to `0.2`, per
+- **Out of scope for `0.1`** (deferred to `0.2`, per
   `docs/PLAN-0.1-POC.md` decision 5): getters/setters, mixins (`with`),
   and traits (`trait`/`use`). Only plain field access and baseline Lox
   method dispatch exist today.
 
 ## 11. The standard library (so far)
 
-`0.1-poc` has exactly two builtin functions, both registered as ordinary
-(shadowable, non-keyword) bindings in the global environment — there is no
+`0.1` has exactly two builtin functions, both registered as ordinary
+(shadowable, non-keyword) global bindings by the VM before any user
+statement runs (`vm/src/natives.hpp`/`.cpp`) — there is no
 `printStmt`/`concatStmt`, and no reserved-word status protects their
 names:
 
@@ -461,13 +538,17 @@ names:
   them with no separator, returning the resulting string. This is
   currently the *only* way to build a string from non-string values or to
   join strings together, since `+` doesn't work on strings
-  ([§3](#3-values-and-types)).
+  ([§3](#3-values-and-types)). A non-vector argument is a runtime error
+  (`Argument to 'concat' must be a vector, got <type>.`).
 
 ```
 concat ["a", 1, "b"]   # "a1b"
 ```
 
-Because these are just values, they can be shadowed like any other name:
+Because these are just values, they can be shadowed like any other name —
+attempting to `var print = ...`/`var concat = ...` at the **top level**
+is a compile-time error (redeclaring an existing global), the same as
+redeclaring any other global; shadowing inside a nested scope is fine:
 
 ```
 fun test() {
@@ -488,83 +569,95 @@ Iqalox distinguishes two error phases, both of which currently **abort the
 whole program** — there is no way for Iqalox source code to catch or
 recover from either kind:
 
-- **Scan/parse errors** (`[line N] Error at 'x': ...`) — e.g. an
-  unterminated string, an unexpected character, a malformed ternary.
-  Running a file with any of these exits with status `65` and never
-  reaches the interpreter at all.
-- **Runtime errors** (`IqaloxRuntimeError`, printed as the message plus
-  `[line N]`) — e.g. assigning to an immutable variable, calling a
-  non-callable value, wrong arity, dividing by zero, a non-number operand
-  to an arithmetic/comparison operator, an undefined variable or property,
-  extending a non-class. Running a file that hits one of these exits with
-  status `70`, after whatever output was already produced.
+- **Compile-time errors** — scan errors (e.g. an unterminated string, an
+  invalid escape sequence, an unexpected character), parse errors (e.g. a
+  malformed ternary), resolve errors (e.g. reassigning an immutable
+  variable, using `super` outside a subclass), and codegen errors (e.g.
+  `break` outside a loop). `iqaloxc` reports each as `[line N] Error:
+  message` to stderr and exits with status `65` — codegen errors currently
+  print without a line number at all (see [§13](#13-known-limitations)).
+  Compilation never reaches the VM at all if any stage reports an error.
+- **Runtime errors** — e.g. assigning to an immutable variable was already
+  caught above, but wrong arity, dividing by zero, a non-number operand to
+  an arithmetic/comparison operator, an undefined variable/property,
+  reading a `var mut` before its first assignment, extending a non-class,
+  calling a non-callable value. `iqaloxvm` reports the message to stderr
+  and exits with status `70`, after whatever output was already produced.
 
-Both kinds also print the offending source line itself, with a `^`
-underline pointing at exactly where the error starts (spanning the whole
-lexeme, not just its first character):
-
-```
-[line 2] Error at '@@@': Unexpected characters: @@@
-    var y = @@@ 2
-            ^^^
-```
-
-A run of consecutive unrecognized characters (`@@@` above) is reported as
-**one** error, not one per character.
+**New for `0.1` (a real gap, not a design choice)**: unlike `0.1-poc`,
+which prints `[line N] Error at 'x': message` plus a caret-underlined
+source excerpt for *both* compile-time and runtime errors, `0.1`'s
+compile-time errors print only `[line N] Error: message` (no offending
+token text, no source excerpt), and `0.1`'s runtime errors currently print
+**no line number at all** — the VM doesn't yet track which source line a
+given bytecode instruction came from. See
+[§13](#13-known-limitations) for the full accounting; this is flagged as a
+known regression in diagnostic quality, not a silent one.
 
 There is no `try`/`catch`/`throw` construct in the language itself.
 
 ## 13. Known limitations
 
 These are documented tradeoffs and open items, not undiscovered bugs — see
-`docs/PLAN-0.1-POC.md` for the full history of how each was arrived at.
+`docs/PLAN-0.1.md` and `docs/PLAN-0.1-POC.md` for the full history of how
+each was arrived at.
 
-1. **No escape sequences in string literals.** `"a\nb"` is the four
-   literal characters `a`, `\`, `n`, `b` — there is no `\n`, `\t`, `\"`,
-   etc. processing in the scanner.
-2. **Vectors are literals only.** `[1, 2, 3]` produces a value with no
+1. **Vectors are literals only.** `[1, 2, 3]` produces a value with no
    indexing, mutation, length, or other operations — full array support is
    `0.2` scope.
-3. **No string concatenation via `+`.** `"a" + "b"` is a runtime error
+2. **No string concatenation via `+`.** `"a" + "b"` is a runtime error
    (arithmetic `+` requires both operands to be numbers); use `concat
    ["a", "b"]` instead.
-4. **Immutability enforcement is runtime-only, not compile-time.**
-   Reassigning an immutable variable is *ideally* a compile-time error,
-   but `0.1-poc` has no static analysis/resolver pass to do that yet (see
-   `docs/PLAN-0.1-POC.md` decision 2) — it's caught at the moment the
-   assignment would execute instead.
-5. **Object fields have no immutability concept at all.** Unlike `var`,
+3. **Object fields have no immutability concept at all.** Unlike `var`,
    `self.x = ...` is always allowed, both the first time and on every
    later reassignment — there's no `mut`-equivalent for fields, and no
    field-declaration syntax to hang one on even if there were.
-6. **Classes can't reference themselves by name from inside their own
-   methods.** There's no placeholder-then-patch binding step in
-   `Environment` (unlike jlox's approach in the book) — this has never
-   blocked any real example, since methods reference `self`/`super`, never
-   their own enclosing class's name, but it is a real gap if that's ever
-   needed.
-7. **Chaining `.method()` straight onto a call that itself takes an
+4. **Chaining `.method()` straight onto a call that itself takes an
    argument is ambiguous, and currently binds to the argument, not the
    outer call.** `B "Bea".greet()` parses as `B(("Bea").greet())`, not
    `(B("Bea")).greet()` — there's no parenthesis marking where a
    paren-free call's argument list ends, unlike Lox's `f(x).y`. Workaround:
    bind the call's result to a variable first, or wrap the whole call in
    its own grouping parens (`(B "Bea").greet()`).
-8. **No built-in methods on primitive values.** Numbers, strings,
+5. **No built-in methods on primitive values.** Numbers, strings,
    booleans, and vectors have no methods of their own (`"hi".length()`
    doesn't exist) — only user-defined class instances support method
    dispatch.
-9. **No concurrency, no exception handling, no reflection/metaprogramming**
+6. **No concurrency, no exception handling, no reflection/metaprogramming**
    exist at the language level (see [§1](#1-introduction-and-classification)).
-10. **Error location is line/column only, with a single-line source
-    excerpt.** There's no multi-line context, no "did you mean," and no
-    IDE-style rich diagnostics — just the offending line and a caret.
+7. **Diagnostic quality regressed relative to `0.1-poc` for this release.**
+   `0.1-poc` reports both compile-time and runtime errors as `[line N]
+   Error at 'x': message` plus a caret-underlined single-line source
+   excerpt. `0.1` currently reports compile-time errors as a bare `[line N]
+   Error: message` (scan/parse/resolve stages only — codegen errors have
+   no line number at all), and runtime errors with **no line number
+   whatsoever**, since the VM doesn't yet associate bytecode instructions
+   with their originating source line. This is a real, confirmed
+   regression surfaced while writing this document (not caught by the
+   Phase 9 conformance suite, which only diffs successful-run stdout, not
+   error-path stderr/exit codes) — worth a follow-up phase to add line
+   tracking through `Codegen.fs`/`Bytecode.fs`/the VM before treating
+   `0.1`'s error UX as done.
+8. **Leading-underscore identifiers scan correctly here but not in
+   `0.1-poc`.** Fixed in `compiler/src/Scanner.fs` (`docs/PLAN-0.1.md`
+   Phase 2) but not carried back into `poc/`, since decoupling
+   the two implementations' bugfix schedules is the deliberate model going
+   forward (see `docs/PLAN-0.1-POC.md`'s running list) — see
+   `docs/LANGUAGE-POC.md` §13 for the `0.1-poc`-side version of this
+   limitation.
+
+The following `0.1-poc` limitations are **resolved** as of `0.1` (see
+`docs/LANGUAGE-POC.md` §13 for their original write-ups): no escape
+sequences in string literals (now fixed, §2 above), immutability
+enforcement being runtime-only rather than compile-time (now fixed, §4
+above), and classes being unable to reference themselves by name (now
+fixed, §10 above).
 
 ## 14. Grammar and precedence reference
 
 The authoritative, up-to-date grammar lives in
 `langspec/SYNTAX_GRAMMAR.md`; the precedence table (same information,
-presented tightest-to-loosest) is in the root `README.md`. Both are kept
-in sync with `poc/src/parser.py` as the language evolves — refer to those
-files directly rather than duplicating them here, since a third copy would
-only be one more place for the three to drift out of sync.
+presented tightest-to-loosest) is in the root `README.md`. Both describe
+the language independent of any one implementation — refer to those files
+directly rather than duplicating them here, since a third copy would only
+be one more place for the three to drift out of sync.
