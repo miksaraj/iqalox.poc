@@ -359,19 +359,61 @@ Two implementation notes:
 Regression tests for both in `compiler/tests/ParserTests.fs` (75 F# tests
 total, up from 36).
 
-**Phase 4 — Resolver / semantic analysis (F#).** Compile-time lexical
-scope and variable-slot resolution (locals get compile-time-known stack
-slots instead of runtime hashmap lookups; closures get upvalues) — the
-standard *Crafting Interpreters* Part III resolver, and exactly where
-compile-time immutability enforcement and self-referencing-class-name
-binding both naturally live:
-  - Compile-time immutability check: reject any assignment to an immutable
-    binding during this pass, before codegen ever runs.
-  - Self-referencing classes: reserve the class's own name slot before
-    compiling its method bodies, patch it once the class value is fully
-    constructed — adapting jlox's runtime-only placeholder-then-patch
-    pattern (that `0.1-poc` couldn't support, `docs/PLAN-0.1-POC.md` §1)
-    to a compile-time slot reservation instead.
+~~**Phase 4 — Resolver / semantic analysis (F#).**~~ Done.
+`compiler/src/Bound.fs` defines `BoundExpr`/`BoundStmt` — the same shape
+as `Ast.fs`'s `Expr`/`Stmt`, except every variable reference/assignment/
+`self`/`super` now carries a `VariableBinding` (`LocalBinding` of a stack
+slot, `UpvalueBinding` of an index, or `GlobalBinding` of a name) and
+every declaration carries a `DeclaredBinding` (`DeclaredLocal`/
+`DeclaredGlobal`) saying where it creates one; each function/method also
+gets its resolved `LocalCount` (how many stack slots its frame needs) and
+`Upvalues` (how to populate each captured variable when a closure over it
+is created). `compiler/src/Resolver.fs`'s `Resolver.resolve` produces this
+from the parsed AST, using `clox`'s own scope/slot/upvalue algorithm
+(*Crafting Interpreters* Part III) — `poc` has no resolver at all to port
+from for this phase, so this one is new, not a port:
+
+- **Compile-time immutability enforcement**: assigning to an immutable
+  local, upvalue, or global is now a compile error, not a runtime one.
+  Global checks are **order-independent** — a first pass
+  (`preRegisterGlobals`) registers every top-level `var`/`fun`/`class`
+  name and its mutability *before* any body is resolved, so a function
+  referencing a global declared later in the same file (ordinary,
+  expected mutual-recursion-style code) still gets a fully-informed
+  check, not a guess based on partial information.
+- **Self-referencing classes**: a class's own name is declared (as an
+  immutable global or local, matching where the `class` statement itself
+  lives) *before* its method bodies are resolved, so a method can
+  reference its own enclosing class by name — the gap `docs/LANGUAGE.md`
+  §13 documented as a `0.1-poc` limitation is closed for `0.1`.
+- **`self`/`super`** are resolved through the exact same local/upvalue/
+  global machinery as any other name, by looking up the synthetic names
+  `"self"`/`"super"` — a method's function context gets an implicit `self`
+  local at slot 0, and a class with a superclass gets a synthetic `super`
+  local in a scope wrapping all of its methods (mirroring `poc`'s own
+  extra-`Environment`-layer trick for `super`, just done at compile time).
+  Falling through all the way to an unresolved global for either name is
+  exactly the "used outside a method" / "no superclass" error case, since
+  neither name can ever be a real user-declared identifier (both are
+  reserved keywords).
+- **Redeclaration in the same scope** (`var x = 1 ... var x = 2` in the
+  same block, or twice at the top level) is now also a compile error,
+  matching `poc`'s `Environment.define`'s "already declared" rule, moved
+  to compile time.
+
+Not in scope for this phase (no regression versus `poc`, which doesn't
+check these statically either): `break`/`continue` outside a loop,
+`return` outside a function — these stay dynamically checked, since
+adding compile-time tracking for them would need new state
+(loop-depth/inside-function counters) that nothing else in this resolver
+needs, unlike `self`/`super`, which reuse the exact same machinery already
+built for ordinary variable resolution at zero extra cost.
+
+95 F# tests total (up from 75), covering locals/upvalues (including a
+doubly-nested closure capturing a grandparent's local through an
+upvalue-of-an-upvalue)/globals resolution, both immutability-enforcement
+cases, redeclaration, self-referencing classes, and all four `self`/
+`super` scoping scenarios.
 
 **Phase 5 — Code generation (F#), bytecode format v1.** Full opcode set
 covering every `0.1-poc` expression/statement plus classes/closures.

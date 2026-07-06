@@ -11,6 +11,7 @@
   <ItemGroup>
     <Compile Include="ScannerTests.fs" />
     <Compile Include="ParserTests.fs" />
+    <Compile Include="ResolverTests.fs" />
     <Compile Include="BytecodeTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
