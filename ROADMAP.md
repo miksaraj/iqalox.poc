@@ -191,8 +191,8 @@ in **F#** and a bytecode VM backend written in **C++23** — see
 `docs/PLAN-0.1.md` for the full plan. The split — per *Crafting
 Interpreters* — is:
 
-- **Frontend** (`frontend/`, F#): scanner, compiler (source → bytecode)
-- **Backend** (`backend/`, C++23): VM, chunk (bytecode representation),
+- **Frontend** (`compiler/`, F#): scanner, compiler (source → bytecode)
+- **Backend** (`vm/`, C++23): VM, chunk (bytecode representation),
   debug tooling
 
 ## Standard library vision
