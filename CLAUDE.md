@@ -232,9 +232,9 @@ identical output to `poc`.
   `sys.modules` before importing project modules; see
   `docs/PLAN-0.1-POC.md` §5 if that ever needs revisiting.
 - **`compiler/`/`vm/` testing**: xUnit (F#) and Catch2 (C++) respectively,
-  per `docs/PLAN-0.1.md` §7 — plus a cross-implementation conformance job
-  running `langspec/examples/*.iqx` through both `poc/` and
-  `compiler/`+`vm/` and diffing output.
+  per `docs/PLAN-0.1.md` §7 — plus `scripts/conformance-test.sh` (Phase 9),
+  a CI job running every `langspec/examples/*.iqx` fixture through both
+  `poc/` and `compiler/`+`vm/` and diffing output byte-for-byte.
 - **`compiler/` F# style**: targets the current F# language version (F# 10
   as of .NET 10) — prefer newer idioms where they cleanly simplify existing
   code (e.g. a discriminated union's auto-generated `.IsCaseName` property,
