@@ -186,6 +186,26 @@ let ``assigning to a class's own name is a compile error`` () =
     Assert.Contains("immutable", errors.[0].Message)
 
 [<Fact>]
+let ``calling a native global like print needs no declaration and is not an error`` () =
+    let bound, errors = resolveSource "print(1)"
+    Assert.Empty errors
+    match bound with
+    | [ BExpressionStmt(BCall(BVariable(GlobalBinding "print", _), [ _ ])) ] -> ()
+    | _ -> failwith $"unexpected shape: %A{bound}"
+
+[<Fact>]
+let ``assigning to a native global like print is a compile error`` () =
+    let _, errors = resolveSource "print = 1"
+    Assert.Single errors |> ignore
+    Assert.Contains("immutable", errors.[0].Message)
+
+[<Fact>]
+let ``redeclaring a native global like concat is a compile error`` () =
+    let _, errors = resolveSource "var concat = 1"
+    Assert.Single errors |> ignore
+    Assert.Contains("already declared", errors.[0].Message)
+
+[<Fact>]
 let ``LocalCount includes self plus every declared local`` () =
     let bound, errors = resolveSource "class Duck {\n    quack(a) { var b = 1\nreturn a; }\n}"
     Assert.Empty errors

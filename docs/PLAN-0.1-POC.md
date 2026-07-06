@@ -586,6 +586,17 @@ this list only tracks what's still outstanding in `poc/src/` itself.
    already-computed value for the truthy branch (a jump-based pattern that
    makes double-evaluation structurally impossible, rather than a
    special-cased fix).
+6. **`concat` crashes the whole interpreter on a non-vector argument**,
+   instead of raising a clean `IqaloxRuntimeError`. `_native_concat` does
+   `''.join(interpreter.stringify(value) for value in arguments[0])` with
+   no check that `arguments[0]` is actually a list — `concat(5)` raises an
+   uncaught Python `TypeError: 'float' object is not iterable` that
+   propagates straight out of `Interpreter.interpret`'s exception handling
+   (which only catches `IqaloxRuntimeError`/`BreakSignal`/`ContinueSignal`/
+   `ReturnSignal`), printing a raw Python traceback instead of a normal
+   `[line N] Error: ...` report. Found while implementing `0.1`'s native
+   stdlib (`docs/PLAN-0.1.md` Phase 7); the VM's `concat` validates its
+   argument's type and raises a normal runtime error instead.
 
 ### Still open
 

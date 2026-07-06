@@ -43,7 +43,15 @@ struct CallFrame {
 // so construct the `Vm` before loading anything into it.
 class Vm {
 public:
-    Vm() = default;
+    // Defines the native stdlib (`print`, `concat` -- Phase 7) as globals
+    // before anything else runs, mirroring `poc/src/interpreter.py`'s
+    // `Interpreter.__init__`, which defines both in the same environment
+    // chain user code runs in before any user statement executes. Safe to
+    // allocate here even though `gcEnabled` is still false: exactly like
+    // objects `bytecode::load` builds, these become reachable the moment
+    // `interpret` anchors the script's closure, via the `globals` map
+    // itself, which is always scanned as a root.
+    Vm();
     ~Vm();
 
     Vm(const Vm&) = delete;
@@ -91,13 +99,11 @@ public:
     // takes effect once `gcEnabled` is also true (see `allocate`).
     bool stressGc = false;
 
-    // Looks up a global by name. There's no `print`/`concat` yet (Phase
-    // 7) for a running program to report its own results through the
-    // language itself, so `vm/tests/test_vm.cpp`'s hand-assembled
-    // fixtures read results back out this way instead -- typically by
-    // having the test program assign its answer to a conventionally
-    // named global. Also a reasonable building block for a future
-    // REPL/debugger, not purely test scaffolding.
+    // Looks up a global by name -- also how `vm/tests/test_vm.cpp`'s
+    // hand-assembled fixtures read a result back out without going
+    // through `print`, typically by having the test program assign its
+    // answer to a conventionally named global. A reasonable building
+    // block for a future REPL/debugger too, not purely test scaffolding.
     const Value* getGlobal(const std::string& name) const {
         auto it = globals.find(name);
         return it == globals.end() ? nullptr : &it->second;
@@ -140,8 +146,11 @@ private:
     Value& constantAt(CallFrame& frame, uint16_t index);
     ObjString* stringConstantAt(CallFrame& frame, uint16_t index);
 
+    void defineNatives();
+
     void callValue(const Value& callee, int argCount);
     void call(ObjClosure* closure, int argCount);
+    void callNative(ObjNativeFunction* native, int argCount);
     ObjUpvalue* captureUpvalue(size_t stackIndex);
     Value readUpvalue(ObjUpvalue* upvalue) const { return upvalue->open ? stack[upvalue->stackIndex] : upvalue->closed; }
     void writeUpvalue(ObjUpvalue* upvalue, const Value& value);

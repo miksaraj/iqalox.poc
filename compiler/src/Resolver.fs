@@ -282,6 +282,18 @@ type private Resolver(globals: Dictionary<string, bool>) =
                 let selfBinding, _ = resolveReference "self"
                 BSuper(selfBinding, binding, keyword, method)
 
+/// Native functions the VM provides without any user declaration (Phase
+/// 7: `print`, `concat`) -- pre-registered as immutable globals, exactly
+/// like a user-declared `fun`, so `print = 5` is a compile-time
+/// immutability error and `var print = 1` is a compile-time redeclaration
+/// error instead of silently succeeding just because the resolver has
+/// never heard of the name. Mirrors `poc`'s `Interpreter.__init__`, which
+/// defines both in the same environment chain user code runs in, with
+/// `is_mutable=False`, before any user statement executes. Keep this in
+/// sync with `vm/src/vm.cpp`'s `defineNatives` -- the two toolchains have
+/// no shared source of truth for this list.
+let private nativeGlobals = [ "print"; "concat" ]
+
 /// Resolves `stmts` into a `BoundStmt` list plus any resolution errors
 /// (compile-time immutability violations, redeclarations, `self`/`super`
 /// used where they can't resolve). Never throws -- every error is
@@ -290,6 +302,8 @@ type private Resolver(globals: Dictionary<string, bool>) =
 /// structure.
 let resolve (stmts: Stmt list) : BoundStmt list * ResolveError list =
     let globals = Dictionary<string, bool>()
+    for name in nativeGlobals do
+        globals.[name] <- false
     let preErrors = ResizeArray<ResolveError>()
     preRegisterGlobals globals preErrors stmts
 

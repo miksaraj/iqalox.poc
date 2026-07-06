@@ -8,12 +8,15 @@
 
 namespace iqalox {
 
+class Vm;
+
 enum class ObjType : uint8_t {
     String,
     Vector,
     Function,
     Closure,
     Upvalue,
+    NativeFunction,
 };
 
 // Base of every heap-allocated, GC-managed value. `next` is the intrusive
@@ -102,6 +105,23 @@ struct ObjClosure : Obj {
     std::vector<ObjUpvalue*> upvalues;
 
     explicit ObjClosure(ObjFunction* fn) : Obj(ObjType::Closure), function(fn) {}
+};
+
+// A stdlib function implemented in C++ rather than compiled Iqalox
+// (Phase 7: `print`, `concat`) -- takes the already-popped argument
+// values directly (no bytecode frame involved) and returns the call's
+// result. Takes `Vm&` so an implementation that needs to allocate (e.g.
+// `concat` building its joined result string) can go through the GC's
+// own tracked allocator rather than a raw, untracked `new`.
+struct ObjNativeFunction : Obj {
+    using Fn = Value (*)(Vm&, const std::vector<Value>&);
+
+    std::string name;
+    int arity;
+    Fn function;
+
+    ObjNativeFunction(std::string n, int a, Fn f)
+        : Obj(ObjType::NativeFunction), name(std::move(n)), arity(a), function(f) {}
 };
 
 }  // namespace iqalox
