@@ -556,6 +556,36 @@ this list only tracks what's still outstanding in `poc/src/` itself.
    no `None` check, but `statement()` returns `None` for a bare `;` body
    (`for (;;) ;`). Fixed in `compiler/src/Parser.fs`'s `ForStatement()` by
    treating a `None` body as an empty block (`docs/PLAN-0.1.md` Phase 3).
+3. **The comma operator always evaluates to `nil`.** `(1, 2)` returns
+   `nil`, not `2` — `Interpreter.visit_binary_expr` never had a
+   `TokenType.COMMA` case, so it silently falls through to the method's
+   final `return None`. Every other language's comma operator means
+   "evaluate both sides, discard the left, return the right" — that's
+   what the grammar/precedence docs already imply and what
+   `docs/PLAN-0.1-POC.md`'s own status table already claims is done.
+   Found while designing `0.1`'s codegen (`docs/PLAN-0.1.md` Phase 5);
+   implemented correctly there.
+4. **`??` (null-coalescing) is not short-circuiting.** `5 ?? boom()` calls
+   `boom()` even though `5` isn't `nil`, because `??` is wired through the
+   same generic `Binary` node as `+`/`-`/etc., whose `visit_binary_expr`
+   unconditionally evaluates *both* operands before even looking at the
+   operator — unlike `and`/`or`, which get their own `Logical` node
+   specifically so they can short-circuit. Every language with a `??`
+   operator (JS, C#, Kotlin, Swift) only evaluates the right side when the
+   left is nil/null. Found and fixed the same way as the comma operator
+   above.
+5. **Elvis `?:` evaluates its condition twice when it's truthy.** The
+   parser reuses the exact same `expr` object for both `Ternary.left` (the
+   truthiness check) and `Ternary.middle` (the "value if truthy" reuse),
+   but `visit_ternary_expr` calls `self.evaluate()` on each independently
+   — so a condition with a side effect (e.g. a function call) runs twice,
+   defeating the entire point of the elvis form (reusing the condition's
+   value instead of writing/evaluating it twice). `sideEffect() ?: false`
+   prints its side effect twice. Found the same way as the other two;
+   fixed in codegen by evaluating the condition once and reusing the
+   already-computed value for the truthy branch (a jump-based pattern that
+   makes double-evaluation structurally impossible, rather than a
+   special-cased fix).
 
 ### Still open
 

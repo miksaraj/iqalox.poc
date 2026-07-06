@@ -13,6 +13,8 @@
     <Compile Include="Bound.fs" />
     <Compile Include="Resolver.fs" />
     <Compile Include="Bytecode.fs" />
+    <Compile Include="Disassembler.fs" />
+    <Compile Include="Codegen.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 

@@ -99,10 +99,11 @@ actually specified elsewhere.
 
 See `docs/PLAN-0.1.md` for the full plan — the compiler frontend (`compiler/`,
 F#) and bytecode VM backend (`vm/`, C++23), decoupled through a versioned
-bytecode file (currently format v0 — a minimal container just big enough
-to represent "push a string constant, print it, halt"; see
-`vm/src/bytecode.hpp` for the authoritative layout, mirrored by
-`compiler/src/Bytecode.fs`'s writer). Phase 1 (toolchain scaffolding and
+bytecode file. `vm/src/bytecode.hpp` still implements format v0 (a minimal
+container just big enough to represent "push a string constant, print it,
+halt") — `compiler/` has moved on to format v1 as of Phase 5 (see below);
+rebuilding `vm/` to read v1 is Phase 6's job, one phase behind by design.
+Phase 1 (toolchain scaffolding and
 an end-to-end round-trip proof) is done. Phase 2 (the scanner) is also
 done: `compiler/src/Token.fs` (an idiomatic `TokenType` discriminated
 union) and `compiler/src/Scanner.fs` (`Scanner.scanTokens`) — see
@@ -121,10 +122,25 @@ binding) and `compiler/src/Resolver.fs` (`Resolver.resolve`), implementing
 `clox`'s compile-time scope/slot/upvalue algorithm — see
 `docs/PLAN-0.1.md`'s Phase 4 entry for how compile-time immutability
 enforcement, self-referencing classes, and `self`/`super` scoping all work.
-The codegen (`compiler/`) and VM core/GC/stdlib (`vm/`) are not built yet
-— this section will grow into the same level of detail as the `poc/` one
-above as that work lands. `scripts/phase1-roundtrip-smoke-test.sh` builds
-both and proves `compiler/`'s output loads and runs correctly in `vm/`.
+Phase 5 (code generation) is also done: `compiler/src/Bytecode.fs` now
+defines bytecode format v1 (a structured, index-based `Instruction`/
+`Chunk`/`Constant`/`FunctionProto` representation, serialized to actual
+bytes only in `Bytecode.write`), `compiler/src/Disassembler.fs`
+pretty-prints a `Chunk` (the primary way tests verify codegen output, no
+C++ VM needed), and `compiler/src/Codegen.fs` (`Codegen.compile`) lowers
+`Bound.fs`'s tree to it — see `docs/PLAN-0.1.md`'s Phase 5 entry for the
+stack-depth-tracking model, the three more `poc` bugs (comma, `??`,
+elvis) fixed here, a real gap found in already-merged Phase 4 code
+(`Bound.BSuper` needed `self`'s binding alongside `super`'s to support a
+super-call from inside a closure nested within a method) and fixed in
+both `Bound.fs`/`Resolver.fs`, and the class/method and `for`-loop
+`break`/`continue` codegen sequences. `compiler/src/Program.fs` is now a
+real `iqaloxc` CLI (source path + output path, scan → parse → resolve →
+codegen → write). VM core/GC/stdlib (`vm/`) are not built yet — this
+section will grow into the same level of detail as the `poc/` one above as
+that work lands. `scripts/phase5-compile-smoke-test.sh` (replacing Phase
+1's round-trip script, since `vm/` can't read format v1 yet) builds
+`compiler/` and compiles every `langspec/examples/*.iqx` fixture with it.
 
 ## Engineering conventions
 

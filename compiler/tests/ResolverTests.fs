@@ -156,7 +156,7 @@ let ``super resolves inside a method of a class with a superclass`` () =
     match bound with
     | [ _; BClassStmt(_, _, Some(GlobalBinding "A", _), [ greetDecl ]) ] ->
         match greetDecl.Body with
-        | [ BReturnStmt(_, Some(BCall(BSuper(UpvalueBinding 0, _, methodName), []))) ] ->
+        | [ BReturnStmt(_, Some(BCall(BSuper(LocalBinding 0, UpvalueBinding 0, _, methodName), []))) ] ->
             Assert.Equal("greet", methodName.Lexeme)
         | body -> failwith $"unexpected method body: %A{body}"
     | _ -> failwith $"unexpected shape: %A{bound}"

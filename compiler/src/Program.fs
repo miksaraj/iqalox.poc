@@ -1,21 +1,52 @@
+/// The `iqaloxc` CLI: `.iqx` source -> bytecode file, running every Phase
+/// 2-5 stage in sequence (scan, parse, resolve, generate code) and
+/// stopping at the first stage that reports errors. Exit codes follow
+/// `poc/src/iqalox.py`'s existing sysexits.h convention (64 usage, 65
+/// source/compile error).
 module Iqalox.Program
 
+open System
+open Iqalox.Scanner
+open Iqalox.Parser
+open Iqalox.Resolver
+open Iqalox.Codegen
 open Iqalox.Bytecode
-
-// Phase 1 scope only (docs/PLAN-0.1.md): emits a fixed, hardcoded chunk
-// rather than actually compiling a .iqx source file -- proving the
-// compiler/vm round trip comes before the scanner/parser/codegen exist
-// (Phases 2-5).
-let helloWorldChunk =
-    { Constants = [ "Hello from the Iqalox bytecode VM!" ]
-      Code = Array.concat [ constStringInstr 0u; printInstr; haltInstr ] }
 
 [<EntryPoint>]
 let main argv =
     match argv with
-    | [| outputPath |] ->
-        write helloWorldChunk outputPath
-        0
+    | [| inputPath; outputPath |] ->
+        let source = IO.File.ReadAllText inputPath
+        let tokens, scanErrors = scanTokens source
+
+        if not scanErrors.IsEmpty then
+            for e in scanErrors do
+                eprintfn "[line %d] Error: %s" e.Line e.Message
+            65
+        else
+            let stmts, parseErrors = parse tokens
+
+            if not parseErrors.IsEmpty then
+                for e in parseErrors do
+                    eprintfn "[line %d] Error: %s" e.Token.Line e.Message
+                65
+            else
+                let bound, resolveErrors = resolve stmts
+
+                if not resolveErrors.IsEmpty then
+                    for e in resolveErrors do
+                        eprintfn "[line %d] Error: %s" e.Token.Line e.Message
+                    65
+                else
+                    let chunk, codegenErrors = compile bound
+
+                    if not codegenErrors.IsEmpty then
+                        for e in codegenErrors do
+                            eprintfn "Error: %s" e.Message
+                        65
+                    else
+                        write chunk outputPath
+                        0
     | _ ->
-        eprintfn "Usage: iqaloxc <output bytecode file>"
+        eprintfn "Usage: iqaloxc <input .iqx file> <output bytecode file>"
         64
