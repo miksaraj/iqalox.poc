@@ -554,15 +554,9 @@ These are documented tradeoffs and open items, not undiscovered bugs — see
    booleans, and vectors have no methods of their own (`"hi".length()`
    doesn't exist) — only user-defined class instances support method
    dispatch.
-9. **A leading-underscore identifier doesn't scan correctly.** `_` is
-   checked as its own single-character token before the identifier
-   dispatch runs, so `_foo` currently tokenizes as a bare `_` (the ignore
-   operator) followed by a separate `foo` identifier, not one `_foo` name.
-   No example or test currently needs a leading-underscore identifier, so
-   this is noted rather than fixed.
-10. **No concurrency, no exception handling, no reflection/metaprogramming**
-    exist at the language level (see [§1](#1-introduction-and-classification)).
-11. **Error location is line/column only, with a single-line source
+9. **No concurrency, no exception handling, no reflection/metaprogramming**
+   exist at the language level (see [§1](#1-introduction-and-classification)).
+10. **Error location is line/column only, with a single-line source
     excerpt.** There's no multi-line context, no "did you mean," and no
     IDE-style rich diagnostics — just the offending line and a caret.
 

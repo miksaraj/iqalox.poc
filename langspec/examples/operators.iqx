@@ -7,6 +7,9 @@ describe 7
 
 print concat ["2 ^ 10 = ", 2 ^ 10]
 
+var pi = 3.14
+print (pi * 2)
+
 var enabled mut = false
 print (!enabled)
 

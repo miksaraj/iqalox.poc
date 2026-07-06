@@ -55,12 +55,6 @@ class Scanner:
     def add_token(self, token_type: TokenType, literal: Any = None) -> None:
         self.tokens.append(Token(token_type, self.current_token, literal, self.start_line, self.start_column))
 
-    def match(self, expected: str) -> bool:
-        if self.is_at_end() or self.source[self.current] != expected:
-            return False
-        self.current += 1
-        return True
-
     def peek(self) -> str:
         if self.is_at_end():
             return '\0'
@@ -121,7 +115,13 @@ class Scanner:
     def number(self) -> None:
         while self.is_digit():
             self.advance()
-        if self.peek() == '.' and self.is_digit():
+        # Bug fix: this used to be `self.is_digit()` (no argument), which
+        # defaults to checking `self.peek()` -- the *same* '.' character
+        # already being compared on this line, never the one after it.
+        # The fractional branch could therefore never actually fire:
+        # "3.14" scanned as NUMBER("3"), DOT, NUMBER("14"). Must check
+        # `peek_next()` instead, matching jlox's own `isDigit(peekNext())`.
+        if self.peek() == '.' and self.is_digit(self.peek_next()):
             self.advance()
             while self.is_digit():
                 self.advance()
@@ -136,13 +136,47 @@ class Scanner:
 
     def scan_token(self) -> None:
         c = self.advance()
-        if c in SINGLE_CHARACTER_TOKENS:
+        if c == '_' and self.is_alpha_numeric(self.peek()):
+            # Bug fix: `_` is only the standalone ignore operator when
+            # nothing identifier-like follows it -- otherwise it's the
+            # start of an identifier like `_foo`. This check must come
+            # before the plain SINGLE_CHARACTER_TOKENS dispatch below,
+            # which previously always claimed a bare `_` first, making
+            # `_foo` misscan as UNDERSCORE followed by a separate `foo`
+            # IDENTIFIER instead of one `_foo` identifier.
+            self.identifier()
+        elif c in SINGLE_CHARACTER_TOKENS:
             self.add_token(TokenType(c))
         elif c in ONE_OR_MORE_CHARACTER_TOKENS:
-            compounds = [i for i in ONE_OR_MORE_CHARACTER_TOKENS if i.startswith(c) and len(i) > 1]
+            # Bug fix: try the longest possible match first (e.g. "..."
+            # before "."), and actually verify+consume the compound's full
+            # remaining characters -- this previously only ever checked
+            # and consumed exactly one extra character (`compound[1]`),
+            # silently truncating any 3+-character token (the
+            # currently-unused "..." ellipsis) to just its first two
+            # characters. `BLOCK_COMMENT_END` ('#>') is excluded here since
+            # it only has meaning as a terminator searched for from
+            # *inside* a block comment's own scanning loop below -- a bare
+            # '#' followed by '>' at the top level must still always start
+            # a line comment, not silently match '#>' as if it meant
+            # something on its own (it previously did, and then matched
+            # neither branch below, silently consuming both characters
+            # with no token or error at all).
+            compounds = sorted(
+                (
+                    candidate
+                    for candidate in ONE_OR_MORE_CHARACTER_TOKENS
+                    if candidate.startswith(c) and len(candidate) > 1 and candidate != TokenType.BLOCK_COMMENT_END
+                ),
+                key=len,
+                reverse=True,
+            )
             token = c
             for compound in compounds:
-                if self.match(compound[1]):
+                remaining = compound[1:]
+                if self.source[self.current:self.current + len(remaining)] == remaining:
+                    for _ in remaining:
+                        self.advance()
                     token = compound
                     break
             if token in COMMENT_TOKENS:
@@ -150,14 +184,31 @@ class Scanner:
                     while self.peek() != '\n' and not self.is_at_end():
                         self.advance()
                 elif token == TokenType.BLOCK_COMMENT_START:
-                    while not (self.peek() == '#' and self.peek_next() == '>') and not self.is_at_end():
+                    closed = False
+                    while not self.is_at_end():
+                        if self.peek() == '#' and self.peek_next() == '>':
+                            self.advance()
+                            self.advance()
+                            closed = True
+                            break
                         if self.peek() == '\n':
                             self.advance()
                             self.advance_newline()
                         else:
                             self.advance()
-                    self.advance()
-                    self.advance()
+                    if not closed:
+                        # Bug fix: an unterminated block comment previously
+                        # produced no error at all -- the loop just exited
+                        # silently at EOF (unlike an unterminated string,
+                        # which already errors correctly). Reports at the
+                        # opening "<#" itself (not the whole, possibly huge,
+                        # comment body), matching how string() reports at
+                        # just the opening quote.
+                        import iqalox
+                        iqalox.Iqalox.error(
+                            Token(TokenType.BLOCK_COMMENT_START, token, None, self.start_line, self.start_column),
+                            "Unterminated block comment.",
+                        )
             else:
                 try:
                     self.add_token(TokenType(token))
