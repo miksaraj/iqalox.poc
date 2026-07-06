@@ -1,4 +1,4 @@
-from typing import Any, List
+from typing import Any, List, Optional
 
 from expression import Expr, ExprVisitor, Binary, Logical, Unary, Literal, Grouping, Ternary, Vector, Variable, \
     Assign, Break, Continue, Ignore, Call, Get, Set, Self, Super
@@ -22,12 +22,36 @@ class ReturnSignal(Exception):
         self.value = value
 
 
+def _type_name(value: Any) -> str:
+    if value is None:
+        return 'nil'
+    if isinstance(value, bool):
+        return 'bool'
+    if isinstance(value, float):
+        return 'number'
+    if isinstance(value, str):
+        return 'string'
+    if isinstance(value, list):
+        return 'vector'
+    if isinstance(value, IqaloxClass):
+        return 'class'
+    if isinstance(value, IqaloxInstance):
+        return 'instance'
+    if isinstance(value, IqaloxCallable):
+        return 'function'
+    return 'value'
+
+
 def _native_print(interpreter: 'Interpreter', arguments: List[Any]) -> None:
     print(interpreter.stringify(arguments[0]))
     return None
 
 
 def _native_concat(interpreter: 'Interpreter', arguments: List[Any]) -> str:
+    if not isinstance(arguments[0], list):
+        raise IqaloxRuntimeError(
+            interpreter.native_call_token, f"Argument to 'concat' must be a vector, got {_type_name(arguments[0])}."
+        )
     return ''.join(interpreter.stringify(value) for value in arguments[0])
 
 
@@ -36,6 +60,11 @@ class Interpreter(ExprVisitor, StmtVisitor):
         self.environment = Environment()
         self.environment.define('print', VariableData(NativeFunction('print', 1, _native_print), is_mutable=False))
         self.environment.define('concat', VariableData(NativeFunction('concat', 1, _native_concat), is_mutable=False))
+        # The call-site token for whichever call is currently executing --
+        # lets a native (which otherwise only sees its arguments) raise an
+        # IqaloxRuntimeError with a real source location, e.g. `concat`'s
+        # non-vector-argument check below.
+        self.native_call_token: Optional[Token] = None
 
     def execute(self, stmt: Stmt) -> None:
         stmt.accept(self)
@@ -243,7 +272,12 @@ class Interpreter(ExprVisitor, StmtVisitor):
                 name_token, f'Expected {callee.arity()} argument(s) but got {len(arguments)}.'
             )
 
-        return callee.call(self, arguments)
+        previous_call_token = self.native_call_token
+        self.native_call_token = name_token
+        try:
+            return callee.call(self, arguments)
+        finally:
+            self.native_call_token = previous_call_token
 
     def visit_get_expr(self, expr: Get) -> Any:
         obj = self.evaluate(expr.object)
@@ -275,9 +309,20 @@ class Interpreter(ExprVisitor, StmtVisitor):
 
     def visit_binary_expr(self, expr: Binary) -> Any:
         left = self.evaluate(expr.left)
-        right = self.evaluate(expr.right)
-
         token_type = expr.operator.type
+
+        # `??` short-circuits like every other language's null-coalescing
+        # operator: the right side is only evaluated (and thus only has its
+        # side effects run) when the left side is actually nil.
+        if token_type == TokenType.DOUBLE_QUESTION_MARK:
+            return left if left is not None else self.evaluate(expr.right)
+
+        # The comma operator: evaluate both sides for their side effects,
+        # discard the left, return the right.
+        if token_type == TokenType.COMMA:
+            return self.evaluate(expr.right)
+
+        right = self.evaluate(expr.right)
 
         if token_type == TokenType.BANG_EQUAL:
             return not self.is_equal(left, right)
@@ -315,8 +360,6 @@ class Interpreter(ExprVisitor, StmtVisitor):
         elif token_type == TokenType.POWER:
             self.check_number_operands(expr.operator, left, right)
             return left ** right
-        elif token_type == TokenType.DOUBLE_QUESTION_MARK:
-            return right if left is None else left
 
         return None
 
@@ -324,6 +367,13 @@ class Interpreter(ExprVisitor, StmtVisitor):
         left = self.evaluate(expr.left)
 
         if self.is_truthy(left):
+            # Elvis (`a ?: b`): the parser reuses the same node for both
+            # `expr.left` (the condition) and `expr.middle` (the value to
+            # return when truthy) -- evaluate it exactly once and reuse
+            # that value rather than evaluating it again, which would
+            # double any side effect (see docs/PLAN-0.1-POC.md).
+            if expr.middle is expr.left:
+                return left
             return self.evaluate(expr.middle)
         else:
             return self.evaluate(expr.right)
