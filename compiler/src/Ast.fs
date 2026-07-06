@@ -36,8 +36,8 @@ type Expr =
     | Ternary of left: Expr * leftOperator: Token * middle: Expr * rightOperator: Token * right: Expr
     | Vector of values: Expr list
     | Variable of name: Token
-    | BreakExpr
-    | ContinueExpr
+    | BreakExpr of keyword: Token
+    | ContinueExpr of keyword: Token
     | Ignore
     | Call of callee: Expr * arguments: Expr list
     | Get of obj: Expr * name: Token

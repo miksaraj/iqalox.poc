@@ -45,7 +45,50 @@ open Iqalox.Ast
 open Iqalox.Bound
 open Iqalox.Bytecode
 
-type CodegenError = { Message: string }
+type CodegenError = { Message: string; Line: int }
+
+/// The source line a runtime fault at this expression should be blamed on
+/// -- whichever token is closest at hand, recursing into a handful of
+/// cases with no token of their own (a grouping/vector's own line is
+/// whichever its first sub-expression's is; a bare literal/`_`/`break`/
+/// `continue` has none at all, so `None` here means "leave `CurrentLine`
+/// exactly as it already was," not "reset to line 0"). Mirrors `clox`'s
+/// own approach of stamping every emitted byte with "whatever the parser's
+/// `previous` token's line was most recently," just computed from the
+/// bound tree instead of a live parser cursor.
+let rec private lineOfExpr (expr: BoundExpr) : int option =
+    match expr with
+    | BAssign(_, name, _) -> Some name.Line
+    | BBinary(_, operator, _) -> Some operator.Line
+    | BLogical(_, operator, _) -> Some operator.Line
+    | BGrouping inner -> lineOfExpr inner
+    | BLiteral _ -> None
+    | BUnary(operator, _) -> Some operator.Line
+    | BTernary(_, leftOperator, _, _, _) -> Some leftOperator.Line
+    | BVector values -> values |> List.tryPick lineOfExpr
+    | BVariable(_, name) -> Some name.Line
+    | BBreak keyword -> Some keyword.Line
+    | BContinue keyword -> Some keyword.Line
+    | BIgnore -> None
+    | BCall(callee, _) -> lineOfExpr callee
+    | BGet(_, name) -> Some name.Line
+    | BSet(_, name, _) -> Some name.Line
+    | BSelf(_, keyword) -> Some keyword.Line
+    | BSuper(_, _, keyword, _) -> Some keyword.Line
+
+let rec private lineOfStmt (stmt: BoundStmt) : int option =
+    match stmt with
+    | BBlock statements -> statements |> List.tryPick lineOfStmt
+    | BExpressionStmt expr -> lineOfExpr expr
+    | BVarStmt(_, name, _) -> Some name.Line
+    | BForStmt(initializer, condition, _, body) ->
+        [ initializer |> Option.bind lineOfStmt
+          condition |> Option.bind lineOfExpr
+          lineOfStmt body ]
+        |> List.tryPick id
+    | BFunctionStmt(_, decl) -> Some decl.Name.Line
+    | BReturnStmt(keyword, _) -> Some keyword.Line
+    | BClassStmt(_, name, _, _) -> Some name.Line
 
 /// Net stack effect of one instruction -- the only input `FunctionState`
 /// needs to keep `StackDepth` accurate as instructions are emitted.
@@ -104,15 +147,23 @@ type private LoopContext =
 /// `Resolver.fs`'s own `context <- FunctionContext(...)` pattern.
 type private FunctionState(initialStackDepth: int) =
     let instructions = ResizeArray<Instruction>()
+    let lines = ResizeArray<int>()
     let constants = ResizeArray<Constant>()
 
     member val StackDepth = initialStackDepth with get, set
     member val Loop: LoopContext option = None with get, set
+    /// The source line the *next* emitted instruction gets stamped with --
+    /// updated from whichever token `CompileExpr`/`CompileStmt` most
+    /// recently had in view (see `lineOfExpr`/`lineOfStmt`), not reset per
+    /// instruction, so a token-less case (a literal, `_`) just inherits
+    /// whatever line was already current.
+    member val CurrentLine = 0 with get, set
 
     member _.Here = instructions.Count
 
     member this.Emit(instr: Instruction) : int =
         instructions.Add instr
+        lines.Add this.CurrentLine
         this.StackDepth <- this.StackDepth + stackEffect instr
         instructions.Count - 1
 
@@ -147,13 +198,16 @@ type private FunctionState(initialStackDepth: int) =
         constants.Count - 1
 
     member _.ToChunk() : Chunk =
-        { Constants = constants.ToArray(); Code = instructions.ToArray() }
+        { Constants = constants.ToArray()
+          Code = instructions.ToArray()
+          Lines = lines.ToArray() }
 
 type private Codegen() =
     let errors = ResizeArray<CodegenError>()
     let mutable state = FunctionState(0)
 
-    let error (message: string) = errors.Add { Message = message }
+    let error (message: string) =
+        errors.Add { Message = message; Line = state.CurrentLine }
 
     member this.Errors = List.ofSeq errors
 
@@ -216,6 +270,7 @@ type private Codegen() =
             state.Emit Nil |> ignore
 
     member private this.CompileExpr(expr: BoundExpr) : unit =
+        lineOfExpr expr |> Option.iter (fun line -> state.CurrentLine <- line)
         match expr with
         | BLiteral NilValue -> state.Emit Nil |> ignore
         | BLiteral(BoolValue true) -> state.Emit True |> ignore
@@ -226,8 +281,8 @@ type private Codegen() =
         | BVariable(binding, _) -> this.CompileGetBinding binding
         | BSelf(binding, _) -> this.CompileGetBinding binding
         | BIgnore -> state.Emit Nil |> ignore
-        | BBreak -> this.CompileJumpOut (fun l -> l.BreakTargetDepth) (fun l -> l.BreakJumps) "break"
-        | BContinue -> this.CompileJumpOut (fun l -> l.ContinueTargetDepth) (fun l -> l.ContinueJumps) "continue"
+        | BBreak _ -> this.CompileJumpOut (fun l -> l.BreakTargetDepth) (fun l -> l.BreakJumps) "break"
+        | BContinue _ -> this.CompileJumpOut (fun l -> l.ContinueTargetDepth) (fun l -> l.ContinueJumps) "continue"
         | BAssign(binding, _, value) ->
             this.CompileExpr value
             this.CompileSetBinding binding
@@ -328,6 +383,7 @@ type private Codegen() =
             state.Emit(GetSuper(state.AddStringConstant method.Lexeme)) |> ignore
 
     member private this.CompileStmt(stmt: BoundStmt) : unit =
+        lineOfStmt stmt |> Option.iter (fun line -> state.CurrentLine <- line)
         match stmt with
         | BExpressionStmt expr ->
             this.CompileExpr expr

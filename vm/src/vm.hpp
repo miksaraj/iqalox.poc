@@ -27,6 +27,13 @@ public:
 struct CallFrame {
     ObjClosure* closure;
     size_t ip = 0;
+    // The byte offset `ip` had at the start of whatever instruction is
+    // currently executing -- captured once per `run()` loop iteration,
+    // before any operand bytes are read, so `runtimeError` can still
+    // find it after `ip` has advanced past the whole instruction (or a
+    // callee it invoked pushed further frames of its own). Indexes
+    // `closure->function->chunk.lines` to report `[line N]`.
+    size_t currentInstructionIp = 0;
     // Stack index of this frame's slot 0. Note this is *not* clox's
     // convention of reserving slot 0 for the callee itself -- Resolver.fs
     // starts a plain function's parameters at slot 0 directly (see

@@ -122,6 +122,11 @@ Chunk readChunk(Reader& reader, Vm& vm) {
     uint32_t codeLength = reader.readU32();
     chunk.code = reader.readBytes(codeLength);
 
+    chunk.lines.reserve(codeLength);
+    for (uint32_t i = 0; i < codeLength; ++i) {
+        chunk.lines.push_back(reader.readU16());
+    }
+
     return chunk;
 }
 

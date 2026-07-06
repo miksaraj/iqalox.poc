@@ -853,22 +853,56 @@ classes) are folded into the relevant sections instead of bolted on as an
 addendum. §13's known-limitations list drops the three items `0.1`
 actually resolves and keeps everything still true.
 
-Writing this surfaced one real, previously-unnoticed gap, flagged rather
-than silently fixed or silently ignored: `0.1`'s runtime errors carry
-**no source line number at all** (`vm/src/vm.cpp`'s `runtimeError` just
-throws the message), and its compile-time errors print only a bare
-`[line N] Error: message` — no offending-token text, no caret-underlined
-source excerpt, and codegen errors have no line number either
-(`CodegenError` has no line field). `0.1-poc` has all of this (both of
-its own post-release GitHub issue fixes, `docs/PLAN-0.1-POC.md` §3, plus
-runtime-error line reporting), and the Phase 9 conformance suite didn't
-catch the regression because it only diffs successful-run stdout, never
-error-path stderr or exit codes. Recorded as `docs/LANGUAGE.md` §13 item
-7 (new-format limitation, not a `0.1-poc` one) — a candidate for a
-follow-up phase (line tracking through `Codegen.fs`/`Bytecode.fs`, a
-`currentLine`-equivalent in the VM's fetch-decode loop, and a nicer CLI
-format), not implemented here since it's a nontrivial cross-cutting
-change orthogonal to "write the docs."
+Writing this surfaced one real, previously-unnoticed gap: `0.1`'s runtime
+errors carried **no source line number at all** (`vm/src/vm.cpp`'s
+`runtimeError` just threw the message), and its compile-time errors
+printed only a bare `[line N] Error: message` — codegen errors had no
+line number either (`CodegenError` had no line field at all). `0.1-poc`
+has both of its own post-release GitHub issue fixes (`docs/PLAN-0.1-POC.md`
+§3) plus runtime-error line reporting, and the Phase 9 conformance suite
+didn't catch the regression because it only diffs successful-run stdout,
+never error-path stderr or exit codes. Fixed in this same PR rather than
+deferred, once flagged and confirmed:
+
+- **Bytecode format v2** (`compiler/src/Bytecode.fs`, `vm/src/bytecode.hpp`/
+  `.cpp`): adds a per-instruction-byte line table alongside the existing
+  instruction stream — one `u16` per byte of `code`, not one per
+  instruction, so the VM can look up `lines[ip]` directly with no
+  opcode-width decoding of its own at load time (the same tradeoff `clox`
+  itself makes). `Codegen.fs`'s `FunctionState` gains a `CurrentLine`
+  field, updated from whichever token `lineOfExpr`/`lineOfStmt` finds
+  closest at hand each time `CompileExpr`/`CompileStmt` visits a node, and
+  stamped onto every instruction `Emit` records — mirroring `clox`'s own
+  "stamp every emitted byte with the parser's current line" approach, just
+  computed from the bound tree instead of a live parser cursor. `Ast.fs`/
+  `Bound.fs`'s `BreakExpr`/`ContinueExpr` (`BBreak`/`BContinue`) gained
+  their own keyword token in the process — they carried none before,
+  which would have left "`break` outside a loop" (the one existing codegen
+  error) with no line to report at all, the single worst case for this
+  fix.
+- **`CodegenError` gains a `Line` field**, populated from `CurrentLine` at
+  the point of the error; `Program.fs` now prints `[line N] Error:
+  message` for codegen errors too, matching the other three compile
+  stages.
+- **`vm/src/vm.hpp`'s `CallFrame` gains `currentInstructionIp`**, captured
+  once per `run()` loop iteration before any operand bytes are read (so it
+  survives `ip` advancing past the whole instruction, or a callee's own
+  arity check running before its frame is pushed). `Vm::runtimeError`
+  looks it up against `chunk.lines` and appends `"\n[line N]"` to the
+  thrown message — `main.cpp`'s existing `std::cerr << error.what()`
+  prints the result across two lines, exactly matching `poc`'s own
+  `f"{error}\n[line {error.token.line}]"` shape.
+
+Not fixed (recorded as `docs/LANGUAGE.md` §13 item 7, updated to reflect
+what's still open): `0.1-poc`'s offending-token text (`Error at 'x': ...`)
+and caret-underlined source excerpt. `0.1`'s compile-time stages could
+plausibly grow these (they already have the original source text and,
+for scan/parse/resolve errors, a real token), but the VM fundamentally
+can't reproduce the excerpt without a bigger format change — it only ever
+receives a compiled `.iqbc` file, never the original source text, so
+showing a source line would mean embedding source text in the bytecode
+format itself, not just a line table. Left as a real, smaller open item
+rather than stretched to fit in this same change.
 
 Every other cross-reference to the old `docs/LANGUAGE.md` path across
 this document, `CLAUDE.md`, and `README.md` is updated to point at

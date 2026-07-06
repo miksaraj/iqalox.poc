@@ -1,9 +1,11 @@
-/// Bytecode format v1: superseding format v0's Phase 1 round-trip proof
-/// (`vm/src/bytecode.hpp`, `docs/PLAN-0.1.md` Phase 1) now that `Codegen`
-/// (Phase 5) produces something worth defining a real format for. `vm/`
-/// doesn't understand v1 yet -- rebuilding it to do so is Phase 6's job,
-/// same relationship v0 had to Phase 1 (compiler writes, VM reads, one
-/// phase ahead of the other by design).
+/// Bytecode format v2: adds a per-instruction source-line table (§"lines"
+/// below) so a runtime fault can be blamed on a real `[line N]`, which v1
+/// (Phases 1-9) had no room for at all -- a real diagnostics gap found
+/// while writing `docs/LANGUAGE.md`'s Phase 10 entry (`docs/PLAN-0.1.md`).
+/// Otherwise unchanged from v1, which itself superseded format v0's Phase 1
+/// round-trip proof (`vm/src/bytecode.hpp`, `docs/PLAN-0.1.md` Phase 1) now
+/// that `Codegen` (Phase 5) produces something worth defining a real format
+/// for.
 ///
 /// `Instruction`/`Chunk` are the *structured*, in-memory representation
 /// `Codegen` builds and `Disassemble.fs` prints directly -- jump targets
@@ -11,14 +13,15 @@
 /// what makes both codegen (no manual byte-offset patching) and the
 /// disassembler (no re-decoding) simple. `write` is the only place that
 /// cares about the actual on-disk byte layout, converting indices to byte
-/// offsets in one pass right before serializing.
+/// offsets (and per-instruction line numbers to per-byte ones -- see
+/// "lines" below) in one pass right before serializing.
 ///
 /// On-disk layout (all multi-byte integers little-endian, unchanged
-/// framing style from v0):
+/// framing style from v0/v1):
 ///
 ///   offset  size  field
 ///   0       4     magic: 'I' 'Q' 'B' 'C'
-///   4       1     format version (0x01 for v1)
+///   4       1     format version (0x02 for v2)
 ///   5       <chunk>   the top-level "script" chunk (see below), treated
 ///                     as an implicit zero-arity, zero-upvalue function
 ///
@@ -34,6 +37,11 @@
 ///                    2 index (u16)), then a nested <chunk>
 ///     4     code_length (u32) -- byte length of the instruction stream
 ///     N     instruction bytes
+///     N*2   lines -- one u16 per byte of the instruction stream above
+///           (yes, one per *byte*, not per instruction -- redundant, but
+///           it means the VM can look up `lines[ip]` directly with no
+///           opcode-width decoding of its own at load time, the same
+///           tradeoff `clox` itself makes)
 ///
 ///   Instruction encoding: 1 opcode byte, then a fixed operand width
 ///   determined entirely by the opcode (no variable-width operands except
@@ -51,7 +59,7 @@ open System.Text
 open Iqalox.Bound
 
 [<Literal>]
-let FormatVersion = 1uy
+let FormatVersion = 2uy
 
 type Instruction =
     | Constant of index: int
@@ -113,7 +121,11 @@ and FunctionProto =
       Upvalues: UpvalueDescriptor list
       Chunk: Chunk }
 
-and Chunk = { Constants: Constant[]; Code: Instruction[] }
+/// `Lines.[i]` is the source line `Codegen` had "in view" when it emitted
+/// `Code.[i]` -- parallel to `Code`, one entry per structured instruction
+/// (not one per serialized byte; `write` expands it to the latter, since
+/// that's what a byte-offset-indexed VM needs -- see its own doc comment).
+and Chunk = { Constants: Constant[]; Code: Instruction[]; Lines: int[] }
 
 let private opcodeOf =
     function
@@ -288,8 +300,16 @@ let rec private writeChunk (writer: BinaryWriter) (chunk: Chunk) : unit =
     writer.Write(uint32 codeBytes.Length)
     writer.Write(codeBytes)
 
+    // One u16 line number per byte of `codeBytes`, expanded from
+    // `chunk.Lines`' one-entry-per-*instruction* form by repeating each
+    // instruction's line across every byte of its own serialized length.
+    for i in 0 .. chunk.Code.Length - 1 do
+        let byteLength = instructionByteLength chunk.Code.[i]
+        for _ in 1 .. byteLength do
+            writer.Write(uint16 chunk.Lines.[i])
+
 /// Serializes `chunk` (the top-level script) to `path` in bytecode format
-/// v1.
+/// v2.
 let write (chunk: Chunk) (path: string) : unit =
     use stream = File.Open(path, FileMode.Create, FileAccess.Write)
     use writer = new BinaryWriter(stream)

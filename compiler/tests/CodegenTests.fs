@@ -26,6 +26,21 @@ let ``a bare literal expression statement pushes, pops, then implicitly returns 
     Assert.Equal<Constant[]>([| NumberConstant 1.0 |], chunk.Constants)
 
 [<Fact>]
+let ``each instruction's Lines entry matches the source line it came from`` () =
+    // Regression test for the diagnostics gap found while writing
+    // docs/LANGUAGE.md's Phase 10 entry: bytecode used to carry no line
+    // info at all, so a runtime fault couldn't be blamed on any `[line
+    // N]`. `var x = 1` is line 1, `x` (the bare reference) is line 2; the
+    // implicit trailing `Nil; Return` inherits line 2 too, since nothing
+    // after `x` ever updates CurrentLine again.
+    let chunk = compileSource "var x = 1\nx"
+    Assert.Equal<Instruction[]>(
+        [| Constant 0; DefineGlobal 1; GetGlobal 1; Pop; Nil; Return |],
+        chunk.Code
+    )
+    Assert.Equal<int[]>([| 1; 1; 2; 2; 2; 2 |], chunk.Lines)
+
+[<Fact>]
 let ``a global var declares via DefineGlobal and reads back via GetGlobal`` () =
     let chunk = compileSource "var x = 1\nx"
     Assert.Equal<Instruction[]>([| Constant 0; DefineGlobal 1; GetGlobal 1; Pop; Nil; Return |], chunk.Code)
@@ -235,3 +250,18 @@ let ``break outside any loop is a codegen error, not a crash`` () =
     let _, codegenErrors = compile bound
     Assert.Single codegenErrors |> ignore
     Assert.Contains("outside of a loop", codegenErrors.[0].Message)
+    // Regression test for the diagnostics gap found while writing
+    // docs/LANGUAGE.md's Phase 10 entry: codegen errors used to carry no
+    // line number at all. `break` itself is a token-less BBreak case, so
+    // this also exercises that its keyword's line makes it through.
+    Assert.Equal(1, codegenErrors.[0].Line)
+
+[<Fact>]
+let ``a codegen error reports the line of the statement it occurred on, not line 1`` () =
+    let tokens, _ = scanTokens "var x = 1\nvar y = 2\nbreak\n"
+    let stmts, _ = parse tokens
+    let bound, resolveErrors = resolve stmts
+    Assert.Empty resolveErrors
+    let _, codegenErrors = compile bound
+    Assert.Single codegenErrors |> ignore
+    Assert.Equal(3, codegenErrors.[0].Line)

@@ -49,7 +49,7 @@ std::filesystem::path writeTempFile(const std::vector<uint8_t>& bytes) {
     return path;
 }
 
-std::vector<uint8_t> header() { return {'I', 'Q', 'B', 'C', 0x01}; }
+std::vector<uint8_t> header() { return {'I', 'Q', 'B', 'C', bytecode::kFormatVersion}; }
 
 struct TempFile {
     std::filesystem::path path;
@@ -84,6 +84,9 @@ TEST_CASE("number and string constants decode to their runtime Values", "[byteco
     std::vector<uint8_t> code{0x01, 0, 0, 0x01, 1, 0, 0x23};  // CONSTANT 0, CONSTANT 1, RETURN
     pushU32(bytes, static_cast<uint32_t>(code.size()));
     bytes.insert(bytes.end(), code.begin(), code.end());
+    for (size_t i = 0; i < code.size(); ++i) {
+        pushU16(bytes, 1);  // one line entry per code byte
+    }
     TempFile file(bytes);
 
     Vm vm;
@@ -95,6 +98,7 @@ TEST_CASE("number and string constants decode to their runtime Values", "[byteco
     REQUIRE(isObj(script->chunk.constants[1]));
     REQUIRE(static_cast<ObjString*>(asObj(script->chunk.constants[1]))->value == "hi");
     REQUIRE(script->chunk.code == code);
+    REQUIRE(script->chunk.lines.size() == code.size());
 }
 
 TEST_CASE("a nested FunctionConstant decodes its name/arity/locals/upvalues and its own chunk", "[bytecode]") {
@@ -111,6 +115,7 @@ TEST_CASE("a nested FunctionConstant decodes its name/arity/locals/upvalues and 
     pushU32(bytes, 0);
     pushU32(bytes, 1);
     bytes.push_back(0x23);
+    pushU16(bytes, 5);  // RETURN's line
 
     pushU32(bytes, 0);  // top-level code_length
     TempFile file(bytes);
@@ -128,6 +133,7 @@ TEST_CASE("a nested FunctionConstant decodes its name/arity/locals/upvalues and 
     REQUIRE(function->upvalues[0].index == 0);
     REQUIRE(function->chunk.constants.empty());
     REQUIRE(function->chunk.code == std::vector<uint8_t>{0x23});
+    REQUIRE(function->chunk.lines == std::vector<uint16_t>{5});
 }
 
 TEST_CASE("a bad magic number is rejected", "[bytecode]") {
