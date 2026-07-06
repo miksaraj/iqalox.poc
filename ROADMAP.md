@@ -93,7 +93,7 @@ Explicitly **deferred out of 0.1-poc** (see 0.2): mixin support
 (`trait A {...}` / `class B { use A }`) — the PHP-vs-Scala-style
 implementation question is real but doesn't need answering yet.
 
-### 0.1
+### 0.1 — *scaffolding in progress*
 
 The first real implementation — a compiler frontend (F#) plus a bytecode
 VM backend (C++23), superseding the `0.1-poc` tree-walk interpreter. See

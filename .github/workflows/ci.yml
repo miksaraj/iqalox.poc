@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  vm:
+    name: vm/ (C++23)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install Catch2
+        run: sudo apt-get update && sudo apt-get install -y catch2
+      - name: Configure
+        run: cmake -S vm -B vm/build -DCMAKE_BUILD_TYPE=Debug
+      - name: Build
+        run: cmake --build vm/build -j
+      - name: Test
+        run: ctest --test-dir vm/build --output-on-failure
+
+  compiler:
+    name: compiler/ (F#)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: "8.0.x"
+      - name: Build
+        run: dotnet build compiler/Iqalox.sln
+      - name: Test
+        run: dotnet test compiler/Iqalox.sln
+
+  roundtrip:
+    name: Phase 1 round-trip proof
+    runs-on: ubuntu-latest
+    needs: [vm, compiler]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: "8.0.x"
+      - name: Install Catch2
+        run: sudo apt-get update && sudo apt-get install -y catch2
+      - name: Run round-trip smoke test
+        run: ./scripts/phase1-roundtrip-smoke-test.sh
+
+  poc:
+    name: poc/ (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install dependencies
+        run: pip install -r poc/requirements-dev.txt
+      - name: Test
+        run: cd poc && pytest
+      - name: Run every example script
+        run: |
+          for f in langspec/examples/*.iqx; do
+            python3 poc/src/iqalox.py "$f"
+          done
