@@ -1,16 +1,18 @@
 # The Iqalox Language (0.1-poc)
 
 This is the complete reference for Iqalox as implemented by the `0.1-poc`
-tree-walk interpreter in `src/`. It documents what the language **actually
-does today**, with runnable examples and an explicit list of known
-limitations — it does not speculate about `0.1`, `0.2`, or later versions
-except where noted for contrast. See `ROADMAP.md` for what's planned beyond
-this milestone and `docs/PLAN-0.1-POC.md` for the day-to-day implementation
-log and open design questions.
+tree-walk interpreter in `poc/src/`. It documents what the language
+**actually does today**, with runnable examples and an explicit list of
+known limitations — it does not speculate about `0.1`, `0.2`, or later
+versions except where noted for contrast. See `ROADMAP.md` for what's
+planned beyond this milestone, `docs/PLAN-0.1-POC.md` for the day-to-day
+`0.1-poc` implementation log and open design questions, and
+`docs/PLAN-0.1.md` for the real `0.1` implementation (compiler frontend in
+F#, bytecode VM backend in C++23) currently in progress alongside this one.
 
 Every code sample below is valid Iqalox and, unless marked otherwise, runs
-successfully against `src/iqalox.py`. Longer, complete programs live under
-`langspec/examples/*.iqx`.
+successfully against `poc/src/iqalox.py`. Longer, complete programs live
+under `langspec/examples/*.iqx`.
 
 ## Table of contents
 
@@ -65,10 +67,11 @@ exists today, not a permanent commitment for later Iqalox versions:
   is no manual memory management, no pointers, and no language-level
   concept of ownership or lifetimes.
 - **Execution model**: a classic **tree-walking interpreter** — source is
-  scanned into tokens, parsed directly into an AST (`src/expression.py`/
-  `src/statement.py`), and the AST is walked and evaluated node-by-node via
-  the visitor pattern (`src/interpreter.py`). There is no bytecode, no
-  intermediate representation, and no JIT.
+  scanned into tokens, parsed directly into an AST (`poc/src/expression.py`/
+  `poc/src/statement.py`), and the AST is walked and evaluated node-by-node
+  via the visitor pattern (`poc/src/interpreter.py`). There is no bytecode,
+  no intermediate representation, and no JIT. (A bytecode-compiled
+  implementation is in progress for `0.1` — see `docs/PLAN-0.1.md`.)
 - **Evaluation strategy**: **eager (strict)** evaluation everywhere except
   the two short-circuiting logical operators `and`/`or`, which don't
   evaluate their right operand unless needed. Function arguments are fully
@@ -568,6 +571,6 @@ These are documented tradeoffs and open items, not undiscovered bugs — see
 The authoritative, up-to-date grammar lives in
 `langspec/SYNTAX_GRAMMAR.md`; the precedence table (same information,
 presented tightest-to-loosest) is in the root `README.md`. Both are kept
-in sync with `src/parser.py` as the language evolves — refer to those
+in sync with `poc/src/parser.py` as the language evolves — refer to those
 files directly rather than duplicating them here, since a third copy would
 only be one more place for the three to drift out of sync.
