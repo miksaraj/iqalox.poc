@@ -1,5 +1,12 @@
 # Plan: getting to 0.1-poc
 
+> **Note (post-`0.1` repo reorg):** `0.1-poc`'s code moved to `poc/` (was
+> the repository root) as part of `docs/PLAN-0.1.md`'s Phase 0. The `src/`/
+> `tests/`/`tools/` paths throughout this document describe the
+> implementation *as it was built*, before that move — a historical
+> record, left as-is rather than retroactively rewritten. Read `src/` etc.
+> below as `poc/src/` etc. for where things actually live today.
+
 Status snapshot based on reading `src/` against the `0.1-poc` feature list in
 `ROADMAP.md` and the example scripts in `langspec/examples/*.iqx`. This is a
 living document — update the status table and the open-questions list as work
