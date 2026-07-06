@@ -99,9 +99,15 @@ actually specified elsewhere.
 
 See `docs/PLAN-0.1.md` for the full plan — the compiler frontend (`compiler/`,
 F#) and bytecode VM backend (`vm/`, C++23), decoupled through a versioned
-bytecode file. Both are in early scaffolding as of this writing; this
-section will grow into the same level of detail as the `poc/` one above as
-that work lands.
+bytecode file (currently format v0 — a minimal container just big enough
+to represent "push a string constant, print it, halt"; see
+`vm/src/bytecode.hpp` for the authoritative layout, mirrored by
+`compiler/src/Bytecode.fs`'s writer). Phase 1 (toolchain scaffolding and
+an end-to-end round-trip proof) is done; the real scanner/parser/resolver/
+codegen (`compiler/`) and VM core/GC/stdlib (`vm/`) are not built yet —
+this section will grow into the same level of detail as the `poc/` one
+above as that work lands. `scripts/phase1-roundtrip-smoke-test.sh` builds
+both and proves `compiler/`'s output loads and runs correctly in `vm/`.
 
 ## Engineering conventions
 

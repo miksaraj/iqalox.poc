@@ -251,13 +251,20 @@ low-priority items, not silently resolved here.
 
 ## 6. Suggested sequencing
 
-**Phase 1 — Toolchain scaffolding & round-trip proof.** Stand up
-`compiler/` as an F# solution and `vm/` as a CMake C++23 project; define
-bytecode format v0 (§3) with just enough to represent "call the `print`
-native with one string constant"; `compiler/` emits that fixed bytecode
-for a hardcoded program, `vm/` loads and executes it. Prove the whole
-pipeline end-to-end before any real compiler work starts. Stand up CI for
-both toolchains (§8).
+~~**Phase 1 — Toolchain scaffolding & round-trip proof.**~~ Done. `vm/`
+is a CMake C++23 project (`iqaloxvm`, `src/bytecode.{hpp,cpp}` implementing
+the format v0 reader, Catch2 tests in `tests/`). `compiler/` is an F#
+solution (`Iqaloxc.sln`; `src/Bytecode.fs` implements the matching writer,
+`src/Program.fs` emits a hardcoded "print a greeting" chunk; xUnit tests in
+`tests/`). `scripts/phase1-roundtrip-smoke-test.sh` builds both and proves
+`iqaloxc`'s output is exactly what `iqaloxvm` can load and execute
+end-to-end. CI (`.github/workflows/ci.yml`) runs both toolchains' own test
+suites, the round-trip script, and (newly, since this was the project's
+first workflow) `poc/`'s existing pytest suite plus every
+`langspec/examples/*.iqx` script — all `uses:` steps pinned to a full
+commit SHA per `CLAUDE.md`. Environment note: this environment needed
+`dotnet-sdk-8.0` and `catch2` installed via `apt`; CMake/GCC/Clang were
+already present (see §8's original findings).
 
 **Phase 2 — Scanner (F#).** Port `0.1-poc`'s scanner design — its two
 post-release bugfixes (accurate line/column tracking; coalescing runs of
