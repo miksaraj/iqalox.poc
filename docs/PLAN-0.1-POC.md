@@ -535,6 +535,28 @@ now uses a decimal literal (`var pi = 3.14`), and
 leading-underscore parameter name (`secondOf(_first, second)`), a common
 "intentionally unused" naming convention.
 
+### Noticed via the 0.1 F# port, not yet patched here (running list)
+
+Per-owner direction: keep collecting these as they turn up across the
+`0.1` implementation phases (`docs/PLAN-0.1.md`) rather than patching
+`poc` one bug at a time, and fix them all together in one batch later.
+Each entry below was already fixed in the corresponding `compiler/`
+module (see `docs/PLAN-0.1.md`'s phase notes for the fix and its tests) —
+this list only tracks what's still outstanding in `poc/src/` itself.
+
+1. **`Parser.primary()`'s vector-literal handling can permanently disable
+   the comma operator.** `comma_as_operator` is toggled off, the elements
+   are parsed, then toggled back on with a plain assignment — but a parse
+   error partway through the elements (e.g. `[1, 2, bad+]`) raises past
+   that restore, leaving `comma_as_operator = False` for the rest of the
+   file. Fixed in `compiler/src/Parser.fs`'s `Primary()` with a
+   `try`/`finally` (`docs/PLAN-0.1.md` Phase 3).
+2. **`Parser.for_statement()` can construct a `For` node with a `None`
+   body**, crashing the interpreter later. `body = self.statement()` has
+   no `None` check, but `statement()` returns `None` for a bare `;` body
+   (`for (;;) ;`). Fixed in `compiler/src/Parser.fs`'s `ForStatement()` by
+   treating a `None` body as an empty block (`docs/PLAN-0.1.md` Phase 3).
+
 ### Still open
 
 1. `error.py`'s `IqaloxRuntimeError.__str__`/`__repr__` just call `super()`,

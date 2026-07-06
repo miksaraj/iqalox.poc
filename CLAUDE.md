@@ -114,11 +114,17 @@ union) and `compiler/src/Parser.fs` (`Parser.parse`) — see
 `docs/PLAN-0.1.md`'s Phase 3 entry for a real naming collision between
 `TokenType` and `Ast` case names (fixed by suffixing the colliding `Ast`
 cases) and two more `poc` bugs found and fixed rather than carried
-forward. The resolver/codegen (`compiler/`) and VM core/GC/stdlib (`vm/`)
-are not built yet — this section will grow into the same level of detail
-as the `poc/` one above as that work lands. `scripts/phase1-roundtrip-smoke-test.sh`
-builds both and proves `compiler/`'s output loads and runs correctly in
-`vm/`.
+forward. Phase 4 (the resolver) is also done: `compiler/src/Bound.fs`
+(`BoundExpr`/`BoundStmt`, the same shape as `Ast.fs` but with every
+variable reference/declaration/`self`/`super` carrying its resolved
+binding) and `compiler/src/Resolver.fs` (`Resolver.resolve`), implementing
+`clox`'s compile-time scope/slot/upvalue algorithm — see
+`docs/PLAN-0.1.md`'s Phase 4 entry for how compile-time immutability
+enforcement, self-referencing classes, and `self`/`super` scoping all work.
+The codegen (`compiler/`) and VM core/GC/stdlib (`vm/`) are not built yet
+— this section will grow into the same level of detail as the `poc/` one
+above as that work lands. `scripts/phase1-roundtrip-smoke-test.sh` builds
+both and proves `compiler/`'s output loads and runs correctly in `vm/`.
 
 ## Engineering conventions
 

@@ -10,6 +10,8 @@
     <Compile Include="Scanner.fs" />
     <Compile Include="Ast.fs" />
     <Compile Include="Parser.fs" />
+    <Compile Include="Bound.fs" />
+    <Compile Include="Resolver.fs" />
     <Compile Include="Bytecode.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
