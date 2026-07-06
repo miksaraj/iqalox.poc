@@ -1,0 +1,86 @@
+name: Release
+
+# Fires once a GitHub Release is published (not on tag push, and not on a
+# draft being created/edited) -- release notes themselves are written by
+# hand against the tag first (same process the 0.1.x-poc releases already
+# used), decoupled from this workflow's only job: build the two binaries
+# users actually need (iqaloxc, iqaloxvm) for each platform and attach
+# them as release assets.
+on:
+  release:
+    types: [published]
+
+# Least-privilege default; the one job that needs to upload release
+# assets grants itself contents: write explicitly below.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (${{ matrix.rid }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: macos-latest
+            rid: osx-arm64
+          - os: windows-latest
+            rid: win-x64
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Publish iqaloxc (self-contained, single file)
+        run: dotnet publish compiler/src/Iqaloxc.fsproj -c Release -r ${{ matrix.rid }} --self-contained -p:PublishSingleFile=true -o dist
+
+      - name: Configure vm/ (Release, no test dependency)
+        run: cmake -S vm -B vm/build -DCMAKE_BUILD_TYPE=Release -DIQALOX_BUILD_TESTS=OFF
+
+      - name: Build iqaloxvm
+        run: cmake --build vm/build --target iqaloxvm --config Release -j
+
+      - name: Assemble and upload release archive (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          name="iqalox-${{ github.event.release.tag_name }}-${{ matrix.rid }}"
+          mkdir "$name"
+          # `dotnet publish` names the binary after the project (`Iqaloxc`),
+          # not the lowercase `iqaloxc` CLI name used everywhere else.
+          cp dist/Iqaloxc "$name/iqaloxc"
+          cp vm/build/iqaloxvm "$name/"
+          cp README.md LICENSE "$name/"
+          cp -r langspec/examples "$name/examples"
+          tar czf "$name.tar.gz" "$name"
+          gh release upload "${{ github.event.release.tag_name }}" "$name.tar.gz" --clobber --repo "${{ github.repository }}"
+
+      - name: Assemble and upload release archive (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $name = "iqalox-${{ github.event.release.tag_name }}-${{ matrix.rid }}"
+          New-Item -ItemType Directory -Path $name | Out-Null
+          # `dotnet publish` names the binary after the project (`Iqaloxc`),
+          # not the lowercase `iqaloxc` CLI name used everywhere else.
+          Copy-Item dist/Iqaloxc.exe "$name/iqaloxc.exe"
+          Copy-Item vm/build/Release/iqaloxvm.exe "$name/"
+          Copy-Item README.md,LICENSE "$name/"
+          Copy-Item -Recurse langspec/examples "$name/examples"
+          Compress-Archive -Path $name -DestinationPath "$name.zip"
+          gh release upload "${{ github.event.release.tag_name }}" "$name.zip" --clobber --repo "${{ github.repository }}"

@@ -267,6 +267,18 @@ but `actions/checkout@<full-40-char-sha>`), including for first-party GitHub
 actions. This is a supply-chain security requirement, not a style preference —
 don't relax it for convenience.
 
+Two workflows, two different jobs: `.github/workflows/ci.yml` runs on every
+push/PR (build + test both toolchains, the smoke test, the conformance
+suite); `.github/workflows/release.yml` fires only when a GitHub Release is
+published (`on: release: types: [published]`, not on tag push) and builds
+`iqaloxc`/`iqaloxvm` for Linux/macOS/Windows, attaching each platform's
+archive as a release asset. Release notes are written by hand against the
+tag first (same process the `0.1.x-poc` releases used) — this workflow's
+only job is producing the binaries, not the notes. `vm/CMakeLists.txt`'s
+`IQALOX_BUILD_TESTS` option (default `ON`) is what lets `release.yml`
+configure with `-DIQALOX_BUILD_TESTS=OFF`, so a release build of `iqaloxvm`
+needs no Catch2 dependency at all.
+
 ## License
 
 GPLv3 (`LICENSE`). No file header convention is currently in use — don't add
