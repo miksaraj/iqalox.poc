@@ -10,6 +10,7 @@ add_executable(iqaloxvm
     src/bytecode.cpp
     src/value.cpp
     src/vm.cpp
+    src/natives.cpp
 )
 
 target_include_directories(iqaloxvm PRIVATE src)

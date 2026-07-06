@@ -635,10 +635,89 @@ and a program that calls the not-yet-defined `print` or declares a class
 fails with exactly the expected Phase 7/8 boundary error rather than
 crashing.
 
-**Phase 7 — Native standard library (C++23).** `print`, `concat` at
-minimum for parity with `0.1-poc`. Whether any stdlib is ever written in
-Iqalox itself (self-hosting) is a separate, later conversation — not
-blocking here.
+~~**Phase 7 — Native standard library (C++23).**~~ Done. `vm/src/object.hpp`
+adds `ObjNativeFunction` (a name, an arity, and a plain `Value(*)(Vm&,
+const std::vector<Value>&)` function pointer — no bytecode frame involved
+in calling one), `vm/src/vm.cpp`'s `Vm::callValue` dispatches to it
+alongside `ObjClosure`, and `vm/src/natives.hpp`/`.cpp` implement `print`
+and `concat` themselves, both arity 1, both defined as globals by
+`Vm::defineNatives` (called from the `Vm` constructor, mirroring
+`poc/src/interpreter.py`'s `Interpreter.__init__`, which defines both in
+the same environment chain user code runs in before any statement
+executes).
+
+Runtime semantics again ported from `poc`, not reinvented — with one real
+bug found and *not* carried forward:
+
+- **`stringify`** (`value.hpp`/`.cpp`, deliberately deferred out of Phase
+  6 since nothing consumed it yet) matches `poc`'s own `stringify`:
+  `nil`/`undef` literal, booleans lowercase, strings unquoted, numbers
+  with a trailing `.0` stripped. The float-formatting piece needed real
+  care: `poc`'s `str(float)` is Python's own shortest-round-trip
+  algorithm, which switches to scientific notation at fixed thresholds
+  (exponent `< -4` or `>= 16`, confirmed empirically against
+  `python3 -c "print(repr(v))"` at both boundaries) — `std::to_chars`'
+  own "general" format instead switches whenever scientific happens to be
+  *shorter*, disagreeing with Python for ordinary values like
+  `100000000.0` (renders `"1e+08"`). Fixed by taking `to_chars`' shortest
+  *scientific*-form digits and exponent and reassembling fixed notation
+  myself whenever the exponent falls in Python's fixed range, reusing
+  `to_chars`' own scientific string verbatim outside it (already an exact
+  match in every case checked).
+- **A vector's own elements print with `repr`-like rules, not
+  `stringify`'s** — a nested number keeps its `.0` and a nested string is
+  quoted (`[1.0, 'a']`, not `[1, a]`) — because `poc`'s vectors are plain
+  Python lists, so `str(a_vector)` is Python's own `list.__str__`, which
+  renders every element with `repr()` internally rather than calling
+  `poc`'s custom `stringify` recursively. Confirmed against `poc` directly
+  rather than assumed, including the quote-character switch (`'`, unless
+  the string itself contains a `'` but no `"`, matching Python's `repr`
+  heuristic without chasing its full escaping-rule parity, which doesn't
+  matter for anything this project's example scripts print).
+- **A real bug in `poc`, found and not carried forward**: `concat(5)` (a
+  non-vector argument) raises an uncaught Python `TypeError` that
+  propagates straight past `Interpreter.interpret`'s exception handling
+  (which only catches `IqaloxRuntimeError` and the three control-flow
+  signals), printing a raw Python traceback instead of a normal
+  `[line N] Error: ...` report. Logged in `docs/PLAN-0.1-POC.md`'s running
+  list per the standing batch-fix policy; the VM's `concat` validates its
+  argument's type first and raises a clean `RuntimeError` instead.
+
+One `compiler/`-side fix, in already-merged Phase 4 code: `Resolver.fs`
+had no way to know `print`/`concat` exist at all, since neither is a
+user-declared `var`/`fun`/`class` — meaning `print = 5` or `var print = 1`
+would have silently compiled instead of being the compile-time
+immutability/redeclaration error `poc`'s runtime-checked equivalent
+already gives (`poc` defines both in the same environment chain user code
+resolves names through, immutably, before any user statement runs).
+Fixed by having `resolve` pre-seed its `globals` table with `print`/
+`concat` as immutable, exactly like a user-declared `fun`, before
+pre-registering the user's own top-level names — kept in sync with
+`vm/src/vm.cpp`'s `defineNatives` by a cross-referencing comment in both
+places, since the two toolchains have no shared source of truth for this
+list.
+
+`scripts/phase5-compile-smoke-test.sh` is retired in favor of
+`scripts/phase7-run-smoke-test.sh`, which compiles *and runs* every
+`langspec/examples/*.iqx` fixture end to end, checking each reaches its
+expected outcome (0 for a full program, 70 for one that still hits the
+Phase 8 classes boundary) — meaningfully checkable for the first time now
+that a real program can produce real output. Not Phase 9's planned
+conformance suite (no output-diffing against `poc` here), but a
+hand-verified spot check during this phase found all four non-class
+example scripts (`control_flow.iqx`, `functions.iqx`, `loops.iqx`,
+`operators.iqx` — covering closures, recursion, the pipe operator,
+ternaries, prefix increment, and `for` loops) produce byte-for-byte
+identical output to `poc` already.
+
+13 new Catch2 tests: `test_value.cpp` (new) unit-tests `stringify`
+directly, including every float-formatting boundary above; `test_vm.cpp`
+gained coverage for `print`'s stdout output (captured by redirecting
+`std::cout`'s streambuf for the duration of the test) and return value,
+`concat`'s joining behavior and its clean error on a non-vector argument,
+and arity checking for native calls. 3 new xUnit tests in
+`ResolverTests.fs` cover calling `print` needing no declaration, and the
+new immutability/redeclaration errors for native names.
 
 **Phase 8 — Classes & OOP in bytecode form (C++23 + F#).** Bound methods,
 single inheritance, `super` calls — `clox`'s approach (superclass method

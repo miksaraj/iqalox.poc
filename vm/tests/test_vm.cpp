@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -453,4 +455,81 @@ TEST_CASE("aggressive stress-mode collection doesn't corrupt a running program",
     vm.interpret(b.build());
 
     REQUIRE(asNumber(*vm.getGlobal("result")) == 84.0);
+}
+
+TEST_CASE("print and concat are present as globals without any user declaration", "[vm][natives]") {
+    Vm vm;
+    REQUIRE(vm.getGlobal("print") != nullptr);
+    REQUIRE(vm.getGlobal("concat") != nullptr);
+}
+
+TEST_CASE("print writes stringify(value) plus a newline to stdout and returns nil", "[vm][natives]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t printName = b.addStringConstant("print");
+    uint16_t hello = b.addStringConstant("hello");
+    uint16_t result = b.addStringConstant("result");
+
+    b.emitU16(OpCode::GetGlobal, printName);
+    b.emitU16(OpCode::Constant, hello);
+    b.emitU16(OpCode::Call, 1);
+    b.emitU16(OpCode::DefineGlobal, result);
+
+    std::ostringstream captured;
+    std::streambuf* oldBuf = std::cout.rdbuf(captured.rdbuf());
+    vm.interpret(b.build());
+    std::cout.rdbuf(oldBuf);
+
+    REQUIRE(captured.str() == "hello\n");
+    REQUIRE(isNil(*vm.getGlobal("result")));
+}
+
+TEST_CASE("concat joins stringify of each element with no separator", "[vm][natives]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t concatName = b.addStringConstant("concat");
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t a = b.addStringConstant("a");
+    uint16_t result = b.addStringConstant("result");
+
+    b.emitU16(OpCode::GetGlobal, concatName);
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::Constant, a);
+    b.emit(OpCode::True);
+    b.emitU16(OpCode::BuildVector, 3);
+    b.emitU16(OpCode::Call, 1);
+    b.emitU16(OpCode::DefineGlobal, result);
+
+    vm.interpret(b.build());
+
+    const Value* resultValue = vm.getGlobal("result");
+    REQUIRE(isObj(*resultValue));
+    REQUIRE(static_cast<ObjString*>(asObj(*resultValue))->value == "1atrue");
+}
+
+TEST_CASE("concat with a non-vector argument is a clean runtime error, not a crash", "[vm][natives]") {
+    // Regression test for a real poc bug (docs/PLAN-0.1-POC.md's running
+    // list): poc's concat(5) raises an uncaught Python TypeError instead
+    // of a clean IqaloxRuntimeError.
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t concatName = b.addStringConstant("concat");
+    uint16_t five = b.addNumberConstant(5);
+
+    b.emitU16(OpCode::GetGlobal, concatName);
+    b.emitU16(OpCode::Constant, five);
+    b.emitU16(OpCode::Call, 1);
+
+    REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
+}
+
+TEST_CASE("calling print with the wrong argument count is a runtime error", "[vm][natives]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t printName = b.addStringConstant("print");
+
+    b.emitU16(OpCode::GetGlobal, printName);
+    b.emitU16(OpCode::Call, 0);
+
+    REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
 }

@@ -3,6 +3,7 @@
 #include <cmath>
 
 #include "bytecode.hpp"
+#include "natives.hpp"
 
 namespace iqalox {
 
@@ -25,6 +26,13 @@ double pythonStyleModulo(double a, double b) {
 }
 
 }  // namespace
+
+Vm::Vm() { defineNatives(); }
+
+void Vm::defineNatives() {
+    globals["print"] = objValue(allocate<ObjNativeFunction>("print", 1, nativePrint));
+    globals["concat"] = objValue(allocate<ObjNativeFunction>("concat", 1, nativeConcat));
+}
 
 Vm::~Vm() {
     Obj* obj = objects;
@@ -96,11 +104,36 @@ ObjString* Vm::stringConstantAt(CallFrame& frame, uint16_t index) {
 }
 
 void Vm::callValue(const Value& callee, int argCount) {
-    if (isObj(callee) && asObj(callee)->type == ObjType::Closure) {
-        call(static_cast<ObjClosure*>(asObj(callee)), argCount);
-        return;
+    if (isObj(callee)) {
+        Obj* obj = asObj(callee);
+        if (obj->type == ObjType::Closure) {
+            call(static_cast<ObjClosure*>(obj), argCount);
+            return;
+        }
+        if (obj->type == ObjType::NativeFunction) {
+            callNative(static_cast<ObjNativeFunction*>(obj), argCount);
+            return;
+        }
     }
     runtimeError(typeName(callee) + " value is not callable.");
+}
+
+void Vm::callNative(ObjNativeFunction* native, int argCount) {
+    if (argCount != native->arity) {
+        runtimeError("Expected " + std::to_string(native->arity) + " argument(s) but got " +
+                     std::to_string(argCount) + ".");
+    }
+
+    // Copied into a plain `std::vector` for the native function's own
+    // simple ABI (`deque` doesn't offer a contiguous view to hand out
+    // instead). Safe even though `native->function` may itself allocate
+    // (`concat` builds its result string): the arguments stay right where
+    // they are on `stack` -- still scanned as a GC root -- until
+    // `truncateStack` removes them *after* the call returns.
+    std::vector<Value> args(stack.end() - argCount, stack.end());
+    Value result = native->function(*this, args);
+    truncateStack(stack.size() - static_cast<size_t>(argCount) - 1);
+    push(result);
 }
 
 void Vm::call(ObjClosure* closure, int argCount) {
@@ -420,6 +453,10 @@ void Vm::blackenObject(Obj* obj) {
         }
         case ObjType::Upvalue:
             markValue(static_cast<ObjUpvalue*>(obj)->closed);
+            break;
+        case ObjType::NativeFunction:
+            // A raw C++ function pointer plus a name/arity -- nothing
+            // GC-owned to trace through.
             break;
     }
 }

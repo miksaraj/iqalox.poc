@@ -136,10 +136,7 @@ super-call from inside a closure nested within a method) and fixed in
 both `Bound.fs`/`Resolver.fs`, and the class/method and `for`-loop
 `break`/`continue` codegen sequences. `compiler/src/Program.fs` is now a
 real `iqaloxc` CLI (source path + output path, scan → parse → resolve →
-codegen → write). `scripts/phase5-compile-smoke-test.sh` (replacing Phase
-1's round-trip script, since `vm/` couldn't read format v1 yet at the
-time) builds `compiler/` and compiles every `langspec/examples/*.iqx`
-fixture with it.
+codegen → write).
 
 Phase 6 (VM core) is also done: `vm/src/value.hpp` defines `Value` as a
 tagged `std::variant` (`nil`/`undef`/`bool`/`double`/`Obj*`);
@@ -160,11 +157,29 @@ bug caught before it shipped (the GC mustn't run at all until the loaded
 program's top-level closure is anchored on the stack, or it frees the
 whole program before it starts). Classes/`self`/`super` are recognized by
 the loader and the VM's opcode dispatch but raise a clear "not yet
-supported" error if actually executed (Phase 8); there's no native
-stdlib yet either (`print`/`concat`, Phase 7), so no program that calls
-either can run to completion yet — VM core/GC/stdlib will finish growing
-into the same level of detail as the `poc/` section above as those two
-phases land.
+supported" error if actually executed (Phase 8).
+
+Phase 7 (native standard library) is also done: `vm/src/object.hpp` adds
+`ObjNativeFunction` (a name, arity, and a plain C++ function pointer, no
+bytecode frame involved in calling one), and `vm/src/natives.hpp`/`.cpp`
+implement `print`/`concat`, both defined as globals by the `Vm`
+constructor — mirroring `poc/src/interpreter.py`'s `Interpreter.__init__`,
+which defines both the same way before any user statement runs. See
+`docs/PLAN-0.1.md`'s Phase 7 entry for `stringify`'s float-formatting
+work (matching Python's exact fixed/scientific notation thresholds, which
+`std::to_chars`' own formatting doesn't), the vector-nested-element
+`repr`-vs-`stringify` distinction, a real `poc` bug found (`concat` on a
+non-vector argument crashes with an uncaught Python exception instead of
+a clean error) and not carried forward, and a `Resolver.fs` fix so
+reassigning/redeclaring `print`/`concat` is a compile-time error like any
+other global instead of silently succeeding. `scripts/phase7-run-smoke-test.sh`
+(replacing Phase 5's compile-only script, now that `vm/` can actually
+execute a program and produce real output) compiles *and runs* every
+`langspec/examples/*.iqx` fixture — a hand-verified spot check during this
+phase found the four non-class examples already produce byte-for-byte
+identical output to `poc`. Classes/`self`/`super` still raise the Phase 8
+"not yet supported" error — this section will finish growing into the
+same level of detail as the `poc/` section above once that phase lands.
 
 ## Engineering conventions
 
