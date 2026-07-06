@@ -159,6 +159,14 @@ that work lands. `scripts/phase5-compile-smoke-test.sh` (replacing Phase
   per `docs/PLAN-0.1.md` §7 — plus a cross-implementation conformance job
   running `langspec/examples/*.iqx` through both `poc/` and
   `compiler/`+`vm/` and diffing output.
+- **`compiler/` F# style**: targets the current F# language version (F# 10
+  as of .NET 10) — prefer newer idioms where they cleanly simplify existing
+  code (e.g. a discriminated union's auto-generated `.IsCaseName` property,
+  F# 9, over a two-arm `match` that only needed a case check, not its
+  payload) rather than defaulting to older patterns out of habit. Don't
+  force-fit a newer feature where it doesn't clearly help, though — e.g.
+  nullable reference types (F# 9) have no real application here, since this
+  codebase doesn't interoperate with null-returning APIs.
 - **Example scripts**: live in `langspec/examples/*.iqx` (current) —
   `langspec/archived/*/examples/*.iqlx` used the old extension and are
   frozen. These are cross-implementation conformance fixtures: keep them

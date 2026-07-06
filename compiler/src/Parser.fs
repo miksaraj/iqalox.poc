@@ -229,9 +229,10 @@ type private ParserState(tokens: Token[]) =
         while matchAny [ Pipe ] do
             let operator = previous ()
             let right = this.Comma()
-            match right with
-            | Variable _ -> expr <- Call(right, [ expr ])
-            | _ -> error operator "Expect a function reference after '|>'." |> ignore
+            if right.IsVariable then
+                expr <- Call(right, [ expr ])
+            else
+                error operator "Expect a function reference after '|>'." |> ignore
         expr
 
     member this.Comma() : Expr =
@@ -326,9 +327,10 @@ type private ParserState(tokens: Token[]) =
         if matchAny [ PlusPlus; MinusMinus ] then
             let operator = previous ()
             let right = this.Unary()
-            match right with
-            | Variable _ -> Unary(operator, right)
-            | _ -> error operator "Invalid increment/decrement target."
+            if right.IsVariable then
+                Unary(operator, right)
+            else
+                error operator "Invalid increment/decrement target."
         else
             this.Unary()
 
@@ -373,9 +375,7 @@ type private ParserState(tokens: Token[]) =
             // `super.method` is one combined primary (see Primary()) that,
             // like any other property access, may itself be immediately
             // called.
-            match expr with
-            | SuperExpr _ -> this.FinishPropertyAccess(expr)
-            | _ -> expr
+            if expr.IsSuperExpr then this.FinishPropertyAccess(expr) else expr
 
     member this.FinishPropertyAccess(expr: Expr) : Expr =
         // expr is a Get or a Super -- same zero-arg/argument-start call
