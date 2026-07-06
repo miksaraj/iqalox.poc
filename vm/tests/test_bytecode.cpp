@@ -1,109 +1,170 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <random>
 #include <vector>
 
 #include "bytecode.hpp"
+#include "vm.hpp"
+
+using namespace iqalox;
 
 namespace {
 
-void push_u32(std::vector<uint8_t>& bytes, uint32_t value) {
+void pushU16(std::vector<uint8_t>& bytes, uint16_t value) {
+    bytes.push_back(static_cast<uint8_t>(value & 0xFF));
+    bytes.push_back(static_cast<uint8_t>((value >> 8) & 0xFF));
+}
+
+void pushU32(std::vector<uint8_t>& bytes, uint32_t value) {
     bytes.push_back(static_cast<uint8_t>(value & 0xFF));
     bytes.push_back(static_cast<uint8_t>((value >> 8) & 0xFF));
     bytes.push_back(static_cast<uint8_t>((value >> 16) & 0xFF));
     bytes.push_back(static_cast<uint8_t>((value >> 24) & 0xFF));
 }
 
+void pushF64(std::vector<uint8_t>& bytes, double value) {
+    uint8_t raw[8];
+    std::memcpy(raw, &value, 8);
+    bytes.insert(bytes.end(), raw, raw + 8);
+}
+
+void pushString(std::vector<uint8_t>& bytes, const std::string& s) {
+    pushU32(bytes, static_cast<uint32_t>(s.size()));
+    bytes.insert(bytes.end(), s.begin(), s.end());
+}
+
 // Writes `bytes` to a fresh temp file and returns its path -- each test gets
 // its own file (a random suffix) so parallel/interleaved test runs can't
 // collide on the same path.
-std::filesystem::path write_temp_file(const std::vector<uint8_t>& bytes) {
+std::filesystem::path writeTempFile(const std::vector<uint8_t>& bytes) {
     static std::mt19937 rng(std::random_device{}());
-    auto path = std::filesystem::temp_directory_path() /
-                ("iqaloxvm_test_" + std::to_string(rng()) + ".iqbc");
+    auto path = std::filesystem::temp_directory_path() / ("iqaloxvm_test_" + std::to_string(rng()) + ".iqbc");
     std::ofstream file(path, std::ios::binary);
     file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
     file.close();
     return path;
 }
 
-std::vector<uint8_t> header_with_version(uint8_t version) {
-    return {'I', 'Q', 'B', 'C', version};
-}
+std::vector<uint8_t> header() { return {'I', 'Q', 'B', 'C', 0x01}; }
+
+struct TempFile {
+    std::filesystem::path path;
+    explicit TempFile(const std::vector<uint8_t>& bytes) : path(writeTempFile(bytes)) {}
+    ~TempFile() { std::filesystem::remove(path); }
+};
 
 }  // namespace
 
-TEST_CASE("an empty chunk (no constants, no code) loads cleanly", "[bytecode]") {
-    auto bytes = header_with_version(0);
-    push_u32(bytes, 0);  // constant_count
-    push_u32(bytes, 0);  // code_length
+TEST_CASE("an empty top-level chunk loads as a zero-arity script function", "[bytecode]") {
+    auto bytes = header();
+    pushU32(bytes, 0);  // constant_count
+    pushU32(bytes, 0);  // code_length
+    TempFile file(bytes);
 
-    auto path = write_temp_file(bytes);
-    auto chunk = iqalox::bytecode::load(path);
+    Vm vm;
+    ObjFunction* script = bytecode::load(file.path, vm);
 
-    REQUIRE(chunk.constants.empty());
-    REQUIRE(chunk.code.empty());
-
-    std::filesystem::remove(path);
+    REQUIRE(script->arity == 0);
+    REQUIRE(script->chunk.constants.empty());
+    REQUIRE(script->chunk.code.empty());
 }
 
-TEST_CASE("a chunk with one string constant and CONST_STRING/PRINT/HALT round-trips", "[bytecode]") {
-    auto bytes = header_with_version(0);
+TEST_CASE("number and string constants decode to their runtime Values", "[bytecode]") {
+    auto bytes = header();
+    pushU32(bytes, 2);  // constant_count
+    bytes.push_back(0x00);
+    pushF64(bytes, 1.5);
+    bytes.push_back(0x01);
+    pushString(bytes, "hi");
 
-    push_u32(bytes, 1);      // constant_count
-    bytes.push_back(0x00);   // string tag
-    push_u32(bytes, 5);      // length
-    for (char c : std::string("hello")) bytes.push_back(static_cast<uint8_t>(c));
-
-    std::vector<uint8_t> code;
-    code.push_back(0x01);  // OP_CONST_STRING
-    push_u32(code, 0);     // constant index 0
-    code.push_back(0x02);  // OP_PRINT
-    code.push_back(0xFF);  // OP_HALT
-
-    push_u32(bytes, static_cast<uint32_t>(code.size()));
+    std::vector<uint8_t> code{0x01, 0, 0, 0x01, 1, 0, 0x23};  // CONSTANT 0, CONSTANT 1, RETURN
+    pushU32(bytes, static_cast<uint32_t>(code.size()));
     bytes.insert(bytes.end(), code.begin(), code.end());
+    TempFile file(bytes);
 
-    auto path = write_temp_file(bytes);
-    auto chunk = iqalox::bytecode::load(path);
+    Vm vm;
+    ObjFunction* script = bytecode::load(file.path, vm);
 
-    REQUIRE(chunk.constants == std::vector<std::string>{"hello"});
-    REQUIRE(chunk.code == code);
+    REQUIRE(script->chunk.constants.size() == 2);
+    REQUIRE(isNumber(script->chunk.constants[0]));
+    REQUIRE(asNumber(script->chunk.constants[0]) == 1.5);
+    REQUIRE(isObj(script->chunk.constants[1]));
+    REQUIRE(static_cast<ObjString*>(asObj(script->chunk.constants[1]))->value == "hi");
+    REQUIRE(script->chunk.code == code);
+}
 
-    std::filesystem::remove(path);
+TEST_CASE("a nested FunctionConstant decodes its name/arity/locals/upvalues and its own chunk", "[bytecode]") {
+    auto bytes = header();
+    pushU32(bytes, 1);  // constant_count
+    bytes.push_back(0x02);  // function tag
+    pushString(bytes, "f");
+    bytes.push_back(2);    // arity
+    pushU16(bytes, 3);     // local_count
+    pushU16(bytes, 1);     // upvalue_count
+    bytes.push_back(1);    // upvalue 0: from enclosing local
+    pushU16(bytes, 0);     // upvalue 0: index
+    // nested <chunk>: no constants, one RETURN instruction
+    pushU32(bytes, 0);
+    pushU32(bytes, 1);
+    bytes.push_back(0x23);
+
+    pushU32(bytes, 0);  // top-level code_length
+    TempFile file(bytes);
+
+    Vm vm;
+    ObjFunction* script = bytecode::load(file.path, vm);
+
+    REQUIRE(script->chunk.constants.size() == 1);
+    auto* function = static_cast<ObjFunction*>(asObj(script->chunk.constants[0]));
+    REQUIRE(function->name == "f");
+    REQUIRE(function->arity == 2);
+    REQUIRE(function->localCount == 3);
+    REQUIRE(function->upvalues.size() == 1);
+    REQUIRE(function->upvalues[0].fromEnclosingLocal == true);
+    REQUIRE(function->upvalues[0].index == 0);
+    REQUIRE(function->chunk.constants.empty());
+    REQUIRE(function->chunk.code == std::vector<uint8_t>{0x23});
 }
 
 TEST_CASE("a bad magic number is rejected", "[bytecode]") {
-    auto bytes = std::vector<uint8_t>{'N', 'O', 'P', 'E', 0};
-    push_u32(bytes, 0);
-    push_u32(bytes, 0);
+    auto bytes = std::vector<uint8_t>{'N', 'O', 'P', 'E', 0x01};
+    pushU32(bytes, 0);
+    pushU32(bytes, 0);
+    TempFile file(bytes);
 
-    auto path = write_temp_file(bytes);
-    REQUIRE_THROWS_AS(iqalox::bytecode::load(path), std::runtime_error);
-
-    std::filesystem::remove(path);
+    Vm vm;
+    REQUIRE_THROWS_AS(bytecode::load(file.path, vm), std::runtime_error);
 }
 
 TEST_CASE("an unsupported format version is rejected", "[bytecode]") {
-    auto bytes = header_with_version(99);
-    push_u32(bytes, 0);
-    push_u32(bytes, 0);
+    auto bytes = std::vector<uint8_t>{'I', 'Q', 'B', 'C', 99};
+    pushU32(bytes, 0);
+    pushU32(bytes, 0);
+    TempFile file(bytes);
 
-    auto path = write_temp_file(bytes);
-    REQUIRE_THROWS_AS(iqalox::bytecode::load(path), std::runtime_error);
-
-    std::filesystem::remove(path);
+    Vm vm;
+    REQUIRE_THROWS_AS(bytecode::load(file.path, vm), std::runtime_error);
 }
 
 TEST_CASE("a truncated file is rejected rather than reading out of bounds", "[bytecode]") {
-    auto bytes = header_with_version(0);
-    push_u32(bytes, 1);  // claims one constant, but the file ends here
+    auto bytes = header();
+    pushU32(bytes, 1);  // claims one constant, but the file ends here
+    TempFile file(bytes);
 
-    auto path = write_temp_file(bytes);
-    REQUIRE_THROWS_AS(iqalox::bytecode::load(path), std::runtime_error);
+    Vm vm;
+    REQUIRE_THROWS_AS(bytecode::load(file.path, vm), std::runtime_error);
+}
 
-    std::filesystem::remove(path);
+TEST_CASE("an unknown constant tag is rejected", "[bytecode]") {
+    auto bytes = header();
+    pushU32(bytes, 1);
+    bytes.push_back(0x77);  // not a valid tag
+    TempFile file(bytes);
+
+    Vm vm;
+    REQUIRE_THROWS_AS(bytecode::load(file.path, vm), std::runtime_error);
 }

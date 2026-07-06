@@ -8,6 +8,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_executable(iqaloxvm
     src/main.cpp
     src/bytecode.cpp
+    src/value.cpp
+    src/vm.cpp
 )
 
 target_include_directories(iqaloxvm PRIVATE src)
