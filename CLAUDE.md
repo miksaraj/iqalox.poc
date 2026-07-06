@@ -9,15 +9,19 @@ heavily mutated and extended. This repository holds **multiple implementations
 across Iqalox's versions**:
 
 - `poc/` — the **0.1-poc proof-of-concept implementation**: a tree-walking
-  interpreter written in Python. Frozen/reference once `0.1` reaches parity
-  with it (see `docs/PLAN-0.1.md`) — still the actively-maintained current
-  implementation until then.
+  interpreter written in Python. `0.1` reached feature parity with it as of
+  `docs/PLAN-0.1.md` Phase 9, so `poc/` is now **frozen/reference** — a
+  working reference implementation kept in the repo, not the primary
+  target for new language work, but still a real, runnable implementation
+  worth keeping conformant with `langspec/examples/`.
 - `compiler/` — the **0.1 compiler frontend**, written in F#. Scanner →
-  parser → AST → resolver → bytecode codegen. In progress; see
-  `docs/PLAN-0.1.md`.
+  parser → AST → resolver → bytecode codegen. Feature-complete for `0.1`
+  (`docs/PLAN-0.1.md`, Phases 1-9 done); the current, primary
+  implementation going forward.
 - `vm/` — the **0.1 bytecode VM backend**, written in modern C++ (C++23).
-  Loads and executes the bytecode `compiler/` emits. In progress; see
-  `docs/PLAN-0.1.md`.
+  Loads and executes the bytecode `compiler/` emits. Feature-complete for
+  `0.1` (`docs/PLAN-0.1.md`, Phases 1-9 done); the current, primary
+  implementation going forward.
 
 Implementation-agnostic material stays at the repository root:
 
@@ -29,8 +33,11 @@ Implementation-agnostic material stays at the repository root:
   which implementation runs them.
 - `ROADMAP.md` — the version roadmap (0.1-poc onward).
 - `docs/` — implementation planning docs (`docs/PLAN-0.1-POC.md` for
-  `0.1-poc`, `docs/PLAN-0.1.md` for `0.1`, `docs/LANGUAGE.md` for the
-  current language reference).
+  `0.1-poc`, `docs/PLAN-0.1.md` for `0.1`); `docs/LANGUAGE.md` for the
+  current (`0.1`) language reference, `docs/LANGUAGE-POC.md` for the frozen
+  `0.1-poc`-era one — each version gets its own `LANGUAGE-<version>.md`
+  this way as Iqalox evolves, rather than one file being silently rewritten
+  out from under its own history.
 
 ## Language design authority
 
