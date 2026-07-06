@@ -477,6 +477,64 @@ engineering fixes, not design questions, so implemented directly rather
 than routed for sign-off. See `tests/test_scanner.py` and the new
 `tests/test_error_reporting.py` for coverage.
 
+### Fixed post-repo-reorg, found while writing the 0.1 F# scanner (eighth batch)
+
+Writing `compiler/src/Scanner.fs` (the fresh `0.1` scanner, F#) carefully
+rather than as a line-for-line port surfaced five real `scanner.py` bugs
+that had never actually been proven correct — none needed design sign-off,
+all are straightforward scanning bugs, not language-design questions:
+
+1. **Decimal number literals never worked at all.** `number()`'s
+   fractional-part check compared `self.peek()` against a digit test that
+   *also* defaulted to `self.peek()` — the same '.' character checked
+   against itself, never the character after it. `3.14` scanned as
+   `NUMBER("3")`, `DOT`, `NUMBER("14")`, silently, since no test or example
+   had ever used a decimal literal. Fixed by checking `self.peek_next()`
+   instead, matching jlox's own `isDigit(peekNext())`.
+2. **A leading-underscore identifier (`_foo`) misscanned** as a bare `_`
+   (the ignore operator) followed by a separate `foo` identifier, since
+   `_` was checked as its own token before the identifier dispatch ran — a
+   limitation `docs/LANGUAGE.md` §13 had explicitly flagged as
+   known-but-deprioritized. Fixed by checking whether an alphanumeric
+   character follows before deciding `_` is standalone.
+3. **The `...` (ellipsis) token under-consumed by one character** — the
+   compound-matching dispatch only ever advanced one extra character
+   (`compound[1]`) regardless of a matched compound's actual length. Moot
+   today (`...` has no grammar yet, `0.2` scope) but not worth leaving
+   broken. Fixed with a longest-match search (candidates sorted by length,
+   descending) that verifies and consumes a compound's *entire* remaining
+   length.
+4. **A bare `#>` outside a block comment was silently swallowed** with no
+   token or error — an accident of treating `BLOCK_COMMENT_END` as just
+   another entry in the same generic compound table used for operators,
+   so a lone `#` immediately followed by `>` matched the `#>` compound and
+   then matched neither of the two branches handling `token in
+   COMMENT_TOKENS`. Fixed by excluding `BLOCK_COMMENT_END` from the
+   compound search entirely — `#>` only has meaning as a terminator
+   searched for from *inside* a block comment's own loop, never as a
+   token in its own right.
+5. **An unterminated block comment produced no error at all** (the loop
+   just exited silently at EOF), unlike an unterminated string, which
+   already errored correctly. Fixed to report `"Unterminated block
+   comment."` at the opening `<#`'s position, the same way `string()`
+   already reports at the opening quote.
+
+Also removed `Scanner.match()`, left dead by fix 3's rewrite (nothing else
+called it — `Parser.match()` is a separate, still-used method on a
+different class). Escape sequences were deliberately *not* added here:
+that's a genuinely new `0.1` feature (`docs/PLAN-0.1.md` decision 5), not
+a `0.1-poc` bug — `docs/LANGUAGE.md` §13 already documents their absence
+as an intentional limitation, and `0.1-poc` should keep behaving exactly
+as documented.
+
+Regression tests for all five in `tests/test_scanner.py`. Also exercised
+in the example scripts, since these are real, usable language behaviors
+(not just error-handling edge cases): `langspec/examples/operators.iqx`
+now uses a decimal literal (`var pi = 3.14`), and
+`langspec/examples/functions.iqx` now has a function with a
+leading-underscore parameter name (`secondOf(_first, second)`), a common
+"intentionally unused" naming convention.
+
 ### Still open
 
 1. `error.py`'s `IqaloxRuntimeError.__str__`/`__repr__` just call `super()`,
@@ -593,8 +651,12 @@ directly (`tests/test_error_reporting.py` — note its `setup_function()`
 resets `Iqalox`'s class-level `interpreter`/`had_error`/`had_runtime_error`/
 `source_lines` state before each test, since that state is intentionally
 shared/static across calls in the real CLI and would otherwise leak
-between tests in the same file). Run with `pytest` from the repo root
-(`pytest.ini` sets `pythonpath = src`).
+between tests in the same file), and (added in §3's eighth batch)
+decimal number literals, leading-underscore identifiers, exact `...`
+consumption, a bare `#>` outside a block comment, and an unterminated
+block comment's error. Run with `pytest` from the repo root (`pytest.ini`
+sets `pythonpath = src`) — as of the post-`0.1` reorg, that's `poc/`, see
+the note at the top of this file.
 
 Deliberately **not** covered by this suite: anything requiring the actual
 `iqalox.py` CLI *process* (module-duplication bug in §3, exit codes) —

@@ -33,6 +33,14 @@ fun fib(n) {
     return (n <= 1) ? n : (fib (n - 2) * fib (n - 1))
 }
 
+# A leading underscore is an ordinary identifier character, not just the
+# standalone ignore operator -- `_first` names an intentionally-unused
+# parameter, a common convention, rather than misparsing as `_` followed
+# by a separate `first`.
+fun secondOf(_first, second) {
+    return second
+}
+
 var add5 = makeAdder 5
 
 print add5 1
@@ -51,6 +59,8 @@ test count
 for (var i mut = 0; i < 20; ++i) {
     fib i |> print
 }
+
+print secondOf 1, 2
 
 # Sample for the use of control flow ignore operator
 var ignore mut = false

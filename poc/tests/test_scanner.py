@@ -115,3 +115,66 @@ def test_single_invalid_character_is_still_reported_singular(capsys):
     out = capsys.readouterr().out
     assert "Unexpected character:" in out
     assert "Unexpected characters:" not in out
+
+
+def test_decimal_number_literals_scan_as_a_single_token():
+    # Regression test: number()'s fractional-part check used to compare
+    # self.peek() against a digit test that *also* defaulted to
+    # self.peek() -- the same '.' character checked against itself, never
+    # the one after it -- so the fractional branch could never fire.
+    # "3.14" scanned as NUMBER("3"), DOT, NUMBER("14").
+    tokens = Scanner("3.14").scan_tokens()
+    assert [t.type for t in tokens] == [TokenType.NUMBER, TokenType.EOF]
+    assert tokens[0].lexeme == "3.14"
+    assert tokens[0].literal == 3.14
+
+
+def test_a_trailing_dot_with_no_following_digit_is_not_consumed_as_a_fraction():
+    tokens = token_types("5.")
+    assert tokens == [TokenType.NUMBER, TokenType.DOT, TokenType.EOF]
+
+
+def test_leading_underscore_identifier_scans_as_one_identifier():
+    # Regression test: '_' is checked as its own token before the
+    # identifier dispatch runs, so "_foo" used to misscan as a bare '_'
+    # (the ignore operator) followed by a separate "foo" identifier.
+    tokens = Scanner("_foo").scan_tokens()
+    assert [t.type for t in tokens] == [TokenType.IDENTIFIER, TokenType.EOF]
+    assert tokens[0].lexeme == "_foo"
+
+
+def test_bare_underscore_is_still_the_ignore_operator():
+    assert token_types("_") == [TokenType.UNDERSCORE, TokenType.EOF]
+    assert token_types("_?") == [TokenType.UNDERSCORE, TokenType.QUESTION_MARK, TokenType.EOF]
+
+
+def test_ellipsis_consumes_exactly_three_characters():
+    # Regression test: the compound-matching dispatch used to only ever
+    # advance one extra character regardless of a compound's actual
+    # length, so "..." under-consumed to "..". Moot today (no grammar uses
+    # "...' yet) but worth not leaving broken.
+    tokens = Scanner("...").scan_tokens()
+    assert [t.type for t in tokens] == [TokenType.ELLIPSIS, TokenType.EOF]
+    assert tokens[0].lexeme == "..."
+
+
+def test_bare_hash_angle_outside_a_block_comment_starts_a_line_comment():
+    # Regression test: a bare '#' immediately followed by '>' used to be
+    # mismatched as the BLOCK_COMMENT_END compound at the top level (which
+    # only has meaning as a terminator searched for *inside* a block
+    # comment), silently swallowing both characters with no token or error
+    # at all. '#' must always start a line comment on its own.
+    tokens = token_types("5 #> comment\nprint 1")
+    assert tokens == [
+        TokenType.NUMBER, TokenType.SEMICOLON, TokenType.IDENTIFIER, TokenType.NUMBER, TokenType.EOF,
+    ]
+
+
+def test_unterminated_block_comment_is_a_scan_error(capsys):
+    # Regression test: an unterminated block comment used to produce no
+    # error at all -- the loop just exited silently at EOF, unlike an
+    # unterminated string, which already errored correctly.
+    tokens = Scanner("<# never closed").scan_tokens()
+    out = capsys.readouterr().out
+    assert "Unterminated block comment" in out
+    assert [t.type for t in tokens] == [TokenType.EOF]
