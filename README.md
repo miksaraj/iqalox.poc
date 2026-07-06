@@ -4,17 +4,43 @@ Iqalox is a programming language based on Lox, from Bob Nystrom's
 [Crafting Interpreters](http://craftinginterpreters.com/), mutated and extended to suit the author's
 preferences and interests. "*Iqalox*" is a play on the Kalaallisut word for Arctic char, *Eqaluk*, and *Lox*.
 
-This repository holds multiple implementations across Iqalox's versions:
+`0.1` is the current, primary implementation: a compiler frontend (F#, `compiler/`) that compiles `.iqx`
+source to a bytecode file, executed by a stack-based virtual machine (modern C++23, `vm/`). This repository
+also keeps `poc/` around — the original `0.1-poc` proof of concept, a Python tree-walk interpreter — as a
+frozen, working reference implementation, now that `0.1` has reached feature parity with it.
 
-- `poc/` — the original `0.1-poc` proof of concept: a tree-walk interpreter in Python. Now frozen/reference,
-  since `0.1` below has reached feature parity with it.
-- `compiler/` + `vm/` — `0.1`, the real implementation: a compiler frontend (F#) that compiles to a bytecode
-  format executed by a stack-based virtual machine (modern C++). The current, primary implementation.
+## Getting started
 
-See `ROADMAP.md` for the version plan, `docs/LANGUAGE.md` for the current (`0.1`) language reference, and
-`docs/LANGUAGE-POC.md` for the frozen `0.1-poc`-era one — both with examples and known limitations.
+**Option 1: download a release.** Grab the archive for your platform from the
+[Releases page](https://github.com/miksaraj/iqalox.poc/releases) — each one bundles both binaries
+(`iqaloxc`, `iqaloxvm`) plus a handful of example `.iqx` scripts, and needs nothing else installed.
 
-You will find the **syntax grammar** in `langspec`. The **lexical grammar** and **precedence rules** are presented below.
+**Option 2: build from source.** You'll need the [.NET 10 SDK](https://dotnet.microsoft.com/download)
+and a C++23 compiler (GCC 13+ or Clang 18+) plus [CMake](https://cmake.org/) 3.20+:
+
+```sh
+# Build the compiler
+dotnet build compiler/src/Iqaloxc.fsproj
+
+# Build the VM
+cmake -S vm -B vm/build -DCMAKE_BUILD_TYPE=Release
+cmake --build vm/build --target iqaloxvm -j
+```
+
+Either way, running a program is a two-step pipeline — compile to bytecode, then run it:
+
+```sh
+iqaloxc langspec/examples/classes.iqx classes.iqbc
+iqaloxvm classes.iqbc
+```
+
+(If you built from source instead of downloading a release, replace `iqaloxc` with
+`dotnet run --project compiler/src/Iqaloxc.fsproj --` and `iqaloxvm` with `vm/build/iqaloxvm`.)
+
+See `docs/LANGUAGE.md` for the full `0.1` language reference (with plenty of runnable examples and a list
+of known limitations), `ROADMAP.md` for the version plan, and `docs/LANGUAGE-POC.md` for the frozen
+`0.1-poc`-era reference. You'll find the **syntax grammar** in `langspec/`; the **lexical grammar** and
+**precedence rules** are presented below.
 
 ## Lexical Grammar ##
 
