@@ -108,11 +108,17 @@ done: `compiler/src/Token.fs` (an idiomatic `TokenType` discriminated
 union) and `compiler/src/Scanner.fs` (`Scanner.scanTokens`) — see
 `docs/PLAN-0.1.md`'s Phase 2 entry for the several `poc` scanner bugs this
 surfaced and fixed rather than carried forward (decimal literals,
-leading-underscore identifiers, and others). The parser/resolver/codegen
-(`compiler/`) and VM core/GC/stdlib (`vm/`) are not built yet — this
-section will grow into the same level of detail as the `poc/` one above as
-that work lands. `scripts/phase1-roundtrip-smoke-test.sh` builds both and
-proves `compiler/`'s output loads and runs correctly in `vm/`.
+leading-underscore identifiers, and others). Phase 3 (the parser) is also
+done: `compiler/src/Ast.fs` (an idiomatic `Expr`/`Stmt` discriminated
+union) and `compiler/src/Parser.fs` (`Parser.parse`) — see
+`docs/PLAN-0.1.md`'s Phase 3 entry for a real naming collision between
+`TokenType` and `Ast` case names (fixed by suffixing the colliding `Ast`
+cases) and two more `poc` bugs found and fixed rather than carried
+forward. The resolver/codegen (`compiler/`) and VM core/GC/stdlib (`vm/`)
+are not built yet — this section will grow into the same level of detail
+as the `poc/` one above as that work lands. `scripts/phase1-roundtrip-smoke-test.sh`
+builds both and proves `compiler/`'s output loads and runs correctly in
+`vm/`.
 
 ## Engineering conventions
 
