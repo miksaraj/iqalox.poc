@@ -63,63 +63,40 @@ Resolved in this planning round:
    work starts (see §4): move `0.1-poc`'s implementation-specific code and
    config into a new `poc/` directory, leaving the root for
    implementation-agnostic material (language spec, planning docs,
-   project-wide config) plus the new `frontend/`/`backend/` trees as they
-   come online.
+   project-wide config) plus the new `compiler/`/`vm/` trees as they come
+   online.
+5. **Escape sequences**: the common C-family set — `\n \t \r \\ \' \" \0` —
+   plus a **hard compile error** on any unrecognized escape (e.g. `\q`).
+   Matches the language's existing "operators raise rather than silently
+   coerce" strong-typing bias (`docs/LANGUAGE.md` §1). No `\xHH`/`\uXXXX`
+   escapes for `0.1`.
+6. **`undef` scope: `var`-declared bindings only, not object fields.**
+   Fields keep `0.1-poc`'s existing model — they spring into existence on
+   first `self.x = ...` write, readable any time after
+   (`docs/LANGUAGE.md` §13, limitation 5). Field pre-declaration and field
+   immutability are deferred to `0.2`'s class-system-completeness work
+   (getters/setters/mixins/traits already deferred there), not decided now.
+7. **Memory management: a mark-sweep tracing garbage collector**, matching
+   `clox`'s own approach in *Crafting Interpreters* Part III — chosen over
+   reference counting (cycles among closures/instances would otherwise
+   leak) and an arena/region scheme (too limited once a REPL or
+   long-running process matters).
+8. **Directory names: `compiler/` (F# frontend) and `vm/` (C++23 backend)**
+   — more concrete about what each half literally is than the
+   `frontend/`/`backend/` working names used while this was still open.
+   `ROADMAP.md`'s architecture note and the rest of this plan use these
+   names throughout.
 
 ## 2. Open questions (flagged, not decided)
 
-Per `CLAUDE.md`: these change observable language behavior or lock in a
-substantial, hard-to-reverse architectural commitment, so they're listed
-here rather than guessed at. I'm asking about these directly (see the
-message accompanying this plan) rather than silently picking defaults.
-
-1. **Exact escape-sequence set, and what happens on an unrecognized one.**
-   Candidates: the common C-family set `\n \t \r \\ \' \" \0`; more exotic
-   options some languages add on top include `\a`/`\b`/`\f`/`\v` (legacy
-   control characters, rarely used), `\xHH` (raw byte/hex escape), and
-   `\uXXXX`/`\U........` (Unicode code point escapes). Separately: is an
-   unrecognized escape like `\q` a hard compile error (Rust/Swift-style,
-   stricter) or does it degrade to a literal backslash+character
-   (Python-in-non-raw-string-style, more permissive)? **Recommendation:**
-   the common set (`\n \t \r \\ \' \" \0`) plus a hard error on anything
-   else — matches the project's existing "operators raise rather than
-   silently coerce" strong-typing bias (`docs/LANGUAGE.md` §1).
-2. **Does the `undef`-before-read rule apply to object fields, or only to
-   `var`-declared bindings?** `ROADMAP.md`'s wording is phrased in terms of
-   "a variable." `0.1-poc` fields have no declaration step at all — they
-   spring into existence on first `self.x = ...` write, and can be read
-   any time after that (`docs/LANGUAGE.md` §10/§13 limitation 5). Extending
-   `undef` to fields would mean fields need *some* pre-declaration point
-   (inside `init`, or a class-body field-declaration syntax) for
-   "assigned yet or not" to even be meaningful — a real design surface,
-   not just an implementation detail, and it interacts directly with open
-   question 4 below (self-referencing classes) and with the field-
-   immutability question `0.1-poc` already flagged and left open
-   (`docs/PLAN-0.1-POC.md` §1). **Recommendation:** scope `undef` to
-   `var`-declared bindings only for `0.1`, and leave field pre-declaration/
-   immutability as a `0.2`-or-later class-system-completeness question
-   (it's already adjacent to the getters/setters/mixins/traits work
-   already deferred there).
-3. **Memory management strategy for the C++ backend.** `0.1-poc` made zero
-   decisions here — Python's own GC handled everything. Hand-writing a C++
-   VM means picking one: **reference counting** (simplest to start, but
-   cycles among closures/instances leak unless a cycle collector is added
-   later); a **tracing garbage collector** (mark-sweep, `clox`'s own choice
-   in *Crafting Interpreters* Part III — more upfront engineering, but
-   handles cycles for free and is the architecture this whole project has
-   otherwise tracked closely); or an **arena/region scheme** (simplest of
-   all, but only really works if the whole program's memory can be freed
-   as one block at process exit — too limited if a REPL or long-running
-   process ever matters). **Recommendation:** mark-sweep GC, matching
-   `clox` — but this is a substantial, hard-to-reverse commitment on
-   performance/complexity tradeoffs, worth an explicit decision rather
-   than a quiet default.
-4. **Directory naming: `frontend/`/`backend/` vs. something else** (e.g.
-   `compiler/`/`vm/`). `frontend/`/`backend/` is what I've used throughout
-   this plan since that's the terminology `ROADMAP.md`'s own "Architecture
-   note for the eventual bytecode implementation" section already uses —
-   flagging in case a different pair of names is preferred before Phase 0
-   creates them for real.
+None outstanding as of this revision — the four questions raised when this
+plan was first drafted (escape sequences, `undef`'s scope, memory
+management, directory naming) were all resolved immediately and folded
+into §1 above (decisions 5–8). This section is kept, empty, as a living-
+document placeholder: per `CLAUDE.md`, anything that changes observable
+language behavior or locks in a substantial, hard-to-reverse architectural
+commitment gets flagged here rather than guessed at, as soon as it
+surfaces during implementation.
 
 Not flagging (engineering calls, not language-design ones, per
 `CLAUDE.md`): the bytecode file format itself (§3 sketches a concrete
@@ -134,7 +111,7 @@ behavior.
         |
         v
   +--------------------------------+
-  |  frontend/  (F#, .NET)         |
+  |  compiler/  (F#, .NET)         |
   |  Scanner -> Parser -> AST      |
   |  Resolver (scopes, mutability, |
   |  self-referencing classes)     |
@@ -143,7 +120,7 @@ behavior.
                   | writes a bytecode file (format TBD, see below)
                   v
   +--------------------------------+
-  |  backend/  (C++23)             |
+  |  vm/  (C++23)                  |
   |  Loader -> Chunk/Value model   |
   |  VM (stack-based) + GC         |
   |  Native stdlib (print, ...)    |
@@ -167,9 +144,9 @@ behavior.
   hardening — see the two most recent PoC releases). Versioned from day
   one so frontend and backend can evolve independently without silently
   desyncing.
-- This split means the frontend's tests can assert against the bytecode it
-  produces (a disassembler/pretty-printer, no C++ VM needed yet), and the
-  backend's tests can hand-assemble small bytecode fixtures directly (no F#
+- This split means `compiler/`'s tests can assert against the bytecode it
+  produces (a disassembler/pretty-printer, no C++ VM needed yet), and
+  `vm/`'s tests can hand-assemble small bytecode fixtures directly (no F#
   frontend needed yet) — each side can make real progress before the other
   exists (see §7).
 
@@ -192,7 +169,7 @@ entries are `.idea` (arguably still repo-root-relevant for any future
 implementation opened in IntelliJ/Rider) and `__pycache__/`
 (Python/poc-specific). Move `__pycache__/` into a new `poc/.gitignore`;
 keep a minimal root `.gitignore` for repo-wide concerns; add
-`frontend/.gitignore` (`bin/`, `obj/`, ...) and `backend/.gitignore`
+`compiler/.gitignore` (`bin/`, `obj/`, ...) and `vm/.gitignore`
 (`build/`, `CMakeCache.txt`, `CMakeFiles/`, ...) once those trees exist in
 Phase 1.
 
@@ -207,7 +184,7 @@ paths must track the move):
   `requirements-dev.txt`/`tests/` mentions, and the top-level framing
   ("This repository... holds the first proof-of-concept implementation")
   needs to become "this repo holds multiple implementations: `poc/`
-  (0.1-poc, Python, frozen/reference) and `0.1` (`frontend/` + `backend/`,
+  (0.1-poc, Python, frozen/reference) and `0.1` (`compiler/` + `vm/`,
   in progress)."
 - `docs/LANGUAGE.md` — its `src/` path references (e.g. "runs successfully
   against `src/iqalox.py`") become `poc/src/iqalox.py`.
@@ -235,7 +212,7 @@ conversation, not something this reorg needs to (or should) touch.
 ## 5. Feature checklist (parity target)
 
 Every row is "not started" — this is a from-scratch reimplementation in a
-new stack, not a port of Python code. Ticked off as `frontend/`+`backend/`
+new stack, not a port of Python code. Ticked off as `compiler/`+`vm/`
 together reach each one (verified via the shared `langspec/examples/`
 conformance suite, §7).
 
@@ -261,8 +238,8 @@ conformance suite, §7).
 | Classes, `init`, methods, `self` | | ⛔ |
 | No-parens paren-free call grammar | | ⛔ |
 | Accurate line/column error reporting | 0.1-poc's two post-release fixes | ⛔ (carry forward the design, don't re-discover the bugs) |
-| **New for 0.1:** `undef`, must-assign-before-read | `ROADMAP.md` §0.1 | ⛔ |
-| **New for 0.1:** string escape sequences | §2 open question 1 | ⛔ |
+| **New for 0.1:** `undef`, must-assign-before-read (`var` only, decision 6) | `ROADMAP.md` §0.1 | ⛔ |
+| **New for 0.1:** string escape sequences (decision 5) | | ⛔ |
 | **New for 0.1:** compile-time immutability enforcement | `docs/PLAN-0.1-POC.md` decision 2 | ⛔ |
 | **New for 0.1:** self-referencing classes | `docs/LANGUAGE.md` §13 limitation 6 | ⛔ |
 
@@ -275,18 +252,18 @@ low-priority items, not silently resolved here.
 ## 6. Suggested sequencing
 
 **Phase 1 — Toolchain scaffolding & round-trip proof.** Stand up
-`frontend/` as an F# solution and `backend/` as a CMake C++23 project;
-define bytecode format v0 (§3) with just enough to represent "call the
-`print` native with one string constant"; frontend emits that fixed
-bytecode for a hardcoded program, backend loads and executes it. Prove the
-whole pipeline end-to-end before any real compiler work starts. Stand up
-CI for both toolchains (§8).
+`compiler/` as an F# solution and `vm/` as a CMake C++23 project; define
+bytecode format v0 (§3) with just enough to represent "call the `print`
+native with one string constant"; `compiler/` emits that fixed bytecode
+for a hardcoded program, `vm/` loads and executes it. Prove the whole
+pipeline end-to-end before any real compiler work starts. Stand up CI for
+both toolchains (§8).
 
 **Phase 2 — Scanner (F#).** Port `0.1-poc`'s scanner design — its two
 post-release bugfixes (accurate line/column tracking; coalescing runs of
 invalid characters into one error) are proven-correct behavior worth
 carrying forward directly rather than re-discovering the same bugs — plus
-new escape-sequence handling (open question 1).
+new escape-sequence handling (decision 5).
 
 **Phase 3 — Parser & AST (F#).** AST as F# discriminated unions — a
 natural fit, and arguably simpler than `0.1-poc`'s generated-visitor-
@@ -313,14 +290,14 @@ binding both naturally live:
 covering every `0.1-poc` expression/statement plus classes/closures.
 `undef` becomes a real runtime `Value` case, emitted as the initial value
 for any `mut`-without-initializer declaration; reading a slot still holding
-it is a runtime error (open question 2 decides whether fields ever
-participate in this).
+it is a runtime error. Scoped to `var` bindings only (decision 6) — fields
+keep `0.1-poc`'s existing always-mutable, no-pre-declaration model.
 
 **Phase 6 — VM core (C++23).** Value representation (a tagged
 union/`std::variant` to start; NaN-boxing is a later optimization, not a
 Phase 6 requirement), stack-based execution loop, chunk/constant-pool
-loading matching the frontend's format, and memory management (open
-question 3).
+loading matching `compiler/`'s format, and a mark-sweep tracing garbage
+collector (decision 7).
 
 **Phase 7 — Native standard library (C++23).** `print`, `concat` at
 minimum for parity with `0.1-poc`. Whether any stdlib is ever written in
@@ -335,8 +312,8 @@ Phase 4 resolver architecture.
 **Phase 9 — Conformance testing against `langspec/examples/`.** Since
 those `.iqx` files are language-level, not `0.1-poc`-implementation-
 specific, they're natural cross-implementation fixtures: same input, same
-expected output, run through both `poc/` and the new
-`frontend/`+`backend/` pipeline. Behavioral drift is either an intentional
+expected output, run through both `poc/` and the new `compiler/`+`vm/`
+pipeline. Behavioral drift is either an intentional
 `0.1-poc` limitation being fixed (expected — note where `0.1` deliberately
 diverges) or a real regression worth catching immediately, not something
 to let slide.
@@ -355,23 +332,23 @@ goalposts to `0.2`.
 - **C++ side**: Catch2 (lighter-weight, easier to drop into a project this
   size than GoogleTest) — also swappable.
 - **Cross-implementation conformance**: a CI job that runs every
-  `langspec/examples/*.iqx` through both `poc/` and `frontend/`+`backend/`
+  `langspec/examples/*.iqx` through both `poc/` and `compiler/`+`vm/`
   and diffs output (see Phase 9). This is the project's actual regression
   safety net across two otherwise-independent codebases — worth having
   from the moment there's anything to compare, not bolted on at the end.
 - Each side is also independently testable without the other existing yet
-  (§3) — the frontend against its own disassembled bytecode output, the
-  backend against hand-assembled bytecode fixtures.
+  (§3) — `compiler/` against its own disassembled bytecode output, `vm/`
+  against hand-assembled bytecode fixtures.
 
 ## 8. Tooling & CI
 
 Checked in this environment as of this planning round:
 
 - **C++23**: CMake 3.28.3, GCC 13.3.0, and Clang 18.1.3 are all present and
-  `g++ -std=c++23` is accepted — backend prototyping can start immediately.
+  `g++ -std=c++23` is accepted — `vm/` prototyping can start immediately.
 - **F#/.NET**: no `dotnet` SDK is currently installed here — needs
-  provisioning (in this environment or wherever frontend work actually
-  happens) before Phase 1's frontend half can start for real.
+  provisioning (in this environment or wherever `compiler/` work actually
+  happens) before Phase 1's F# half can start for real.
 - Any new GitHub Actions workflow must SHA-pin every `uses:` step per
   `CLAUDE.md` — this reorg/plan is the project's first real occasion to add
   a workflow at all, worth getting right from the first commit rather than
@@ -385,9 +362,12 @@ Checked in this environment as of this planning round:
   skipping it would let the two silently drift.
 - **Two build toolchains in one repo is real, ongoing maintenance cost** —
   two CI jobs, two dependency ecosystems, contributors need both installed
-  for a full build. Worth being clear-eyed about now that the frontend/
-  backend language split is locked in, not discovered later.
-- **Open question 2 (`undef` and fields) left unresolved for too long**
-  could ripple into Phase 8's class design if it's still open when that
-  phase starts — worth settling before Phase 4 begins in earnest, not
-  after.
+  for a full build. Worth being clear-eyed about now that the `compiler/`/
+  `vm/` language split is locked in, not discovered later.
+- **Deferring field pre-declaration/immutability to `0.2` (decision 6)
+  still leaves a live seam**: Phase 8's class design needs to keep fields
+  and `var` bindings on deliberately different rules (fields stay
+  `0.1-poc`'s always-mutable, no-pre-declaration model; only `var` gets
+  `undef`/compile-time-immutability) without that asymmetry silently
+  leaking into how classes get implemented — worth a deliberate check at
+  the start of Phase 8, not an assumption.
