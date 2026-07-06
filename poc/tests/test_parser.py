@@ -2,7 +2,7 @@ from conftest import parse
 
 from expression import Literal, Logical, Binary, Break, Continue, Call, Get, Grouping, Ignore, Self, Set, Super, \
     Ternary, Variable, Vector
-from statement import Class, For, Function, Return, Expression
+from statement import Class, For, Function, Return, Expression, Var
 from token import TokenType
 
 
@@ -82,6 +82,17 @@ def test_for_statement_clauses_are_optional():
     assert for_stmt.initializer is None
     assert for_stmt.condition is None
     assert for_stmt.increment is None
+
+
+def test_for_statement_bare_semicolon_body_is_an_empty_block():
+    # Regression test: `body = self.statement()` had no None check, but
+    # statement() returns None for a bare `;` -- constructing a For node
+    # with a None body used to crash the interpreter later
+    # (docs/PLAN-0.1-POC.md).
+    stmts = parse("for (;;) ;")
+    for_stmt = stmts[0]
+    assert isinstance(for_stmt, For)
+    assert for_stmt.body is not None
 
 
 def test_increment_requires_assignable_target():
@@ -184,6 +195,24 @@ def test_vector_literal_with_multiple_elements():
 def test_empty_and_single_element_vector_literals():
     assert single_expr("[]").values == []
     assert [v.value for v in single_expr("[1]").values] == [1.0]
+
+
+def test_vector_literal_parse_error_does_not_leak_comma_operator_disabled():
+    # Regression test: comma_as_operator is toggled off before parsing a
+    # vector literal's elements and back on after -- but a parse error
+    # partway through the elements (a dangling `+` with no right operand)
+    # used to raise past that restore, leaving comma_as_operator=False for
+    # the rest of the file. The broken vector declaration is dropped by
+    # synchronize(); the *next* statement must still see the comma
+    # operator, not have it silently disabled (docs/PLAN-0.1-POC.md).
+    stmts = parse("var bad = [1, 2, bad+]\nvar result = (1, 2)\n")
+    assert len(stmts) == 1
+    result_decl = stmts[0]
+    assert isinstance(result_decl, Var) and result_decl.name.lexeme == "result"
+    comma_expr = result_decl.initializer.expression
+    assert isinstance(comma_expr, Binary) and comma_expr.operator.type == TokenType.COMMA
+    assert comma_expr.left.value == 1.0
+    assert comma_expr.right.value == 2.0
 
 
 def test_pipe_desugars_to_a_call():

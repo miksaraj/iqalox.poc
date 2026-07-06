@@ -125,6 +125,8 @@ class Parser:
         self.consume(TokenType.RIGHT_PAREN, "Expect ')' after for clauses.")
 
         body = self.statement()
+        if body is None:
+            body = Block([])
 
         return For(initializer, condition, increment, body)
 
@@ -414,12 +416,14 @@ class Parser:
             exprs = []
             self.comma_as_operator = False
 
-            if not self.check(TokenType.RIGHT_BRACKET):
-                exprs.append(self.expression())
-                while self.match(TokenType.COMMA):
+            try:
+                if not self.check(TokenType.RIGHT_BRACKET):
                     exprs.append(self.expression())
+                    while self.match(TokenType.COMMA):
+                        exprs.append(self.expression())
+            finally:
+                self.comma_as_operator = True
 
-            self.comma_as_operator = True
             self.consume(TokenType.RIGHT_BRACKET, "Expect ']' after vector elements.")
             return Vector(exprs)
 

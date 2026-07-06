@@ -86,6 +86,14 @@ def test_native_concat_joins_stringified_elements():
     assert get_var(interpreter, "result") == "a1b"
 
 
+def test_native_concat_on_non_vector_raises_runtime_error():
+    # Regression test: concat(5) used to crash with an uncaught Python
+    # TypeError ('float' object is not iterable) instead of a clean
+    # IqaloxRuntimeError (docs/PLAN-0.1-POC.md).
+    with pytest.raises(IqaloxRuntimeError):
+        run("var result = concat 5\n")
+
+
 def test_print_can_be_shadowed_in_a_nested_scope():
     # print/concat are no longer reserved keywords -- just ordinary builtin
     # function values bound in the global environment, so a nested `var

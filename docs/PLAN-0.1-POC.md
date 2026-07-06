@@ -535,14 +535,20 @@ now uses a decimal literal (`var pi = 3.14`), and
 leading-underscore parameter name (`secondOf(_first, second)`), a common
 "intentionally unused" naming convention.
 
-### Noticed via the 0.1 F# port, not yet patched here (running list)
+### Noticed via the 0.1 F# port, now patched here too
 
-Per-owner direction: keep collecting these as they turn up across the
+Per-owner direction: these were collected as they turned up across the
 `0.1` implementation phases (`docs/PLAN-0.1.md`) rather than patching
-`poc` one bug at a time, and fix them all together in one batch later.
-Each entry below was already fixed in the corresponding `compiler/`
-module (see `docs/PLAN-0.1.md`'s phase notes for the fix and its tests) —
-this list only tracks what's still outstanding in `poc/src/` itself.
+`poc` one bug at a time, and fixed all together in one batch once Phase 8
+landed (2026-07-06). Each entry below was already fixed in the
+corresponding `compiler/`/`vm/` module first (see `docs/PLAN-0.1.md`'s
+phase notes for that fix and its tests); the same fix, with the same
+reasoning, is now also applied directly to `poc/src/` — regression tests
+for all six live in `poc/tests/test_parser.py`, `test_operators.py`, and
+`test_functions.py`. All six `langspec/examples/*.iqx` fixtures still
+produce byte-for-byte identical output between `poc` and `compiler/`+`vm/`
+after the batch (none of the fixtures happened to exercise any of these
+bugs).
 
 1. **`Parser.primary()`'s vector-literal handling can permanently disable
    the comma operator.** `comma_as_operator` is toggled off, the elements
