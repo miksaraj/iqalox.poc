@@ -1,61 +1,7 @@
-#include <cstdlib>
 #include <iostream>
-#include <vector>
 
 #include "bytecode.hpp"
-
-namespace {
-
-// Deliberately minimal: a stack of strings is enough for the Phase 1
-// round-trip proof (docs/PLAN-0.1.md). The real tagged-union Value type,
-// covering numbers/booleans/nil/vectors/instances, is Phase 6 scope.
-int run(const iqalox::bytecode::Chunk& chunk) {
-    using iqalox::bytecode::OpCode;
-
-    std::vector<std::string> stack;
-    size_t ip = 0;
-    const auto& code = chunk.code;
-
-    while (ip < code.size()) {
-        auto op = static_cast<OpCode>(code[ip++]);
-        switch (op) {
-            case OpCode::ConstString: {
-                if (ip + 4 > code.size()) {
-                    std::cerr << "iqaloxvm: truncated CONST_STRING operand\n";
-                    return 70;
-                }
-                uint32_t index = static_cast<uint32_t>(code[ip]) | (static_cast<uint32_t>(code[ip + 1]) << 8) |
-                                  (static_cast<uint32_t>(code[ip + 2]) << 16) |
-                                  (static_cast<uint32_t>(code[ip + 3]) << 24);
-                ip += 4;
-                if (index >= chunk.constants.size()) {
-                    std::cerr << "iqaloxvm: constant index " << index << " out of range\n";
-                    return 70;
-                }
-                stack.push_back(chunk.constants[index]);
-                break;
-            }
-            case OpCode::Print: {
-                if (stack.empty()) {
-                    std::cerr << "iqaloxvm: PRINT with an empty stack\n";
-                    return 70;
-                }
-                std::cout << stack.back() << "\n";
-                stack.pop_back();
-                break;
-            }
-            case OpCode::Halt:
-                return 0;
-            default:
-                std::cerr << "iqaloxvm: unknown opcode 0x" << std::hex << static_cast<int>(op) << "\n";
-                return 70;
-        }
-    }
-
-    return 0;
-}
-
-}  // namespace
+#include "vm.hpp"
 
 int main(int argc, char** argv) {
     if (argc != 2) {
@@ -63,10 +9,20 @@ int main(int argc, char** argv) {
         return 64;
     }
 
+    iqalox::Vm vm;
     try {
-        auto chunk = iqalox::bytecode::load(argv[1]);
-        return run(chunk);
+        iqalox::ObjFunction* script = iqalox::bytecode::load(argv[1], vm);
+        vm.interpret(script);
+        return 0;
+    } catch (const iqalox::RuntimeError& error) {
+        // An Iqalox-level fault in an otherwise well-formed program --
+        // matches poc/src/iqalox.py's sysexits convention (EX_SOFTWARE).
+        std::cerr << error.what() << "\n";
+        return 70;
     } catch (const std::exception& error) {
+        // A malformed bytecode file (bad magic/version/truncated data) --
+        // EX_DATAERR, caught separately and second since RuntimeError is
+        // itself a std::exception.
         std::cerr << error.what() << "\n";
         return 65;
     }

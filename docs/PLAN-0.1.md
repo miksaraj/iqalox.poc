@@ -529,11 +529,111 @@ short-circuiting, prefix increment, a `for` loop's condition-exit and
 `break` paths converging on the same stack depth without double-popping,
 closures, and the `super.method()` self/super-independent-resolution fix.
 
-**Phase 6 — VM core (C++23).** Value representation (a tagged
-union/`std::variant` to start; NaN-boxing is a later optimization, not a
-Phase 6 requirement), stack-based execution loop, chunk/constant-pool
-loading matching `compiler/`'s format, and a mark-sweep tracing garbage
-collector (decision 7).
+~~**Phase 6 — VM core (C++23).**~~ Done. `vm/src/value.hpp` defines
+`Value` as `std::variant<std::monostate, UndefTag, bool, double, Obj*>` —
+a tagged union to start, per this plan's original scope (NaN-boxing
+remains a later optimization, not attempted here). `vm/src/object.hpp`
+defines the heap-object hierarchy `Obj*` points at: `ObjString`,
+`ObjVector`, `ObjFunction` (owns its own `Chunk` — raw instruction bytes
+plus an already-resolved `Value` constant pool, decoded once at load time
+rather than kept as a separate structured form the way `compiler/`'s own
+`Instruction`/`Chunk` are — the VM decodes opcodes directly off the byte
+stream as it runs, the same way `clox` does), `ObjClosure`, and
+`ObjUpvalue`. `vm/src/bytecode.cpp` rewrites the Phase 1 v0 loader for
+format v1, recursively decoding nested `FunctionConstant`s into
+`ObjFunction`s. `vm/src/vm.hpp`/`.cpp` is the stack-based interpreter
+(`Vm::run`) plus its mark-sweep tracing garbage collector (decision 7),
+both living on one `Vm` class rather than `clox`'s global VM struct.
+
+Three design points worth recording, each either a deliberate deviation
+from `clox` or a bug caught before it shipped:
+
+- **Calling convention differs from `clox`.** `clox` reserves call-frame
+  slot 0 for the callee itself, with parameters starting at slot 1;
+  `Resolver.fs`/`Codegen.fs` don't do this — a plain function's parameters
+  (or a method's `self`) start at slot 0 directly (see `Codegen.fs`'s
+  `CompileFunctionValue`). So `CallFrame::stackBase` in `vm.hpp` points at
+  slot 0 (the first parameter), and the callee's own value lives one slot
+  *below* that, at `stackBase - 1` — every place that needs to unwind a
+  whole call (`Return`, an arity-mismatch error) truncates back to
+  `stackBase - 1`, not `stackBase`.
+- **No dedicated "close upvalue" opcode exists in format v1** — unlike
+  `clox`, which emits one at every scope exit that might have captured a
+  local. Adding one would mean reopening the already-shipped Phase 5
+  format/`Codegen.fs`/tests for a VM-side concern. Instead, `Vm`'s single
+  stack-shrinking choke point (`truncateStack`, used by `Pop`, `PopN`,
+  `Return`'s frame teardown, and `BuildVector`'s operand cleanup)
+  unconditionally closes any open upvalue whose slot is about to be
+  reclaimed. This is strictly more robust than a compiler-emitted opcode
+  (impossible to forget a spot) at a small, constant per-shrink cost.
+- **`ObjUpvalue` addresses its stack slot by index, not by `Value*`.**
+  The VM's value stack is a `std::deque<Value>`, not a `std::vector`,
+  specifically because taking a raw pointer into a local (for an open
+  upvalue to alias) must survive later pushes — a `vector` reallocates
+  and invalidates every existing pointer into it on growth, while a
+  `deque` guarantees push/pop-at-the-ends never invalidates references to
+  other elements. That still leaves a subtler trap: comparing two
+  pointers into *different* elements of a non-contiguous container with
+  `<`/`>=` (needed to find/close every upvalue at or above a given stack
+  position) is unspecified behavior unless both alias the same underlying
+  array, which a `deque`'s internal blocks don't guarantee. Caught before
+  it shipped by reasoning through the design rather than by a failing
+  test; fixed by having `ObjUpvalue` store a plain `size_t` stack index
+  instead, since integer comparison has no such hazard.
+
+A real, empirically-caught bug worth recording too: the GC's
+allocation-threshold check must not run at all until the freshly-loaded
+program's top-level closure has been pushed onto the VM's own stack —
+before that (for every allocation `bytecode::load` makes while building
+the constant pool, and for `interpret`'s own first allocation, the
+closure wrapping the script) nothing is reachable from any root yet, so a
+collection would free the entire program out from under itself before it
+ever runs. `Vm::allocate`'s `gcEnabled` flag (set true immediately after
+that one push) exists solely to close this window. Found by reasoning
+about `vm.stressGc`'s intended use in tests (collect on *every*
+allocation) before writing the tests that would otherwise have hit it
+immediately.
+
+Runtime semantics were ported from `poc/src/interpreter.py`, not
+reinvented: truthiness (only `nil`/`false` are falsy), `==`/`!=`
+structural equality (numbers/bools by value, strings by content, vectors
+element-wise and recursively, everything else by identity — Python's
+default `==`, which is all `is_equal` ever relied on), `%`/`**` following
+Python's floored-modulo sign convention rather than C++'s `std::fmod`
+(`-1 % 4` is `3`, not `-1`), division-by-zero and operand-type-check error
+wording, and `+`/`-`/`*`/`/`/`%`/`^` all requiring numbers (no implicit
+string concatenation via `+` — `concat` is Phase 7's job). One honest gap
+relative to `poc`: format v1 has no debug-info side table yet, so runtime
+errors carry no source line/column — `poc`'s exact wording is matched
+where a name is available (`"Undefined variable 'x'."`), but a local/
+upvalue read's "accessed before assignment" error and a failed call's
+"not callable" error can only name the value's *type*, not its source
+expression.
+
+`Class`/`Method`/`Inherit`/`GetProperty`/`SetProperty`/`GetSuper` are
+recognized by the loader and the VM's opcode dispatch (so a program that
+merely *contains* a class elsewhere still loads and runs up to the point
+of executing one) but raise a clear "not yet supported" runtime error if
+actually executed — full class/instance semantics are Phase 8's job, one
+phase ahead of `vm/` by the same design as v1 itself.
+
+25 Catch2 tests total: a rewritten `test_bytecode.cpp` for v1 loading
+(including a nested `FunctionConstant` with its own upvalues and chunk),
+and new `test_vm.cpp` hand-assembling small `Chunk`s directly via an
+in-file `ChunkBuilder` (no F# frontend needed, per this plan's own
+testing-strategy note in §7) — arithmetic, comparisons, truthiness,
+string/vector equality, `Undef`-read/undefined-global/division-by-zero/
+non-callable/arity-mismatch runtime errors, jump-based control flow, a
+function call, a closure that outlives the frame that declared it, two
+closures sharing one upvalue (proving capture-reuse, not just capture),
+and a `vm.stressGc` run that forces a full collection before every single
+allocation to pressure-test rooting correctness end to end. Also
+hand-verified against the real toolchain: every `compiler/`-emitted
+non-class example compiles and runs to completion (arithmetic, `for`
+loops with `break`/`continue`, recursion, closures over mutable locals),
+and a program that calls the not-yet-defined `print` or declares a class
+fails with exactly the expected Phase 7/8 boundary error rather than
+crashing.
 
 **Phase 7 — Native standard library (C++23).** `print`, `concat` at
 minimum for parity with `0.1-poc`. Whether any stdlib is ever written in

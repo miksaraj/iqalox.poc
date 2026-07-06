@@ -136,11 +136,35 @@ super-call from inside a closure nested within a method) and fixed in
 both `Bound.fs`/`Resolver.fs`, and the class/method and `for`-loop
 `break`/`continue` codegen sequences. `compiler/src/Program.fs` is now a
 real `iqaloxc` CLI (source path + output path, scan → parse → resolve →
-codegen → write). VM core/GC/stdlib (`vm/`) are not built yet — this
-section will grow into the same level of detail as the `poc/` one above as
-that work lands. `scripts/phase5-compile-smoke-test.sh` (replacing Phase
-1's round-trip script, since `vm/` can't read format v1 yet) builds
-`compiler/` and compiles every `langspec/examples/*.iqx` fixture with it.
+codegen → write). `scripts/phase5-compile-smoke-test.sh` (replacing Phase
+1's round-trip script, since `vm/` couldn't read format v1 yet at the
+time) builds `compiler/` and compiles every `langspec/examples/*.iqx`
+fixture with it.
+
+Phase 6 (VM core) is also done: `vm/src/value.hpp` defines `Value` as a
+tagged `std::variant` (`nil`/`undef`/`bool`/`double`/`Obj*`);
+`vm/src/object.hpp` defines the heap-object hierarchy (`ObjString`,
+`ObjVector`, `ObjFunction`, `ObjClosure`, `ObjUpvalue`); `vm/src/bytecode.cpp`
+loads format v1 (superseding Phase 1's v0 loader); `vm/src/vm.hpp`/`.cpp`
+is the stack-based interpreter (`Vm::run`) plus its mark-sweep tracing
+garbage collector (decision 7), both on one `Vm` class. Covers every
+`0.1-poc`-equivalent expression/statement plus functions and closures —
+see `docs/PLAN-0.1.md`'s Phase 6 entry for three notable design points
+(a calling convention that deliberately differs from `clox`'s, since
+`Resolver.fs` doesn't reserve frame slot 0 for the callee; no dedicated
+"close upvalue" opcode, handled instead by a universal stack-shrink choke
+point in `Vm`; and why `ObjUpvalue` addresses its stack slot by index
+rather than by pointer, to sidestep undefined behavior comparing pointers
+into different blocks of the stack's underlying `std::deque`) and a real
+bug caught before it shipped (the GC mustn't run at all until the loaded
+program's top-level closure is anchored on the stack, or it frees the
+whole program before it starts). Classes/`self`/`super` are recognized by
+the loader and the VM's opcode dispatch but raise a clear "not yet
+supported" error if actually executed (Phase 8); there's no native
+stdlib yet either (`print`/`concat`, Phase 7), so no program that calls
+either can run to completion yet — VM core/GC/stdlib will finish growing
+into the same level of detail as the `poc/` section above as those two
+phases land.
 
 ## Engineering conventions
 

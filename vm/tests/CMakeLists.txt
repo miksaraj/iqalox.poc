@@ -2,7 +2,10 @@ find_package(Catch2 3 REQUIRED)
 
 add_executable(iqaloxvm_tests
     test_bytecode.cpp
+    test_vm.cpp
     ../src/bytecode.cpp
+    ../src/value.cpp
+    ../src/vm.cpp
 )
 
 target_include_directories(iqaloxvm_tests PRIVATE ../src)
