@@ -268,11 +268,53 @@ targeted before being corrected). Environment note: this environment
 needed `dotnet-sdk-10.0` and `catch2` installed via `apt`; CMake/GCC/Clang
 were already present (see §8's original findings).
 
-**Phase 2 — Scanner (F#).** Port `0.1-poc`'s scanner design — its two
-post-release bugfixes (accurate line/column tracking; coalescing runs of
-invalid characters into one error) are proven-correct behavior worth
-carrying forward directly rather than re-discovering the same bugs — plus
-new escape-sequence handling (decision 5).
+~~**Phase 2 — Scanner (F#).**~~ Done. `compiler/src/Token.fs` (an
+idiomatic `TokenType` discriminated union plus the `Token` record) and
+`compiler/src/Scanner.fs` (`Scanner.scanTokens : string -> Token list *
+ScanError list`) carry forward `0.1-poc`'s two proven-correct post-release
+fixes (accurate line/column tracking; coalescing runs of invalid
+characters into one error) and add escape-sequence handling (decision 5:
+`\n \t \r \\ \' \" \0`, hard error on anything else).
+
+Writing it carefully (rather than a line-for-line port) surfaced five real
+`poc` bugs that were never "proven correct" and so weren't carried
+forward — all fixed in `Scanner.fs`, none needing design sign-off since
+they're straightforward correctness bugs, not language-design questions:
+
+1. **Decimal number literals never worked in `poc` at all.**
+   `number()`'s fractional-part check compares `self.peek()` to a digit
+   test that *also* defaults to `self.peek()` — it compares the '.'
+   character to itself and never looks at what actually follows it.
+   `3.14` scans as `NUMBER("3")`, `DOT`, `NUMBER("14")` in `poc`, silently,
+   with no test or example ever having used a decimal literal to catch it.
+   Fixed in `Scanner.fs` by checking the character *after* the dot
+   (`peekNext`).
+2. **A leading-underscore identifier (`_foo`) misscans** as a bare `_`
+   (the ignore operator) followed by a separate `foo` identifier, since
+   `_` is checked as its own token before the identifier dispatch runs —
+   a limitation `docs/LANGUAGE.md` §13 already flagged as known-but-
+   deprioritized in `poc`. Fixed by checking whether an alphanumeric
+   character follows before deciding `_` is standalone.
+3. **The `...` (ellipsis) token under-consumes by one character** — `poc`'s
+   generic compound-matching only ever advances one extra character
+   regardless of a compound's actual length, so `...` becomes a 2-character
+   lexeme. Moot today (`...` has no grammar yet, 0.2 scope) but worth not
+   carrying forward. Fixed via a longest-match search that consumes
+   exactly the matched candidate's length.
+4. **A bare `#>` outside a block comment is silently swallowed** with no
+   token or error, an accident of treating comment markers as just another
+   entry in the same generic compound-matching table as operators. Fixed
+   by giving comments (`#`, `<# ... #>`) their own explicit dispatch.
+5. **An unterminated block comment produces no error at all** in `poc`
+   (the scan loop just exits at EOF with nothing reported), unlike an
+   unterminated string, which already errors correctly. Fixed to report
+   one the same way.
+
+See task tracking for a proposed small follow-up patch to `poc` itself for
+bug 1 (the only one of these that's a real, user-facing defect in a
+*shipped* implementation, `0.1.1-poc`) — not done as part of this phase,
+since Phase 2's job is the new `0.1` scanner, not further `poc`
+maintenance.
 
 **Phase 3 — Parser & AST (F#).** AST as F# discriminated unions — a
 natural fit, and arguably simpler than `0.1-poc`'s generated-visitor-
