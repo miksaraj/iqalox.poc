@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
 
+# Least-privilege default for the GITHUB_TOKEN: every job here only
+# checks out code, builds, and runs tests/scripts -- none needs write
+# access to the repo, issues, PRs, etc.
+permissions:
+  contents: read
+
 jobs:
   vm:
     name: vm/ (C++23)
