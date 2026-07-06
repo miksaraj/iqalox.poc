@@ -4,6 +4,7 @@ add_executable(iqaloxvm_tests
     test_bytecode.cpp
     test_vm.cpp
     test_value.cpp
+    test_classes.cpp
     ../src/bytecode.cpp
     ../src/value.cpp
     ../src/vm.cpp

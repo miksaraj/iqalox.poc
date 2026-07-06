@@ -29,11 +29,28 @@ struct CallFrame {
     size_t ip = 0;
     // Stack index of this frame's slot 0. Note this is *not* clox's
     // convention of reserving slot 0 for the callee itself -- Resolver.fs
-    // starts a function's own parameters (or, for a method, `self`) at
-    // slot 0 directly (see `Codegen.fs`'s `CompileFunctionValue`), so the
-    // callee's own value lives one slot *below* `stackBase`, at
-    // `stackBase - 1`, not at slot 0.
+    // starts a plain function's parameters at slot 0 directly (see
+    // `Codegen.fs`'s `CompileFunctionValue`). A *method* call is the one
+    // place that convention still applies: `self` occupies slot 0 (see
+    // `ResolveFunction`'s `isMethod` branch), so `stackBase` for a method
+    // frame points at the receiver itself, not one slot above it.
     size_t stackBase = 0;
+    // Where `Return` truncates the stack back to and pushes the call's
+    // result -- `stackBase - 1` for a plain function/native call (the
+    // callee's own slot, one below its parameters), or `stackBase` itself
+    // for a method call (there's no separate callee slot below `self`;
+    // see `Vm::callMethod`).
+    size_t resultIndex = 0;
+    // `init`, invoked via constructing an instance (`Vm::callClass`),
+    // always yields the instance regardless of what it explicitly
+    // `return`s (or falls off the end with) -- mirroring `poc`'s
+    // `IqaloxClass.call`, which discards `initializer.bind(instance).call(...)`'s
+    // own return value and returns `instance` unconditionally. Calling
+    // `.init()` directly as an ordinary method (not via construction)
+    // does *not* get this treatment in `poc` either, so this is only ever
+    // set for the constructor-invoked call, never a plain `GetProperty`
+    // lookup of "init".
+    bool isInitializer = false;
 };
 
 // The stack-based bytecode interpreter (docs/PLAN-0.1.md Phase 6) plus its
@@ -151,6 +168,19 @@ private:
     void callValue(const Value& callee, int argCount);
     void call(ObjClosure* closure, int argCount);
     void callNative(ObjNativeFunction* native, int argCount);
+    // Shared by a bound-method call and an `init` invocation from
+    // `callClass` -- both need `self`/the instance sitting at the
+    // callee's own stack slot (see `CallFrame::stackBase`'s doc comment),
+    // which the caller has already arranged before calling this.
+    void callMethod(ObjClosure* method, int argCount, bool isInitializer);
+    void callClass(ObjClass* klass, int argCount);
+    // Looks `name` up in `klass->methods` and returns it wrapped in a
+    // fresh `ObjBoundMethod` bound to `receiver` -- shared by `GetProperty`
+    // (looks up on the instance's own class) and `GetSuper` (looks up on
+    // a specific superclass value instead). Throws `RuntimeError`
+    // ("Undefined property '<name>'.") if `name` isn't found, matching
+    // both of poc's identically-worded lookup-miss errors.
+    Value bindMethod(ObjClass* klass, const Value& receiver, const std::string& name);
     ObjUpvalue* captureUpvalue(size_t stackIndex);
     Value readUpvalue(ObjUpvalue* upvalue) const { return upvalue->open ? stack[upvalue->stackIndex] : upvalue->closed; }
     void writeUpvalue(ObjUpvalue* upvalue, const Value& value);
