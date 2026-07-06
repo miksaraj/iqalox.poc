@@ -407,6 +407,21 @@ type private Codegen() =
 
         state.Emit Pop |> ignore // discards the temporary re-fetch, not the class itself
 
+        // The synthetic `super` local's scope (Resolver.fs's `beginScope`/
+        // `endScope` bracketing the superclass expression and this class's
+        // own methods) ends exactly here -- and unlike an ordinary local,
+        // this one was never given its own slot-cleanup by a `BBlock`,
+        // since a class statement isn't compiled as one. Left un-popped,
+        // a *second* class-with-a-superclass declared later in the same
+        // script would have its own synthetic `super` local collide with
+        // this one at the same slot (Resolver correctly reuses it once
+        // this scope ends, but the runtime stack wouldn't have actually
+        // freed it) -- any closure that already captured this `super` as
+        // an upvalue keeps working regardless, since popping closes it
+        // (see `vm/src/vm.cpp`'s `truncateStack`).
+        if superclass.IsSome then
+            state.Emit Pop |> ignore
+
     member private this.CompileFor
         (initializer: BoundStmt option, condition: BoundExpr option, increment: BoundExpr option, body: BoundStmt)
         : unit =

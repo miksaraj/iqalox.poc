@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "value.hpp"
@@ -17,6 +18,9 @@ enum class ObjType : uint8_t {
     Closure,
     Upvalue,
     NativeFunction,
+    Class,
+    Instance,
+    BoundMethod,
 };
 
 // Base of every heap-allocated, GC-managed value. `next` is the intrusive
@@ -122,6 +126,48 @@ struct ObjNativeFunction : Obj {
 
     ObjNativeFunction(std::string n, int a, Fn f)
         : Obj(ObjType::NativeFunction), name(std::move(n)), arity(a), function(f) {}
+};
+
+// `methods` already has every inherited method copied in at declaration
+// time (see `Vm`'s `Inherit` handler) -- matching `clox`'s own approach,
+// not `poc`'s `IqaloxClass`, which instead walks a live `superclass`
+// pointer chain at every lookup. Behaviorally equivalent as long as
+// methods are never added after the fact, which Iqalox has no syntax for.
+// No `superclass` field is kept for the same reason `clox` doesn't need
+// one: a `super.method()` call already carries the exact superclass
+// value it needs on the stack (captured via the synthetic `super`
+// upvalue/local, see `Bound.BSuper`), so nothing here ever has to walk a
+// chain to find it.
+struct ObjClass : Obj {
+    std::string name;
+    std::unordered_map<std::string, ObjClosure*> methods;
+
+    explicit ObjClass(std::string n) : Obj(ObjType::Class), name(std::move(n)) {}
+};
+
+// Fields spring into existence on first assignment and are always
+// mutable, matching `poc/src/callable.py`'s `IqaloxInstance` exactly --
+// `0.1`'s new compile-time immutability (decision 6, docs/PLAN-0.1.md)
+// is scoped to `var` bindings only, not fields.
+struct ObjInstance : Obj {
+    ObjClass* klass;
+    std::unordered_map<std::string, Value> fields;
+
+    explicit ObjInstance(ObjClass* k) : Obj(ObjType::Instance), klass(k) {}
+};
+
+// The result of looking up a method on an instance (`GetProperty`) or via
+// `super` (`GetSuper`): a closure paired with the receiver it's bound to,
+// so calling it later places `receiver` at the method's own `self` slot
+// regardless of how many other values are on the stack by then -- mirrors
+// `poc`'s `IqaloxFunction.bind`, which wraps the same closure in a fresh
+// environment defining `self`, just without needing a new environment
+// per call here.
+struct ObjBoundMethod : Obj {
+    Value receiver;
+    ObjClosure* method;
+
+    ObjBoundMethod(Value r, ObjClosure* m) : Obj(ObjType::BoundMethod), receiver(r), method(m) {}
 };
 
 }  // namespace iqalox

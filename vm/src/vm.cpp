@@ -106,13 +106,25 @@ ObjString* Vm::stringConstantAt(CallFrame& frame, uint16_t index) {
 void Vm::callValue(const Value& callee, int argCount) {
     if (isObj(callee)) {
         Obj* obj = asObj(callee);
-        if (obj->type == ObjType::Closure) {
-            call(static_cast<ObjClosure*>(obj), argCount);
-            return;
-        }
-        if (obj->type == ObjType::NativeFunction) {
-            callNative(static_cast<ObjNativeFunction*>(obj), argCount);
-            return;
+        switch (obj->type) {
+            case ObjType::Closure:
+                call(static_cast<ObjClosure*>(obj), argCount);
+                return;
+            case ObjType::NativeFunction:
+                callNative(static_cast<ObjNativeFunction*>(obj), argCount);
+                return;
+            case ObjType::Class:
+                callClass(static_cast<ObjClass*>(obj), argCount);
+                return;
+            case ObjType::BoundMethod: {
+                auto* bound = static_cast<ObjBoundMethod*>(obj);
+                size_t calleeIndex = stack.size() - static_cast<size_t>(argCount) - 1;
+                stack[calleeIndex] = bound->receiver;
+                callMethod(bound->method, argCount, /*isInitializer=*/false);
+                return;
+            }
+            default:
+                break;
         }
     }
     runtimeError(typeName(callee) + " value is not callable.");
@@ -149,7 +161,50 @@ void Vm::call(ObjClosure* closure, int argCount) {
     frame.closure = closure;
     frame.ip = 0;
     frame.stackBase = stack.size() - static_cast<size_t>(argCount);
+    frame.resultIndex = frame.stackBase - 1;
     frames.push_back(frame);
+}
+
+void Vm::callMethod(ObjClosure* method, int argCount, bool isInitializer) {
+    if (argCount != method->function->arity) {
+        runtimeError("Expected " + std::to_string(method->function->arity) + " argument(s) but got " +
+                     std::to_string(argCount) + ".");
+    }
+    if (frames.size() >= kMaxFrames) {
+        runtimeError("Stack overflow.");
+    }
+
+    CallFrame frame;
+    frame.closure = method;
+    frame.ip = 0;
+    // `self` occupies slot 0 (already placed there by the caller -- see
+    // `callValue`'s BoundMethod case and `callClass`), so, unlike a plain
+    // call, there's no separate callee slot *below* stackBase here.
+    frame.stackBase = stack.size() - static_cast<size_t>(argCount) - 1;
+    frame.resultIndex = frame.stackBase;
+    frame.isInitializer = isInitializer;
+    frames.push_back(frame);
+}
+
+void Vm::callClass(ObjClass* klass, int argCount) {
+    size_t calleeIndex = stack.size() - static_cast<size_t>(argCount) - 1;
+    auto* instance = allocate<ObjInstance>(klass);
+    // Overwrites the class value's own slot -- mirrors `poc`'s
+    // `IqaloxClass.call`, which always returns the freshly created
+    // instance regardless of what (if anything) `init` itself returns.
+    stack[calleeIndex] = objValue(instance);
+
+    auto it = klass->methods.find("init");
+    if (it == klass->methods.end()) {
+        if (argCount != 0) {
+            runtimeError("Expected 0 argument(s) but got " + std::to_string(argCount) + ".");
+        }
+        // No frame to push -- `stack[calleeIndex]` already holds the
+        // finished call's result (the instance), and there are no
+        // leftover arguments to discard.
+        return;
+    }
+    callMethod(it->second, argCount, /*isInitializer=*/true);
 }
 
 ObjUpvalue* Vm::captureUpvalue(size_t stackIndex) {
@@ -171,6 +226,14 @@ ObjUpvalue* Vm::captureUpvalue(size_t stackIndex) {
         prev->nextOpen = created;
     }
     return created;
+}
+
+Value Vm::bindMethod(ObjClass* klass, const Value& receiver, const std::string& name) {
+    auto it = klass->methods.find(name);
+    if (it == klass->methods.end()) {
+        runtimeError("Undefined property '" + name + "'.");
+    }
+    return objValue(allocate<ObjBoundMethod>(receiver, it->second));
 }
 
 void Vm::interpret(ObjFunction* script) {
@@ -393,8 +456,15 @@ void Vm::run() {
             }
             case OpCode::Return: {
                 Value result = pop();
-                size_t calleeIndex = frame.stackBase - 1;
-                truncateStack(calleeIndex);
+                if (frame.isInitializer) {
+                    // Always the instance, regardless of what `init`
+                    // itself returned -- still sitting at `resultIndex`,
+                    // where `callClass` placed it before this frame ever
+                    // started running (see `CallFrame::isInitializer`).
+                    result = stack[frame.resultIndex];
+                }
+                size_t resultIndex = frame.resultIndex;
+                truncateStack(resultIndex);
                 frames.pop_back();
                 if (frames.empty()) {
                     return;
@@ -402,13 +472,65 @@ void Vm::run() {
                 push(result);
                 break;
             }
-            case OpCode::Class:
-            case OpCode::Method:
-            case OpCode::Inherit:
-            case OpCode::GetProperty:
-            case OpCode::SetProperty:
-            case OpCode::GetSuper:
-                runtimeError("Classes are not yet supported by iqaloxvm (docs/PLAN-0.1.md Phase 8).");
+            case OpCode::Class: {
+                ObjString* name = stringConstantAt(frame, readU16(frame));
+                push(objValue(allocate<ObjClass>(name->value)));
+                break;
+            }
+            case OpCode::Method: {
+                ObjString* name = stringConstantAt(frame, readU16(frame));
+                auto* closure = static_cast<ObjClosure*>(asObj(pop()));
+                static_cast<ObjClass*>(asObj(peek(0)))->methods[name->value] = closure;
+                break;
+            }
+            case OpCode::Inherit: {
+                const Value& superclassValue = peek(1);
+                if (!isObj(superclassValue) || asObj(superclassValue)->type != ObjType::Class) {
+                    runtimeError("Superclass must be a class.");
+                }
+                auto* superclass = static_cast<ObjClass*>(asObj(superclassValue));
+                auto* subclass = static_cast<ObjClass*>(asObj(peek(0)));
+                // Copies the superclass's methods in *now*, before any of
+                // the subclass's own `Method` opcodes run -- so a
+                // same-named subclass method naturally overrides the
+                // inherited entry, and `find`-by-name never has to walk a
+                // superclass chain at all (see `ObjClass`'s doc comment).
+                subclass->methods = superclass->methods;
+                break;
+            }
+            case OpCode::GetProperty: {
+                ObjString* name = stringConstantAt(frame, readU16(frame));
+                Value receiver = pop();
+                if (!isObj(receiver) || asObj(receiver)->type != ObjType::Instance) {
+                    runtimeError("Only instances have properties.");
+                }
+                auto* instance = static_cast<ObjInstance*>(asObj(receiver));
+                auto fieldIt = instance->fields.find(name->value);
+                if (fieldIt != instance->fields.end()) {
+                    push(fieldIt->second);
+                } else {
+                    push(bindMethod(instance->klass, receiver, name->value));
+                }
+                break;
+            }
+            case OpCode::SetProperty: {
+                ObjString* name = stringConstantAt(frame, readU16(frame));
+                Value value = pop();
+                Value receiver = pop();
+                if (!isObj(receiver) || asObj(receiver)->type != ObjType::Instance) {
+                    runtimeError("Only instances have fields.");
+                }
+                static_cast<ObjInstance*>(asObj(receiver))->fields[name->value] = value;
+                push(value);
+                break;
+            }
+            case OpCode::GetSuper: {
+                ObjString* name = stringConstantAt(frame, readU16(frame));
+                auto* superclass = static_cast<ObjClass*>(asObj(pop()));
+                Value self = pop();
+                push(bindMethod(superclass, self, name->value));
+                break;
+            }
         }
     }
 }
@@ -458,6 +580,21 @@ void Vm::blackenObject(Obj* obj) {
             // A raw C++ function pointer plus a name/arity -- nothing
             // GC-owned to trace through.
             break;
+        case ObjType::Class:
+            for (auto& [name, closure] : static_cast<ObjClass*>(obj)->methods) markObject(closure);
+            break;
+        case ObjType::Instance: {
+            auto* instance = static_cast<ObjInstance*>(obj);
+            markObject(instance->klass);
+            for (auto& [name, value] : instance->fields) markValue(value);
+            break;
+        }
+        case ObjType::BoundMethod: {
+            auto* bound = static_cast<ObjBoundMethod*>(obj);
+            markValue(bound->receiver);
+            markObject(bound->method);
+            break;
+        }
     }
 }
 

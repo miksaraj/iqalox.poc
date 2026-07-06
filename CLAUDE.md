@@ -155,9 +155,9 @@ rather than by pointer, to sidestep undefined behavior comparing pointers
 into different blocks of the stack's underlying `std::deque`) and a real
 bug caught before it shipped (the GC mustn't run at all until the loaded
 program's top-level closure is anchored on the stack, or it frees the
-whole program before it starts). Classes/`self`/`super` are recognized by
-the loader and the VM's opcode dispatch but raise a clear "not yet
-supported" error if actually executed (Phase 8).
+whole program before it starts). Classes/`self`/`super` were recognized by
+the loader and the VM's opcode dispatch at this point but raised a clear
+"not yet supported" error if actually executed until Phase 8 (below).
 
 Phase 7 (native standard library) is also done: `vm/src/object.hpp` adds
 `ObjNativeFunction` (a name, arity, and a plain C++ function pointer, no
@@ -177,9 +177,46 @@ other global instead of silently succeeding. `scripts/phase7-run-smoke-test.sh`
 execute a program and produce real output) compiles *and runs* every
 `langspec/examples/*.iqx` fixture — a hand-verified spot check during this
 phase found the four non-class examples already produce byte-for-byte
-identical output to `poc`. Classes/`self`/`super` still raise the Phase 8
-"not yet supported" error — this section will finish growing into the
-same level of detail as the `poc/` section above once that phase lands.
+identical output to `poc`. Classes/`self`/`super` still raised a "not
+yet supported" error at that point in time.
+
+Phase 8 (classes & OOP) is also done: `vm/src/object.hpp` adds
+`ObjClass` (a name plus a `methods` map, populated by *copying* the
+superclass's methods at `Inherit` time — clox's static-copy approach,
+not `poc`'s live `superclass` pointer chain walked at every lookup;
+behaviorally equivalent since Iqalox has no runtime method-adding
+syntax), `ObjInstance` (a `klass` pointer plus a `fields` map that
+springs entries into existence on first assignment, exactly like
+`poc/src/callable.py`'s `IqaloxInstance` — 0.1's new compile-time
+immutability is scoped to `var` bindings only, never fields), and
+`ObjBoundMethod` (mirrors `poc`'s `IqaloxFunction.bind`). Method calls
+need a different calling convention from plain function calls, since
+`Resolver.fs` reserves frame slot 0 for `self` on methods but not on
+plain functions: `vm/src/vm.cpp` adds a `callMethod` path alongside the
+existing `call`, and `CallFrame` gains `resultIndex` (generalizing what
+used to be hardcoded as `stackBase - 1` in `Return`'s handler, since it
+differs between the two conventions) and `isInitializer` (lets `Return`
+substitute the pre-seeded instance for whatever `init` explicitly
+returns, matching `poc`'s `IqaloxClass.call` discarding `init`'s own
+return value — a direct `.init()` call on an existing instance, not via
+construction, does *not* get this treatment, also matching `poc`).
+Dynamic dispatch (`GetProperty`) always resolves against the receiver's
+actual runtime `klass`, so an inherited method's `self.method()` call
+correctly finds a subclass's override; `super.method()` (`GetSuper`)
+bypasses dispatch entirely, resolving directly against the specific
+superclass value captured at class-declaration time. See
+`docs/PLAN-0.1.md`'s Phase 8 entry for the full opcode-by-opcode stack
+shapes, exact error-message porting from `poc`, and a real bug found and
+fixed in already-merged Phase 5 code: `Codegen.fs`'s `CompileClass`
+never popped the synthetic `super` local's stack slot once a class's
+own methods were compiled, so a *second*, unrelated `extends`
+declaration later in the same script reused the same slot per
+`Resolver.fs`'s (correct) scoping but collided with the first class's
+still-resident value at runtime — surfaced only by real end-to-end
+script validation (`inheritance.iqx` vs `poc`'s output), not by any unit
+test, and fixed with one added `Pop`. All six `langspec/examples/*.iqx`
+fixtures, including the two class-based ones, now produce byte-for-byte
+identical output to `poc`.
 
 ## Engineering conventions
 

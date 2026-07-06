@@ -169,6 +169,7 @@ let ``super.method() pushes self and the superclass, resolved independently, the
            Closure(4, [ { FromEnclosingLocal = true; Index = 0 } ]) // B.greet, capturing the synthetic `super` local
            Method 2 // "greet"
            Pop
+           Pop // discards the synthetic `super` local -- its scope (Resolver.fs's beginScope/endScope) ends here
            Nil
            Return |],
         chunk.Code
@@ -185,6 +186,35 @@ let ``super.method() pushes self and the superclass, resolved independently, the
             greetB.Chunk.Code
         )
     | constants -> failwith $"unexpected constants: %A{constants}"
+
+[<Fact>]
+let ``two independent superclass declarations in the same script both capture slot 0`` () =
+    // Regression test for a real bug: Resolver.fs's synthetic `super`
+    // local is scoped to just its own class declaration (added, then
+    // removed via beginScope/endScope wrapping the superclass expression
+    // and that class's own methods) -- so a *second*, unrelated `extends`
+    // later in the same script reuses the exact same slot 0, not slot 1.
+    // Codegen must pop the first class's superclass value once its own
+    // methods are compiled, or the runtime stack would still have it
+    // sitting in slot 0 when the second class's superclass is pushed
+    // there too, corrupting that second class's captured `super` upvalue.
+    let source =
+        "class Base1 { value() { return 1; } }\n"
+        + "class A extends Base1 { greet() { return super.value(); } }\n"
+        + "class Base2 { value() { return 2; } }\n"
+        + "class Sub extends Base2 { greet() { return super.value(); } }"
+
+    let chunk = compileSource source
+
+    let greetProtos =
+        chunk.Constants
+        |> Array.choose (function
+            | FunctionConstant proto when proto.Name = "greet" -> Some proto
+            | _ -> None)
+
+    Assert.Equal(2, greetProtos.Length)
+    for proto in greetProtos do
+        Assert.Equal<UpvalueDescriptor list>([ { FromEnclosingLocal = true; Index = 0 } ], proto.Upvalues)
 
 [<Fact>]
 let ``the disassembler prints every top-level instruction and recurses into nested function chunks`` () =

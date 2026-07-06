@@ -719,10 +719,96 @@ and arity checking for native calls. 3 new xUnit tests in
 `ResolverTests.fs` cover calling `print` needing no declaration, and the
 new immutability/redeclaration errors for native names.
 
-**Phase 8 — Classes & OOP in bytecode form (C++23 + F#).** Bound methods,
-single inheritance, `super` calls — `clox`'s approach (superclass method
-table resolved substantially at compile time) is the natural fit given the
-Phase 4 resolver architecture.
+~~**Phase 8 — Classes & OOP in bytecode form (C++23 + F#).**~~ Done.
+`vm/src/object.hpp` adds `ObjClass` (name, a `methods` map already
+containing every inherited method copied in at declaration time — `clox`'s
+approach, not `poc`'s live `superclass` pointer chain, though behaviorally
+equivalent since Iqalox has no syntax to add a method after the fact),
+`ObjInstance` (a class pointer plus a `fields` map, springing into
+existence on first assignment and always mutable, matching `0.1-poc`'s
+model exactly — decision 6's compile-time immutability is `var` bindings
+only), and `ObjBoundMethod` (a receiver paired with a closure, mirroring
+`poc`'s `IqaloxFunction.bind`). `vm/src/vm.cpp` implements all six
+class-related opcodes (`Class`, `Method`, `Inherit`, `GetProperty`,
+`SetProperty`, `GetSuper`), replacing the "not yet supported" error
+they'd raised since Phase 6.
+
+The calling convention needed a second shape alongside Phase 6's
+plain-function one: a method's `self` occupies frame slot 0 directly
+(`Resolver.fs`'s `ResolveFunction` reserves it there), unlike a plain
+call, where the callee's own value sits one slot *below* the frame base.
+`Vm::callMethod` (shared by a bound-method call and `init`, invoked via
+constructing an instance) sets `stackBase` to include that slot instead
+of one past it. Constructing an instance needed its own substitution
+too: `init`'s return value is always discarded in favor of the instance
+(mirroring `poc`'s `IqaloxClass.call`, which does the same), implemented
+by having `Vm::callClass` pre-seed the instance at the position `Return`
+will eventually truncate back to and read from if `CallFrame::isInitializer`
+is set — a plain, direct call to `.init()` on an existing instance
+(not via construction) does *not* get this treatment, matching `poc`.
+
+Runtime error wording again ported from `poc` directly: `"Superclass must
+be a class."` (checked at `Inherit`, the first point the VM can validate
+it, since the superclass expression itself is just an ordinary variable
+read at compile time), `"Only instances have properties."`/`"Only
+instances have fields."` (`GetProperty`/`SetProperty` on a non-instance),
+and `"Undefined property '<name>'."` (shared by a failed `GetProperty`
+and a failed `GetSuper` lookup, exactly as `poc` words both). One honest,
+minor divergence: `poc`'s `visit_set_expr` checks its target is an
+instance *before* evaluating the value expression, short-circuiting a
+side-effecting RHS on a bad target (`notAnInstance.x = sideEffect()`
+never runs `sideEffect()` in `poc`) — `compiler/`'s codegen has already
+pushed both operands by the time `SetProperty` runs, so `0.1` evaluates
+the value regardless. Inherent to the bytecode's fixed evaluate-then-check
+shape (arithmetic already behaves the same way, in `poc` too), not
+worth a new opcode to fix.
+
+**A real bug found in already-merged Phase 5 code**, caught by the
+existing `langspec/examples/inheritance.iqx` fixture rather than by any
+new test written for this phase: `Resolver.fs`'s synthetic `super` local
+is scoped to just its own class declaration (`beginScope`/`endScope`
+bracket the superclass expression and that class's own methods, then
+remove it from `Locals`) — so a *second*, unrelated `extends` later in
+the same script correctly reuses the same slot, per Resolver. But
+`Codegen.fs`'s `CompileClass` never popped the superclass value it
+pushed, on the assumption (recorded, and never re-verified, back in
+Phase 5's design notes) that it stayed on the stack permanently. With
+only one superclass-using class ever exercised in isolation until now
+(both `ResolverTests.fs` and `CodegenTests.fs`'s existing coverage, and
+Phase 6/7's own hand-assembled VM tests), the slot-reuse-across-two-
+classes scenario never came up — `inheritance.iqx` has exactly this shape
+(`Dog extends Animal`, later `BostonCream extends Doughnut`), and running
+it end to end surfaced `BostonCream`'s `super.cook()` resolving to
+whatever `Dog`'s already-permanently-resident superclass slot still held.
+Fixed with one more conditional `Pop` at the end of `CompileClass`,
+relying on the same closure-closing mechanism `truncateStack` already
+provides for any other local going out of scope (Phase 6) to keep
+already-captured `super` upvalues correct even after their stack slot is
+reclaimed. `CodegenTests.fs` gained a regression test asserting two
+independent superclass declarations in one script both capture upvalue
+slot 0.
+
+`scripts/phase7-run-smoke-test.sh` (Phase 7) no longer special-cases the
+two classes-using fixtures to expect the old "not yet supported" exit
+code — every `langspec/examples/*.iqx` fixture now runs to completion.
+Verified further than that script checks, too: a hand-run diff against
+`poc/src/iqalox.py`'s own output found **all six** example scripts,
+including `classes.iqx` and `inheritance.iqx`, produce byte-for-byte
+identical output — the full `langspec/examples/` suite already passes
+conformance, ahead of Phase 9 formalizing it in CI.
+
+12 new Catch2 tests in new `test_classes.cpp`: bare construction and
+field get/set, `init` running with `self` bound and its return value
+discarded, arity errors for both a class with `init` and one without,
+undefined-property/non-instance/non-class-superclass errors, a
+non-callable-instance error, an inheritance test proving override,
+dynamic dispatch through `self` (an inherited method's `self.method()`
+call correctly finds the *subclass's* override, not the version the
+method itself was originally declared next to), and an explicit `super`
+call bypassing that override — and a `stressGc` run exercising classes/
+instances/bound methods. `test_vm.cpp`'s hand-built-`Chunk` `ChunkBuilder`
+helper moved into a shared `chunk_builder.hpp` so `test_classes.cpp`
+could reuse it rather than duplicating it.
 
 **Phase 9 — Conformance testing against `langspec/examples/`.** Since
 those `.iqx` files are language-level, not `0.1-poc`-implementation-

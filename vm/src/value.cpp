@@ -31,15 +31,18 @@ bool objectsEqual(Obj* a, Obj* b) {
             }
             return true;
         }
-        // Functions/closures/native functions/upvalues have no `poc`
-        // equivalent with structural equality -- Python's default `==`
-        // (what `is_equal` relies on for everything it doesn't
-        // special-case) falls back to identity, already handled by the
-        // `a == b` check above.
+        // Functions/closures/native functions/upvalues/classes/instances/
+        // bound methods have no `poc` equivalent with structural equality
+        // -- Python's default `==` (what `is_equal` relies on for
+        // everything it doesn't special-case) falls back to identity,
+        // already handled by the `a == b` check above.
         case ObjType::Function:
         case ObjType::Closure:
         case ObjType::NativeFunction:
         case ObjType::Upvalue:
+        case ObjType::Class:
+        case ObjType::Instance:
+        case ObjType::BoundMethod:
             return false;
     }
     return false;
@@ -67,6 +70,9 @@ std::string typeName(const Value& v) {
         case ObjType::Closure: return "function";
         case ObjType::NativeFunction: return "function";
         case ObjType::Upvalue: return "upvalue";
+        case ObjType::Class: return "class";
+        case ObjType::Instance: return "instance";
+        case ObjType::BoundMethod: return "function";
     }
     return "value";
 }
@@ -190,6 +196,12 @@ std::string stringify(const Value& v) {
             return "<native fun " + static_cast<ObjNativeFunction*>(asObj(v))->name + ">";
         case ObjType::Upvalue:
             return "<upvalue>";
+        case ObjType::Class:
+            return "<class " + static_cast<ObjClass*>(asObj(v))->name + ">";
+        case ObjType::Instance:
+            return "<" + static_cast<ObjInstance*>(asObj(v))->klass->name + " instance>";
+        case ObjType::BoundMethod:
+            return "<fun " + static_cast<ObjBoundMethod*>(asObj(v))->method->function->name + ">";
     }
     return "<value>";
 }
