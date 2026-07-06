@@ -95,11 +95,18 @@ implementation question is real but doesn't need answering yet.
 
 ### 0.1
 
-Everything targeted for `0.1-poc`, actually complete and hardened, plus:
+The first real implementation — a compiler frontend (F#) plus a bytecode
+VM backend (C++23), superseding the `0.1-poc` tree-walk interpreter. See
+`docs/PLAN-0.1.md` for the detailed, current plan (architecture, phased
+sequencing, open questions). Everything targeted for `0.1-poc`, actually
+complete and hardened, plus:
 
 - Accessing an uninitialized variable is a **runtime error** (implicit
   `undef`, not implicit `nil`) — a variable must be explicitly assigned
   something (including `nil`) before it can be read.
+- Escape sequences in string literals.
+- Immutability enforced at compile time, not runtime-only.
+- Classes can reference themselves by name from inside their own methods.
 
 ### 0.2 *(formerly `0.2-poc`)*
 
@@ -179,11 +186,14 @@ See also: <https://en.wikipedia.org/wiki/Optimizing_compiler>
 
 ## Architecture note for the eventual bytecode implementation
 
-Once the project moves past tree-walking (implementation language TBD, see
-`CLAUDE.md`), the expected split — again per *Crafting Interpreters* — is:
+The project moves past tree-walking for `0.1`: a compiler frontend written
+in **F#** and a bytecode VM backend written in **C++23** — see
+`docs/PLAN-0.1.md` for the full plan. The split — per *Crafting
+Interpreters* — is:
 
-- **Frontend**: scanner, compiler (source → bytecode)
-- **Backend**: VM, chunk (bytecode representation), debug tooling
+- **Frontend** (`frontend/`, F#): scanner, compiler (source → bytecode)
+- **Backend** (`backend/`, C++23): VM, chunk (bytecode representation),
+  debug tooling
 
 ## Standard library vision
 
