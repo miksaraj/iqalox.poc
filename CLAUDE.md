@@ -103,11 +103,16 @@ bytecode file (currently format v0 — a minimal container just big enough
 to represent "push a string constant, print it, halt"; see
 `vm/src/bytecode.hpp` for the authoritative layout, mirrored by
 `compiler/src/Bytecode.fs`'s writer). Phase 1 (toolchain scaffolding and
-an end-to-end round-trip proof) is done; the real scanner/parser/resolver/
-codegen (`compiler/`) and VM core/GC/stdlib (`vm/`) are not built yet —
-this section will grow into the same level of detail as the `poc/` one
-above as that work lands. `scripts/phase1-roundtrip-smoke-test.sh` builds
-both and proves `compiler/`'s output loads and runs correctly in `vm/`.
+an end-to-end round-trip proof) is done. Phase 2 (the scanner) is also
+done: `compiler/src/Token.fs` (an idiomatic `TokenType` discriminated
+union) and `compiler/src/Scanner.fs` (`Scanner.scanTokens`) — see
+`docs/PLAN-0.1.md`'s Phase 2 entry for the several `poc` scanner bugs this
+surfaced and fixed rather than carried forward (decimal literals,
+leading-underscore identifiers, and others). The parser/resolver/codegen
+(`compiler/`) and VM core/GC/stdlib (`vm/`) are not built yet — this
+section will grow into the same level of detail as the `poc/` one above as
+that work lands. `scripts/phase1-roundtrip-smoke-test.sh` builds both and
+proves `compiler/`'s output loads and runs correctly in `vm/`.
 
 ## Engineering conventions
 
