@@ -54,6 +54,9 @@ type BoundExpr =
     | BUnary of operator: Token * right: BoundExpr
     | BTernary of left: BoundExpr * leftOperator: Token * middle: BoundExpr * rightOperator: Token * right: BoundExpr
     | BVector of values: BoundExpr list
+    /// `docs/PLAN-0.2.md` Phase 4 -- only ever appears as a direct element
+    /// of a `BVector`'s `values` list (see `Ast.Spread`'s doc comment).
+    | BSpread of expr: BoundExpr * ellipsis: Token
     | BVariable of binding: VariableBinding * name: Token
     | BBreak of keyword: Token
     | BContinue of keyword: Token

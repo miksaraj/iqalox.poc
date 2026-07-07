@@ -69,6 +69,7 @@ enum class OpCode : uint8_t {
     SetIndex = 0x2B,
     VectorLength = 0x2C,
     VectorAppend = 0x2D,
+    VectorExtend = 0x2E,
 };
 
 // Loads `path` as a format-v1 bytecode file and returns its top-level

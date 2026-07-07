@@ -326,6 +326,23 @@ let ``a list comprehension's bound variable shadows an outer variable of the sam
     | _ -> failwith $"unexpected shape: %A{bound}"
 
 [<Fact>]
+let ``a spread element resolves to BSpread wrapping the resolved inner expression`` () =
+    let bound, errors = resolveSource "var a = [1, 2]\n[...a]"
+    Assert.Empty errors
+    match bound with
+    | [ BVarStmt(DeclaredGlobal "a", _, _); BExpressionStmt(BVector [ BSpread(BVariable(GlobalBinding "a", _), _) ]) ] -> ()
+    | _ -> failwith $"unexpected shape: %A{bound}"
+
+[<Fact>]
+let ``spread and plain elements resolve independently within the same vector`` () =
+    let bound, errors = resolveSource "var a = [1]\n[0, ...a, 2]"
+    Assert.Empty errors
+    match bound with
+    | [ _; BExpressionStmt(BVector [ BLiteral(NumberValue 0.0); BSpread(BVariable(GlobalBinding "a", _), _); BLiteral(NumberValue 2.0) ]) ] ->
+        ()
+    | other -> failwith $"unexpected shape: %A{other}"
+
+[<Fact>]
 let ``vector length and append are internal-only primitives usable directly`` () =
     let bound, errors = resolveSource "var v = [1, 2]\n[3 | v]"
     Assert.Empty errors

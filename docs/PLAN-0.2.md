@@ -343,7 +343,7 @@ stale for nine phases and then need a special pass to fix it.**
 | Lambdas (`(a, b) -> expr`) | §1.1 | Done |
 | Cons operator (`[item \| list]`) | §1.2 | Done |
 | List comprehensions (single generator) | §1.2-4 | Done |
-| Vector-literal spread (`[...a, ...b]`) | §1.7 | Not started |
+| Vector-literal spread (`[...a, ...b]`) | §1.7 | Done |
 | Array-manipulation stdlib | §2.4 (list not yet final) | Not started |
 | Matrices (nested vectors + stdlib) | §1.5, §2.5 (list not yet final) | Not started |
 | Property `pub`/`mut` modifiers | §1.8-10, §2.3 | Not started |
@@ -527,7 +527,54 @@ full end-to-end hand-assembled reproductions of the exact bytecode
 call-argument case, now passing). `langspec/examples/cons_and_comprehensions.iqx`
 verified end to end through the real `iqaloxc`+`iqaloxvm` toolchain.
 
-**Phase 4 — Vector-literal spread.** `[...a, ...b]`.
+**Phase 4 — Vector-literal spread.** *Done.* `[...a, ...b]` (decision 7).
+No new tokens needed -- `Ellipsis` (`...`) has been scanned since
+`0.1-poc`, just never given grammar until now. A new `Ast.Spread`/
+`Bound.BSpread` expression pair wraps the spread-away inner expression;
+`Parser.fs` recognizes a leading `...` on any vector-literal element, and
+-- since decision 7 scopes spread to vector literals only -- a *leading*
+spread on the very first element unambiguously rules out the existing `|`
+lookahead entirely, so `[...a | b]` is a plain syntax error rather than
+something ambiguously cons-or-spread-shaped.
+
+Unlike Phase 3's `Cons`/`ListComprehension`, spread needed **no synthetic
+closure and no hidden locals at all**. A spread-free vector literal
+compiles exactly as before (`BuildVector n`, one fixed operand); once any
+element is a spread, `Codegen.fs` instead builds the vector by chaining
+pure stack operations: `BuildVector 0` starts an empty accumulator, then
+each element either extends it with a spread source directly, or first
+wraps a plain value in its own one-element `BuildVector 1` and extends
+with that -- a single new opcode, `VectorExtend` (pop a source vector,
+pop a target vector, append the source's elements onto the target's own
+element list, and, unlike Phase 3's `VectorAppend`, **push the target back
+onto the stack** so the next element in the chain can keep extending it).
+Because every step both consumes and re-produces the accumulator in place
+on the stack -- never in a named local slot -- there's no "declare a new
+local here" step for `Resolver.fs`'s slot-counting model to get wrong, so
+this sidesteps the exact mid-expression stack-corruption bug Phase 3 hit
+and fixed by moving to an isolated closure frame. Verified directly:
+`sum([...a, 9])` (a spread inside a call argument, the same shape
+`print [1 | []]` broke under the old Phase 3 design) produces the correct
+result with no isolation machinery needed at all.
+
+A non-vector spread source (`[...5]`) is a real, user-facing runtime type
+error ("Can only spread a vector, got number."), unlike `VectorAppend`'s
+non-vector-receiver case (an internal-consistency check only, since that
+one's never reachable from surface syntax) -- `VectorExtend`'s target,
+by contrast, needs no check at all, since `Codegen.fs` only ever builds it
+with `BuildVector` immediately beforehand.
+
+10 new xUnit tests (6 parser: spread parsing, mixed spread/plain
+positions, the "no spread at all" case, the leading-spread-rules-out-cons
+disambiguation, an arbitrary spread source expression; 2 resolver: the
+`BSpread` shape, independent resolution of mixed elements; 3 codegen:
+spread-free `BuildVector` unchanged, the full flattening instruction
+sequence, an all-spread literal) and 4 new Catch2 tests (`VectorExtend`
+happy path, chained extends building up one target, non-vector-source
+runtime error, a full end-to-end hand-assembled reproduction matching
+`Codegen.fs`'s own emitted sequence for `[0, ...a, 5]`).
+`langspec/examples/spread.iqx` verified end to end through the real
+`iqaloxc`+`iqaloxvm` toolchain.
 
 **Phase 5 — Array-manipulation standard library.** Depends on Phases 1-2
 (indexing, lambdas) for anything map/filter/reduce-shaped. Needs §2.4

@@ -599,9 +599,10 @@ void Vm::run() {
             case OpCode::VectorAppend: {
                 Value value = pop();
                 Value receiver = pop();
-                // Only ever emitted by Codegen.fs's own BCons/
-                // BListComprehension loops onto an accumulator it just
-                // built with BuildVector -- never reachable with a
+                // Only ever emitted inside the synthetic closures
+                // Cons/ListComprehension desugar into (docs/PLAN-0.2.md
+                // Phase 3), appending onto an accumulator built with
+                // BuildVector just before -- never reachable with a
                 // non-vector receiver from any user-written program, so
                 // this is an internal-consistency check, not a
                 // user-facing type error.
@@ -609,6 +610,26 @@ void Vm::run() {
                     runtimeError("Internal error: VectorAppend on a non-vector.");
                 }
                 static_cast<ObjVector*>(asObj(receiver))->elements.push_back(value);
+                break;
+            }
+            case OpCode::VectorExtend: {
+                // docs/PLAN-0.2.md Phase 4: `[..., ...source, ...]`
+                // -- unlike VectorAppend, `source` is a user-written
+                // expression, so a non-vector source is a real,
+                // user-facing runtime error, not an internal-consistency
+                // check. Pushes the target back (unlike VectorAppend):
+                // Codegen.fs's spread-flattening chains several of these
+                // purely on the stack, with no accumulator local slot to
+                // re-fetch it from in between.
+                Value source = pop();
+                Value target = pop();
+                if (!isObj(source) || asObj(source)->type != ObjType::Vector) {
+                    runtimeError("Can only spread a vector, got " + typeName(source) + ".");
+                }
+                auto& targetElements = static_cast<ObjVector*>(asObj(target))->elements;
+                auto& sourceElements = static_cast<ObjVector*>(asObj(source))->elements;
+                targetElements.insert(targetElements.end(), sourceElements.begin(), sourceElements.end());
+                push(target);
                 break;
             }
         }

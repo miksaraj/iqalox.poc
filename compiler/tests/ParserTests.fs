@@ -502,3 +502,36 @@ let ``list comprehension source can be an arbitrary expression, not just an iden
     match singleExpr "[x | x <- [1, 2, 3]]" with
     | ListComprehension(_, variable, Vector _, _) -> Assert.Equal("x", variable.Lexeme)
     | e -> failwith $"expected ListComprehension, got %A{e}"
+
+[<Fact>]
+let ``a spread element parses as Spread wrapping the inner expression`` () =
+    match singleExpr "[...a]" with
+    | Vector [ Spread(Variable inner, _) ] -> Assert.Equal("a", inner.Lexeme)
+    | e -> failwith $"expected Vector with one Spread element, got %A{e}"
+
+[<Fact>]
+let ``spread can be mixed with plain elements in any position`` () =
+    match singleExpr "[0, ...a, 2.5, ...b, 5]" with
+    | Vector [ Literal(NumberValue 0.0); Spread(Variable a, _); Literal(NumberValue 2.5); Spread(Variable b, _); Literal(NumberValue 5.0) ] ->
+        Assert.Equal("a", a.Lexeme)
+        Assert.Equal("b", b.Lexeme)
+    | e -> failwith $"expected Vector with alternating plain/Spread elements, got %A{e}"
+
+[<Fact>]
+let ``a vector literal with no spread elements has no Spread node at all`` () =
+    match singleExpr "[1, 2, 3]" with
+    | Vector values -> Assert.DoesNotContain(values, (function | Spread _ -> true | _ -> false))
+    | e -> failwith $"expected Vector, got %A{e}"
+
+[<Fact>]
+let ``a leading spread element rules out cons and list comprehension disambiguation`` () =
+    // docs/PLAN-0.2.md decision 7: spread is vector-literal only -- a
+    // bare '|' right after a leading spread element is a plain syntax
+    // error (expects ',' or ']'), never parsed as cons or a comprehension.
+    Assert.Empty(parseSource "[...a | b]")
+
+[<Fact>]
+let ``spread's inner expression can be an arbitrary expression, not just an identifier`` () =
+    match singleExpr "[...(a)]" with
+    | Vector [ Spread(Grouping(Variable inner), _) ] -> Assert.Equal("a", inner.Lexeme)
+    | e -> failwith $"expected Vector with one Spread(Grouping) element, got %A{e}"
