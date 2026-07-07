@@ -133,19 +133,29 @@ plan — design decisions, open questions, and phased sequencing:
   from the named nested-function closures already in 0.1-poc
 - Variadic unpacking (`...` operator) — vector-literal spread
   (`[...a, ...b]`) only for this version
-- Getters and setters — **forced** (mandatory encapsulation, no direct
-  property access without a declared accessor), via `get`/`set` blocks on
-  a property declaration; related to the private-by-default property
-  question raised for the old v0.3 (now 0.4, see below)
+- Getters and setters replaced by **`pub`/`mut` visibility and mutability
+  modifiers**, private and immutable by default (`var name`, `var name
+  mut`, `var name pub`, `var name pub mut`) — resolves the private-by-default
+  property question raised for the old v0.3 (now 0.4, see below), and
+  foreshadows `0.5`'s module support directly (`pub` is expected to apply
+  to classes themselves then, defining what a module exports)
 - Mixin support (`class A extends B with C`, `A with B`) and trait support
   (`trait A {...}` / `class B { use A }`) — resolved as a split by which
-  keyword is used: `trait`/`use` is Scala-style dynamic linearization,
-  `with`-only mixins are PHP-style static copying
+  keyword is used: `trait`/`use` is **PHP-style static copying** (matching
+  PHP's own `trait`/`use` keywords), `with`-only mixins are **Scala-style
+  dynamic linearization** (matching Scala's own `with` keyword)
 
 ### 0.3 *(formerly `0.2`)*
 
 - Disallow unused variables — **compile-time warning**
-- Array-manipulation standard library improvements
+- Array-manipulation standard library improvements, including negative
+  indices and slice syntax (`v[a:b]`) deferred from `0.2`
+- Full list comprehensions: multiple comma-separated generators (nested/
+  Cartesian iteration) and boolean guards — `0.2` ships a single-generator,
+  no-guards slice only (`docs/PLAN-0.2.md`); this is the original
+  `[x + y | x <- xs, y <- ys, x not y]`-style sketch's full shape (exact
+  guard-expression syntax, e.g. whether `not` is real or just informal
+  pseudocode for "not equal," still needs pinning down when this starts)
 - First set of compiler optimizations (see below)
 
 ### 0.4 *(formerly `0.3`)*
@@ -156,7 +166,11 @@ plan — design decisions, open questions, and phased sequencing:
 
 ### 0.5 *(formerly `0.4`)*
 
-- Module support
+- Module support — **must also revisit module-scoped mixin/trait
+  composition here**: `0.2` only delivers the class-scoped case
+  (`class C extends Base with M1, M2`, `class D { use T; }`) since real
+  `module` declarations don't exist yet; `docs/PLAN-0.2.md` explicitly
+  flagged this as deferred, not dropped
 - Disallow unused variables — **compile-time error** (upgraded from warning)
 - Trigonometric functions standard library
 - Other standard library enhancements
@@ -177,6 +191,20 @@ plan — design decisions, open questions, and phased sequencing:
 
 - Standard library enhancements
 - Sixth (and possibly final) set of compiler optimizations
+
+## Language feature ideas under consideration
+
+Raised while planning `0.2` (`docs/PLAN-0.2.md`), deliberately not
+committed to a specific version yet:
+
+- **Variadic parameters** (`fun f(...args)`, extra call-site arguments
+  collect into a vector) and **call-site spread** (`f(...someVector)`,
+  unpacking a vector's elements as separate positional arguments). `0.2`
+  ships only vector-*literal* spread (`[...a, ...b]`) — these two are a
+  bigger step, since variadic parameters are in real tension with `0.1`'s
+  stated design ("a call's arity is fixed by the callee's declaration, not
+  inferred from how many arguments happen to be written"). That tension
+  needs its own resolution before either lands, not just a version slot.
 
 ## Compiler optimization concepts under consideration
 
