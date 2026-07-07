@@ -459,6 +459,56 @@ let ``a curried lambda's body is itself a lambda`` () =
     | e -> failwith $"expected a Lambda whose body is another Lambda, got %A{e}"
 
 [<Fact>]
+let ``a lambda argument in a non-last position does not swallow the arguments after it`` () =
+    // Bug found while writing docs/PLAN-0.2.md Phase 5's array-stdlib
+    // prelude (`map fn, v`): a lambda's own body is parsed via the full
+    // Expression() chain, which -- unless suppressed -- treats a bare
+    // comma as its own operator, so `map (x) -> x * 2, v` used to have
+    // the lambda's unparenthesized body swallow `, v` entirely, leaving
+    // `map` a 1-argument call. Fixed in Argument().
+    match singleExpr "map (x) -> x * 2, v" with
+    | Call(Variable mapName, [ Lambda([ x ], _, Binary(Variable bodyX, _, Literal(NumberValue 2.0))); Variable vName ]) ->
+        Assert.Equal("map", mapName.Lexeme)
+        Assert.Equal("x", x.Lexeme)
+        Assert.Equal("x", bodyX.Lexeme)
+        Assert.Equal("v", vName.Lexeme)
+    | e -> failwith $"expected a 2-argument Call with a Lambda first argument, got %A{e}"
+
+[<Fact>]
+let ``a three-argument call with a non-last lambda still parses all three arguments`` () =
+    // The same bug, exercised with reduce's actual shape (fn, v, initial).
+    match singleExpr "reduce (a, b) -> a + b, v, 0" with
+    | Call(Variable reduceName, [ Lambda([ a; b ], _, _); Variable vName; Literal(NumberValue 0.0) ]) ->
+        Assert.Equal("reduce", reduceName.Lexeme)
+        Assert.Equal("a", a.Lexeme)
+        Assert.Equal("b", b.Lexeme)
+        Assert.Equal("v", vName.Lexeme)
+    | e -> failwith $"expected a 3-argument Call, got %A{e}"
+
+[<Fact>]
+let ``a parenthesized comma expression still works as a single call argument`` () =
+    // The fix above must not break the pre-existing, legitimate case: a
+    // *parenthesized* comma-operator expression, passed as one argument.
+    // Grouping's own explicit parens always re-enable the comma operator
+    // for their own contents, regardless of the outer context.
+    match singleExpr "f (a, b)" with
+    | Call(Variable fName, [ Grouping(Binary(Variable a, operator, Variable b)) ]) ->
+        Assert.Equal("f", fName.Lexeme)
+        Assert.Equal(Comma, operator.Type)
+        Assert.Equal("a", a.Lexeme)
+        Assert.Equal("b", b.Lexeme)
+    | e -> failwith $"expected a 1-argument Call with a grouped comma Binary, got %A{e}"
+
+[<Fact>]
+let ``a parenthesized comma expression inside a vector literal still works`` () =
+    // Same fix, exercised inside `[...]`'s own comma-suppressed context --
+    // Grouping's parens must re-enable the comma operator there too.
+    match singleExpr "[(1, 2), 3]" with
+    | Vector [ Grouping(Binary(Literal(NumberValue 1.0), operator, Literal(NumberValue 2.0))); Literal(NumberValue 3.0) ] ->
+        Assert.Equal(Comma, operator.Type)
+    | e -> failwith $"expected a Vector with a grouped comma Binary first element, got %A{e}"
+
+[<Fact>]
 let ``a bare vertical bar with no generator marker is a cons`` () =
     match singleExpr "[1 | xs]" with
     | Cons(Literal(NumberValue 1.0), Variable list_, _) -> Assert.Equal("xs", list_.Lexeme)
