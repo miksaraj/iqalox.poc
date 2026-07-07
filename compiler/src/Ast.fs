@@ -35,6 +35,13 @@ type Expr =
     | Unary of operator: Token * right: Expr
     | Ternary of left: Expr * leftOperator: Token * middle: Expr * rightOperator: Token * right: Expr
     | Vector of values: Expr list
+    /// `...expr` inside a vector literal (`docs/PLAN-0.2.md` decision 7)
+    /// -- only ever produced by `Parser.fs` as a direct element of a
+    /// `Vector`'s `values` list, never as a general expression (`...`
+    /// isn't recognized as a prefix anywhere `Primary()`'s ordinary
+    /// dispatch runs, so `f(...a)`/`1 + ...a` remain plain parse errors,
+    /// matching decision 7's "vector-literal spread only" scope).
+    | Spread of expr: Expr * ellipsis: Token
     | Variable of name: Token
     | BreakExpr of keyword: Token
     | ContinueExpr of keyword: Token

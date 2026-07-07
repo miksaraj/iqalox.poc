@@ -119,16 +119,33 @@ type Instruction =
     /// Phase 3: both `Cons` and list comprehensions need to loop a
     /// runtime-determined number of times (the source vector's length
     /// isn't known at compile time), which a fixed-operand `BuildVector`
-    /// can't express. Only `Codegen.fs`'s `BCons`/`BListComprehension`
-    /// compilation emits this -- no dedicated `BoundExpr` case for it.
+    /// can't express. Only ever emitted from inside the synthetic
+    /// closures `Resolver.fs` desugars `Cons`/`ListComprehension` into
+    /// (via `Bound.BVectorLengthInternal`) -- no surface syntax reaches it
+    /// directly.
     | VectorLength
     /// Pops a value, then pops a vector, appends the value to the
     /// vector's own element list, and pushes nothing back. Since a
     /// vector is a heap reference (`Obj*`), any other copy of the same
     /// pointer already sitting elsewhere on the stack (e.g. an
     /// accumulator local slot) observes the mutation immediately -- no
-    /// need to re-store anything after appending.
+    /// need to re-store anything after appending. Same synthetic-closure-
+    /// only reach as `VectorLength` (`Bound.BVectorAppendInternal`).
     | VectorAppend
+    /// Pops a source vector, then pops a target vector, and appends every
+    /// element of the source onto the target's own element list (a
+    /// user-facing runtime type error if the source isn't a vector --
+    /// unlike `VectorAppend`, this one's reachable directly from surface
+    /// syntax: `docs/PLAN-0.2.md` Phase 4's vector-literal spread,
+    /// `[...a, ...b]`). Pushes the target back, unlike `VectorAppend` --
+    /// `Codegen.fs`'s spread-flattening `BVector` compilation chains
+    /// several of these (and `BuildVector`) purely on the stack, with no
+    /// hidden local slots at all, sidestepping the exact mid-expression
+    /// stack-corruption bug Phase 3's `Cons`/`ListComprehension` hit and
+    /// fixed by moving to an isolated closure frame instead -- spread
+    /// never needs that isolation since it never declares a *named*
+    /// local, only ever chains ordinary stack-relative pushes/pops.
+    | VectorExtend
 
 type Constant =
     | NumberConstant of float
@@ -195,6 +212,7 @@ let private opcodeOf =
     | SetIndex -> 0x2Buy
     | VectorLength -> 0x2Cuy
     | VectorAppend -> 0x2Duy
+    | VectorExtend -> 0x2Euy
 
 /// Serialized byte length of one instruction -- see the module doc
 /// comment's "Instruction encoding" table.
@@ -224,7 +242,8 @@ let instructionByteLength (instruction: Instruction) : int =
     | GetIndex
     | SetIndex
     | VectorLength
-    | VectorAppend -> 1
+    | VectorAppend
+    | VectorExtend -> 1
     | Closure(_, upvalues) -> 1 + 2 + 2 + (3 * List.length upvalues)
     | _ -> 3
 
@@ -302,7 +321,8 @@ let rec private writeChunk (writer: BinaryWriter) (chunk: Chunk) : unit =
         | GetIndex
         | SetIndex
         | VectorLength
-        | VectorAppend -> ()
+        | VectorAppend
+        | VectorExtend -> ()
         | Constant i
         | PopN i
         | GetLocal i

@@ -253,6 +253,7 @@ type private Resolver(globals: Dictionary<string, bool>) =
         | Ternary(left, leftOp, middle, rightOp, right) ->
             BTernary(this.ResolveExpr left, leftOp, this.ResolveExpr middle, rightOp, this.ResolveExpr right)
         | Vector values -> BVector(values |> List.map this.ResolveExpr)
+        | Spread(expr, ellipsis) -> BSpread(this.ResolveExpr expr, ellipsis)
         | Variable name ->
             let binding, _ = resolveReference name.Lexeme
             BVariable(binding, name)

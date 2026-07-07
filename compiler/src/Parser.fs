@@ -519,8 +519,23 @@ type private ParserState(tokens: Token[]) =
                     advance () |> ignore
                     Vector []
                 else
-                    let first = this.Expression()
-                    if matchAny [ VerticalBar ] then
+                    // `...expr` (docs/PLAN-0.2.md decision 7) is only ever
+                    // a vector-literal element, never a cons item or a
+                    // comprehension body -- so a leading '...' on the
+                    // first element unambiguously rules out the '|'
+                    // lookahead below before it even runs.
+                    let parseVectorElement () =
+                        if matchAny [ Ellipsis ] then
+                            let ellipsis = previous ()
+                            Spread(this.Expression(), ellipsis)
+                        else
+                            this.Expression()
+                    let first = parseVectorElement ()
+                    let firstIsSpread =
+                        match first with
+                        | Spread _ -> true
+                        | _ -> false
+                    if not firstIsSpread && matchAny [ VerticalBar ] then
                         // Cons ([item | list]) and list comprehensions
                         // ([expr | x <- xs]) share this `[expr |` prefix,
                         // told apart by lookahead on the generator marker
@@ -539,7 +554,7 @@ type private ParserState(tokens: Token[]) =
                         let values = ResizeArray<Expr>()
                         values.Add(first)
                         while matchAny [ Comma ] do
-                            values.Add(this.Expression())
+                            values.Add(parseVectorElement ())
                         consume RightBracket "Expect ']' after vector elements." |> ignore
                         Vector(List.ofSeq values)
             finally

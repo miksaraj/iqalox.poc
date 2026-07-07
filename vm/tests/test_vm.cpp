@@ -801,6 +801,124 @@ TEST_CASE("end-to-end: consing onto an empty list produces a single-element vect
     REQUIRE(asNumber(elements[0]) == 1.0);
 }
 
+TEST_CASE("VectorExtend appends every element of the source onto the target and pushes the target back", "[vm]") {
+    // docs/PLAN-0.2.md Phase 4: `[...a, ...b]` -- unlike VectorAppend,
+    // this one's reachable directly from spread syntax, so the target is
+    // pushed back onto the stack (no accumulator local slot to refetch it
+    // from between chained spreads/plain elements).
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t two = b.addNumberConstant(2);
+    uint16_t three = b.addNumberConstant(3);
+    uint16_t result = b.addStringConstant("result");
+
+    b.emitU16(OpCode::BuildVector, 0);  // target = []
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::Constant, two);
+    b.emitU16(OpCode::Constant, three);
+    b.emitU16(OpCode::BuildVector, 3);  // source = [1, 2, 3]
+    b.emit(OpCode::VectorExtend);       // target.extend(source), target pushed back
+    b.emitU16(OpCode::DefineGlobal, result);
+
+    vm.interpret(b.build());
+
+    const Value* resultVal = vm.getGlobal("result");
+    REQUIRE(isObj(*resultVal));
+    auto& elements = static_cast<ObjVector*>(asObj(*resultVal))->elements;
+    REQUIRE(elements.size() == 3);
+    REQUIRE(asNumber(elements[0]) == 1.0);
+    REQUIRE(asNumber(elements[1]) == 2.0);
+    REQUIRE(asNumber(elements[2]) == 3.0);
+}
+
+TEST_CASE("VectorExtend chains: several extends in a row build up the same target vector", "[vm]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t two = b.addNumberConstant(2);
+    uint16_t three = b.addNumberConstant(3);
+    uint16_t result = b.addStringConstant("result");
+
+    b.emitU16(OpCode::BuildVector, 0);  // target = []
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::BuildVector, 1);  // [1]
+    b.emit(OpCode::VectorExtend);       // target = [1], pushed back
+    b.emitU16(OpCode::Constant, two);
+    b.emitU16(OpCode::Constant, three);
+    b.emitU16(OpCode::BuildVector, 2);  // [2, 3]
+    b.emit(OpCode::VectorExtend);       // target = [1, 2, 3], pushed back
+    b.emitU16(OpCode::DefineGlobal, result);
+
+    vm.interpret(b.build());
+
+    const Value* resultVal = vm.getGlobal("result");
+    auto& elements = static_cast<ObjVector*>(asObj(*resultVal))->elements;
+    REQUIRE(elements.size() == 3);
+    REQUIRE(asNumber(elements[0]) == 1.0);
+    REQUIRE(asNumber(elements[1]) == 2.0);
+    REQUIRE(asNumber(elements[2]) == 3.0);
+}
+
+TEST_CASE("VectorExtend with a non-vector source is a user-facing runtime error", "[vm]") {
+    // Unlike VectorAppend's non-vector *receiver* (an internal-consistency
+    // check, never reachable from real syntax), a non-vector *source* here
+    // is exactly what `[...5]` produces -- a real, user-facing type error.
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t five = b.addNumberConstant(5);
+
+    b.emitU16(OpCode::BuildVector, 0);  // target = []
+    b.emitU16(OpCode::Constant, five);  // source = 5, not a vector
+    b.emit(OpCode::VectorExtend);
+
+    REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
+}
+
+TEST_CASE("end-to-end: a vector literal with a spread element flattens purely on the stack, no locals needed", "[vm]") {
+    // Mirrors exactly what Codegen.fs emits for `[0, ...a, 5]` -- verified
+    // against CodegenTests.fs's own instruction-sequence assertion for the
+    // same source. Confirms the whole spread-flattening strategy actually
+    // executes correctly end to end, including composing safely as a call
+    // argument (no hidden local slots to corrupt, unlike Phase 3's
+    // Cons/ListComprehension before their synthetic-closure fix).
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t zero = b.addNumberConstant(0);
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t two = b.addNumberConstant(2);
+    uint16_t five = b.addNumberConstant(5);
+    uint16_t aName = b.addStringConstant("a");
+    uint16_t result = b.addStringConstant("result");
+
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::Constant, two);
+    b.emitU16(OpCode::BuildVector, 2);
+    b.emitU16(OpCode::DefineGlobal, aName);  // a = [1, 2]
+
+    b.emitU16(OpCode::BuildVector, 0);  // accumulator = []
+    b.emitU16(OpCode::Constant, zero);
+    b.emitU16(OpCode::BuildVector, 1);  // [0]
+    b.emit(OpCode::VectorExtend);       // acc.extend([0])
+    b.emitU16(OpCode::GetGlobal, aName);
+    b.emit(OpCode::VectorExtend);  // acc.extend(a)
+    b.emitU16(OpCode::Constant, five);
+    b.emitU16(OpCode::BuildVector, 1);  // [5]
+    b.emit(OpCode::VectorExtend);       // acc.extend([5])
+    b.emitU16(OpCode::DefineGlobal, result);
+
+    vm.interpret(b.build());
+
+    const Value* resultVal = vm.getGlobal("result");
+    REQUIRE(isObj(*resultVal));
+    auto& elements = static_cast<ObjVector*>(asObj(*resultVal))->elements;
+    REQUIRE(elements.size() == 4);
+    REQUIRE(asNumber(elements[0]) == 0.0);
+    REQUIRE(asNumber(elements[1]) == 1.0);
+    REQUIRE(asNumber(elements[2]) == 2.0);
+    REQUIRE(asNumber(elements[3]) == 5.0);
+}
+
 TEST_CASE("calling print with the wrong argument count is a runtime error", "[vm][natives]") {
     Vm vm;
     ChunkBuilder b(vm);

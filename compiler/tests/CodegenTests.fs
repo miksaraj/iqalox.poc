@@ -383,3 +383,44 @@ let ``list comprehension compiles to a call of a synthetic closure, source evalu
         Assert.Equal("comprehension", proto.Name)
         Assert.Equal(1, proto.Arity)
     | other -> failwith $"expected a FunctionConstant, got %A{other}"
+
+[<Fact>]
+let ``a spread-free vector literal still compiles to a single fixed-operand BuildVector`` () =
+    // No behavior change for the common case -- VectorExtend only enters
+    // the picture once a spread element is actually present.
+    let chunk = compileSource "[1, 2, 3]"
+    Assert.Equal<Instruction[]>(
+        [| Constant 0; Constant 1; Constant 2; BuildVector 3; Pop; Nil; Return |],
+        chunk.Code
+    )
+
+[<Fact>]
+let ``a vector literal with a spread element flattens purely on the stack via BuildVector 0 and VectorExtend`` () =
+    let chunk = compileSource "[0, ...a, 5]"
+    Assert.Equal<Instruction[]>(
+        [| BuildVector 0 // accumulator = []
+           Constant 0 // 0
+           BuildVector 1 // [0]
+           VectorExtend // acc.extend([0])
+           GetGlobal 1 // "a"
+           VectorExtend // acc.extend(a)
+           Constant 2 // 5
+           BuildVector 1 // [5]
+           VectorExtend // acc.extend([5])
+           Pop
+           Nil
+           Return |],
+        chunk.Code
+    )
+    Assert.Equal<Constant[]>(
+        [| NumberConstant 0.0; StringConstant "a"; NumberConstant 5.0 |],
+        chunk.Constants
+    )
+
+[<Fact>]
+let ``a vector literal that's entirely one spread skips BuildVector 1 for the (nonexistent) plain elements`` () =
+    let chunk = compileSource "[...a]"
+    Assert.Equal<Instruction[]>(
+        [| BuildVector 0; GetGlobal 0; VectorExtend; Pop; Nil; Return |],
+        chunk.Code
+    )

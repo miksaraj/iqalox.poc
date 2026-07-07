@@ -80,6 +80,7 @@ let rec private lineOfExpr (expr: BoundExpr) : int option =
     | BUnary(operator, _) -> Some operator.Line
     | BTernary(_, leftOperator, _, _, _) -> Some leftOperator.Line
     | BVector values -> values |> List.tryPick lineOfExpr
+    | BSpread(_, ellipsis) -> Some ellipsis.Line
     | BVariable(_, name) -> Some name.Line
     | BBreak keyword -> Some keyword.Line
     | BContinue keyword -> Some keyword.Line
@@ -161,6 +162,8 @@ let private stackEffect (instr: Instruction) : int =
     | SetIndex -> -2
     | VectorLength -> 0
     | VectorAppend -> -2
+    // Pops source + target, pushes target back: net -1.
+    | VectorExtend -> -1
 
 type private LoopContext =
     { BreakTargetDepth: int
@@ -388,9 +391,36 @@ type private Codegen() =
                 this.CompileExpr right
                 state.PatchJump(jumpToEnd, state.Here)
         | BVector values ->
-            for value in values do
-                this.CompileExpr value
-            state.Emit(BuildVector(List.length values)) |> ignore
+            let hasSpread =
+                values
+                |> List.exists (function
+                    | BSpread _ -> true
+                    | _ -> false)
+            if not hasSpread then
+                for value in values do
+                    this.CompileExpr value
+                state.Emit(BuildVector(List.length values)) |> ignore
+            else
+                // docs/PLAN-0.2.md Phase 4: a spread element's source
+                // length isn't known at compile time, so this can't be a
+                // single fixed-operand BuildVector. Built up purely on the
+                // stack instead -- no hidden local slots at all, unlike
+                // Phase 3's Cons/ListComprehension (which needed an
+                // isolated closure frame to avoid corrupting the
+                // enclosing expression's own stack addressing): each step
+                // here just pops+pushes the accumulator in place, so it
+                // composes safely anywhere an expression can, including
+                // mid-expression, with no such risk.
+                state.Emit(BuildVector 0) |> ignore // accumulator = []
+                for value in values do
+                    match value with
+                    | BSpread(inner, _) ->
+                        this.CompileExpr inner
+                        state.Emit VectorExtend |> ignore
+                    | plain ->
+                        this.CompileExpr plain
+                        state.Emit(BuildVector 1) |> ignore
+                        state.Emit VectorExtend |> ignore
         | BCall(callee, arguments) ->
             this.CompileExpr callee
             for argument in arguments do
@@ -413,6 +443,12 @@ type private Codegen() =
             this.CompileExpr value
             state.Emit SetIndex |> ignore
         | BLambda decl -> this.CompileFunctionValue(decl, isMethod = false)
+        | BSpread _ ->
+            // `Ast.Spread`'s doc comment: `Parser.fs` only ever produces
+            // this as a direct element of a `Vector`'s own `values` list,
+            // handled entirely within `BVector`'s case above -- never
+            // reached through this top-level dispatch.
+            failwith "unreachable: BSpread only ever appears inside BVector's values list"
         | BVectorLengthInternal vector ->
             this.CompileExpr vector
             state.Emit VectorLength |> ignore
