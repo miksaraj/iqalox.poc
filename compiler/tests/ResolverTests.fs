@@ -268,3 +268,78 @@ let ``a lambda parameter is immutable, matching a named function's parameters`` 
     let _, errors = resolveSource "(x) -> x = 1"
     Assert.Single errors |> ignore
     Assert.Contains("immutable", errors.[0].Message)
+
+[<Fact>]
+let ``cons desugars to a call of a synthetic two-parameter closure`` () =
+    let bound, errors = resolveSource "[1 | xs]"
+    Assert.Empty errors
+    match bound with
+    | [ BExpressionStmt(BCall(BLambda decl, [ BLiteral(NumberValue 1.0); _ ])) ] ->
+        Assert.Equal("cons", decl.Name.Lexeme)
+        Assert.Equal(2, decl.Parameters.Length)
+    | _ -> failwith $"unexpected shape: %A{bound}"
+
+[<Fact>]
+let ``cons's arguments are resolved in the enclosing scope, not the synthetic closure's`` () =
+    // `xs` is an enclosing global, evaluated once and passed as the
+    // closure's second argument -- not looked up from inside the
+    // synthetic closure's own body.
+    let bound, errors = resolveSource "var xs = [2, 3]\n[1 | xs]"
+    Assert.Empty errors
+    match bound with
+    | [ _; BExpressionStmt(BCall(BLambda _, [ _; BVariable(GlobalBinding "xs", _) ])) ] -> ()
+    | _ -> failwith $"unexpected shape: %A{bound}"
+
+[<Fact>]
+let ``list comprehension desugars to a call of a synthetic one-parameter closure`` () =
+    let bound, errors = resolveSource "[x * 2 | x <- xs]"
+    Assert.Empty errors
+    match bound with
+    | [ BExpressionStmt(BCall(BLambda decl, [ _ ])) ] ->
+        Assert.Equal("comprehension", decl.Name.Lexeme)
+        Assert.Equal(1, decl.Parameters.Length)
+    | _ -> failwith $"unexpected shape: %A{bound}"
+
+[<Fact>]
+let ``a list comprehension's body captures an enclosing local as an upvalue, exactly like a lambda`` () =
+    let source = "fun outer() {\n    var factor mut = 10\n    return [x + factor | x <- [1, 2, 3]]\n}"
+    let bound, errors = resolveSource source
+    Assert.Empty errors
+    match bound with
+    | [ BFunctionStmt(_, outerDecl) ] ->
+        match outerDecl.Body with
+        | [ BVarStmt(DeclaredLocal factorSlot, _, _)
+            BReturnStmt(_, Some(BCall(BLambda comprehensionDecl, [ _ ]))) ] ->
+            Assert.Equal<UpvalueDescriptor list>(
+                [ { FromEnclosingLocal = true; Index = factorSlot } ],
+                comprehensionDecl.Upvalues
+            )
+        | body -> failwith $"unexpected outer body: %A{body}"
+    | _ -> failwith $"unexpected shape: %A{bound}"
+
+[<Fact>]
+let ``a list comprehension's bound variable shadows an outer variable of the same name without corrupting it`` () =
+    let bound, errors = resolveSource "var n = 0\nvar shadow = [n | n <- [5, 6, 7]]\nn"
+    Assert.Empty errors
+    match bound with
+    | [ BVarStmt(DeclaredGlobal "n", _, _); BVarStmt(DeclaredGlobal "shadow", _, _); BExpressionStmt(BVariable(GlobalBinding "n", _)) ] -> ()
+    | _ -> failwith $"unexpected shape: %A{bound}"
+
+[<Fact>]
+let ``vector length and append are internal-only primitives usable directly`` () =
+    let bound, errors = resolveSource "var v = [1, 2]\n[3 | v]"
+    Assert.Empty errors
+    match bound with
+    | [ BVarStmt(DeclaredGlobal "v", _, _); BExpressionStmt(BCall(BLambda decl, _)) ] ->
+        // The synthetic cons body's for-loop condition calls
+        // InternalVectorLength on the closure's own $list parameter, and
+        // its body calls InternalVectorAppend on $result.
+        let rec containsInternalOps (stmts: BoundStmt list) =
+            stmts
+            |> List.exists (function
+                | BForStmt(_, Some(BBinary(_, _, BVectorLengthInternal _)), _, body) -> containsInternalOps [ body ]
+                | BExpressionStmt(BVectorAppendInternal _) -> true
+                | BBlock inner -> containsInternalOps inner
+                | _ -> false)
+        Assert.True(containsInternalOps decl.Body)
+    | _ -> failwith $"unexpected shape: %A{bound}"

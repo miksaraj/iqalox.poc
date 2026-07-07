@@ -278,6 +278,92 @@ type private Resolver(globals: Dictionary<string, bool>) =
                   Parameters = parameters
                   Body = [ ReturnStmt(arrow, Some body) ] }
             BLambda(this.ResolveFunction(syntheticDecl, isMethod = false))
+        | Cons(item, list, bracket) ->
+            // `[item | list]` (docs/PLAN-0.2.md decision 2) needs a real
+            // runtime loop -- `list`'s length isn't known at compile
+            // time, so this can't be a fixed-operand `BuildVector`. A
+            // first attempt allocated hidden local slots directly in the
+            // *enclosing* scope for the accumulator/source/index, but
+            // that's unsound: a `Cons` can appear anywhere an expression
+            // can, including mid-expression (e.g. a call argument), where
+            // other transient values the enclosing expression already
+            // pushed (like the callee itself) sit above the slot numbers
+            // `Resolver.fs`'s ordinary `declareVariable` would compute,
+            // corrupting every `GetLocal`/`SetLocal` after it -- found by
+            // `[1 | []]` failing as a bare call argument (`print [1 | []]`)
+            // while working fine as a `var` initializer. Fixed by
+            // desugaring to a call of a synthetic, isolated zero-context
+            // closure instead: `item`/`list` are evaluated once in the
+            // *enclosing* scope and passed in as ordinary call arguments,
+            // and everything the closure's own body needs (`$result`,
+            // `$index`) lives in its own fresh frame, entirely decoupled
+            // from whatever the enclosing expression already has on the
+            // stack -- exactly the same isolation a lambda already gets,
+            // and exactly how `Return` already extracts a value out from
+            // under a callee's own locals.
+            let itemParam = { bracket with Type = Identifier; Lexeme = "$item" }
+            let listParam = { bracket with Type = Identifier; Lexeme = "$list" }
+            let resultName = { bracket with Type = Identifier; Lexeme = "$result" }
+            let indexName = { bracket with Type = Identifier; Lexeme = "$index" }
+            let lessOp = { bracket with Type = Less; Lexeme = "<" }
+            let incrOp = { bracket with Type = PlusPlus; Lexeme = "++" }
+            let syntheticDecl: FunctionDecl =
+                { Name = { bracket with Type = Identifier; Lexeme = "cons" }
+                  Parameters = [ itemParam; listParam ]
+                  Body =
+                    [ VarStmt(resultName, Some(Vector [ Variable itemParam ]), false)
+                      VarStmt(indexName, Some(Literal(NumberValue 0.0)), true)
+                      ForStmt(
+                          None,
+                          Some(Binary(Variable indexName, lessOp, InternalVectorLength(Variable listParam))),
+                          Some(Unary(incrOp, Variable indexName)),
+                          ExpressionStmt(
+                              InternalVectorAppend(Variable resultName, Index(Variable listParam, Variable indexName, bracket))
+                          )
+                      )
+                      ReturnStmt(bracket, Some(Variable resultName)) ] }
+            let boundDecl = this.ResolveFunction(syntheticDecl, isMethod = false)
+            let boundItem = this.ResolveExpr item
+            let boundList = this.ResolveExpr list
+            BCall(BLambda boundDecl, [ boundItem; boundList ])
+        | ListComprehension(body, variable, source, bracket) ->
+            // Same runtime-length problem, same synthetic-closure fix as
+            // `Cons` above -- `source` becomes the closure's sole
+            // parameter (evaluated once, in the enclosing scope); the
+            // user's own bound name (`variable`) is declared fresh each
+            // iteration inside the loop body's own block scope (so its
+            // slot is correctly reused iteration to iteration, exactly
+            // like any other block-scoped `var` already is), and `body`
+            // is resolved *within* the synthetic function so any
+            // reference to an enclosing-scope name (not just `variable`)
+            // correctly captures it as an upvalue, same as a lambda's
+            // body would.
+            let sourceParam = { bracket with Type = Identifier; Lexeme = "$source" }
+            let resultName = { bracket with Type = Identifier; Lexeme = "$result" }
+            let indexName = { bracket with Type = Identifier; Lexeme = "$index" }
+            let lessOp = { bracket with Type = Less; Lexeme = "<" }
+            let incrOp = { bracket with Type = PlusPlus; Lexeme = "++" }
+            let syntheticDecl: FunctionDecl =
+                { Name = { bracket with Type = Identifier; Lexeme = "comprehension" }
+                  Parameters = [ sourceParam ]
+                  Body =
+                    [ VarStmt(resultName, Some(Vector []), false)
+                      VarStmt(indexName, Some(Literal(NumberValue 0.0)), true)
+                      ForStmt(
+                          None,
+                          Some(Binary(Variable indexName, lessOp, InternalVectorLength(Variable sourceParam))),
+                          Some(Unary(incrOp, Variable indexName)),
+                          Block [
+                              VarStmt(variable, Some(Index(Variable sourceParam, Variable indexName, bracket)), false)
+                              ExpressionStmt(InternalVectorAppend(Variable resultName, body))
+                          ]
+                      )
+                      ReturnStmt(bracket, Some(Variable resultName)) ] }
+            let boundDecl = this.ResolveFunction(syntheticDecl, isMethod = false)
+            let boundSource = this.ResolveExpr source
+            BCall(BLambda boundDecl, [ boundSource ])
+        | InternalVectorLength vector -> BVectorLengthInternal(this.ResolveExpr vector)
+        | InternalVectorAppend(vector, value) -> BVectorAppendInternal(this.ResolveExpr vector, this.ResolveExpr value)
         | SelfExpr keyword ->
             match resolveReference "self" with
             | GlobalBinding _, None ->

@@ -53,6 +53,7 @@ let private operatorCandidates: (string * TokenType) list =
       "<=", LessEqual
       "--", MinusMinus
       "->", Arrow
+      "<-", LeftArrow
       "++", PlusPlus
       "?:", QuestionMarkColon
       "??", DoubleQuestionMark
@@ -78,7 +79,8 @@ let private operatorCandidates: (string * TokenType) list =
       "+", Plus
       ".", Dot
       "?", QuestionMark
-      ":", Colon ]
+      ":", Colon
+      "|", VerticalBar ]
     |> List.sortByDescending (fun (lexeme, _) -> lexeme.Length)
 
 let private operatorStartChars: Set<char> =

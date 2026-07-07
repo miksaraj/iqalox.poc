@@ -208,3 +208,18 @@ let ``a string can span multiple raw lines`` () =
 let ``single and double quoted strings are both accepted`` () =
     Assert.Equal<TokenType list>([ String; Eof ], tokenTypes "'hi'")
     Assert.Equal<TokenType list>([ String; Eof ], tokenTypes "\"hi\"")
+
+[<Fact>]
+let ``vertical bar scans distinctly from the pipe operator`` () =
+    // docs/PLAN-0.2.md decision 2's cons/comprehension bracket syntax
+    // (`[item | list]`) needs a bare `|`, which must not be swallowed by
+    // `|>`'s longest-match.
+    Assert.Equal<TokenType list>([ Identifier; VerticalBar; Identifier; Eof ], tokenTypes "a | b")
+    Assert.Equal<TokenType list>([ Identifier; Pipe; Identifier; Eof ], tokenTypes "a |> b")
+
+[<Fact>]
+let ``left arrow scans distinctly from less-than and less-than-or-equal`` () =
+    // docs/PLAN-0.2.md decision 4's generator marker (`x <- xs`).
+    Assert.Equal<TokenType list>([ Identifier; LeftArrow; Identifier; Eof ], tokenTypes "x <- xs")
+    Assert.Equal<TokenType list>([ Identifier; Less; Identifier; Eof ], tokenTypes "x < xs")
+    Assert.Equal<TokenType list>([ Identifier; LessEqual; Identifier; Eof ], tokenTypes "x <= xs")

@@ -562,6 +562,245 @@ TEST_CASE("concat with a non-vector argument is a clean runtime error, not a cra
     REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
 }
 
+TEST_CASE("VectorLength pushes the element count of a vector", "[vm]") {
+    // docs/PLAN-0.2.md Phase 3: an internal-only primitive, never emitted
+    // by any surface syntax -- only Codegen.fs's desugared Cons/
+    // ListComprehension loop condition uses it. Exercised directly here
+    // since no user-written Iqalox program can reach it any other way.
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t two = b.addNumberConstant(2);
+    uint16_t three = b.addNumberConstant(3);
+    uint16_t result = b.addStringConstant("result");
+
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::Constant, two);
+    b.emitU16(OpCode::Constant, three);
+    b.emitU16(OpCode::BuildVector, 3);  // [1, 2, 3]
+    b.emit(OpCode::VectorLength);
+    b.emitU16(OpCode::DefineGlobal, result);
+
+    vm.interpret(b.build());
+
+    REQUIRE(asNumber(*vm.getGlobal("result")) == 3.0);
+}
+
+TEST_CASE("VectorLength on a non-vector is a runtime error", "[vm]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t one = b.addNumberConstant(1);
+    b.emitU16(OpCode::Constant, one);
+    b.emit(OpCode::VectorLength);
+
+    REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
+}
+
+TEST_CASE("VectorAppend mutates the vector in place and pushes nothing back", "[vm]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t two = b.addNumberConstant(2);
+    uint16_t vName = b.addStringConstant("v");
+    uint16_t lengthName = b.addStringConstant("length");
+
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::BuildVector, 1);  // [1]
+    b.emitU16(OpCode::DefineGlobal, vName);
+
+    b.emitU16(OpCode::GetGlobal, vName);
+    b.emitU16(OpCode::Constant, two);
+    b.emit(OpCode::VectorAppend);  // v.push_back(2), pushes nothing
+
+    b.emitU16(OpCode::GetGlobal, vName);
+    b.emit(OpCode::VectorLength);
+    b.emitU16(OpCode::DefineGlobal, lengthName);
+
+    vm.interpret(b.build());
+
+    REQUIRE(asNumber(*vm.getGlobal("length")) == 2.0);
+    const Value* vVal = vm.getGlobal("v");
+    REQUIRE(static_cast<ObjVector*>(asObj(*vVal))->elements.size() == 2);
+    REQUIRE(asNumber(static_cast<ObjVector*>(asObj(*vVal))->elements[1]) == 2.0);
+}
+
+TEST_CASE("VectorAppend's mutation is visible through every other reference to the same vector", "[vm]") {
+    // Vectors are heap-allocated reference types -- appending through one
+    // copy of the pointer is immediately visible through any other, which
+    // is exactly what lets Codegen.fs's desugared loop mutate `$result`
+    // without ever needing to store it back.
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t two = b.addNumberConstant(2);
+    uint16_t aliasLength = b.addStringConstant("aliasLength");
+
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::BuildVector, 1);  // [1], left on the stack as slot 0 ("v")
+    b.emitU16(OpCode::GetLocal, 0);     // a second reference to the same ObjVector ("alias")
+
+    b.emitU16(OpCode::GetLocal, 0);  // "v" again, as VectorAppend's receiver
+    b.emitU16(OpCode::Constant, two);
+    b.emit(OpCode::VectorAppend);  // mutates through "v"
+
+    b.emitU16(OpCode::GetLocal, 1);  // "alias", a different stack slot, same underlying vector
+    b.emit(OpCode::VectorLength);
+    b.emitU16(OpCode::DefineGlobal, aliasLength);
+
+    vm.interpret(b.build());
+
+    REQUIRE(asNumber(*vm.getGlobal("aliasLength")) == 2.0);
+}
+
+TEST_CASE("VectorAppend on a non-vector is a runtime error", "[vm]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t two = b.addNumberConstant(2);
+    b.emitU16(OpCode::Constant, one);  // receiver = 1, not a vector
+    b.emitU16(OpCode::Constant, two);
+    b.emit(OpCode::VectorAppend);
+
+    REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
+}
+
+TEST_CASE("end-to-end: a cons call builds [item, ...list] via a synthetic closure", "[vm]") {
+    // Mirrors exactly what Codegen.fs emits for `[1 | list]` -- verified
+    // against CodegenTests.fs's `cons compiles to a call of a synthetic
+    // closure...` test. Exercises the whole synthetic-closure desugaring
+    // end-to-end at the VM level: BuildVector for the accumulator,
+    // VectorLength/VectorAppend/GetIndex in a real loop, and Return
+    // extracting the final accumulator out from under the closure's own
+    // now-discarded locals ($index, and the loop's own transient values).
+    Vm vm;
+
+    // fun cons($item, $list) {
+    //     var $result = [$item]
+    //     var $index mut = 0
+    //     for (; $index < len($list); ++$index) { $result.append($list[$index]); }
+    //     return $result
+    // }
+    ChunkBuilder consBuilder(vm);
+    uint16_t zero = consBuilder.addNumberConstant(0);
+    uint16_t one = consBuilder.addNumberConstant(1);
+    consBuilder.emitU16(OpCode::GetLocal, 0);  // $item
+    consBuilder.emitU16(OpCode::BuildVector, 1);  // $result (slot 2) = [$item]
+    consBuilder.emitU16(OpCode::Constant, zero);  // $index (slot 3) = 0
+    size_t loopStart = consBuilder.here();
+    consBuilder.emitU16(OpCode::GetLocal, 3);  // $index
+    consBuilder.emitU16(OpCode::GetLocal, 1);  // $list
+    consBuilder.emit(OpCode::VectorLength);
+    consBuilder.emit(OpCode::Less);
+    size_t exitJump = consBuilder.emitJump(OpCode::JumpIfFalse);
+    consBuilder.emit(OpCode::Pop);
+    consBuilder.emitU16(OpCode::GetLocal, 2);  // $result
+    consBuilder.emitU16(OpCode::GetLocal, 1);  // $list
+    consBuilder.emitU16(OpCode::GetLocal, 3);  // $index
+    consBuilder.emit(OpCode::GetIndex);
+    consBuilder.emit(OpCode::VectorAppend);
+    consBuilder.emit(OpCode::Nil);
+    consBuilder.emit(OpCode::Pop);
+    consBuilder.emitU16(OpCode::GetLocal, 3);
+    consBuilder.emitU16(OpCode::Constant, one);
+    consBuilder.emit(OpCode::Add);
+    consBuilder.emitU16(OpCode::SetLocal, 3);
+    consBuilder.emit(OpCode::Pop);
+    consBuilder.emitJumpTo(OpCode::Jump, loopStart);
+    consBuilder.patch(exitJump);
+    consBuilder.emit(OpCode::Pop);
+    consBuilder.emitU16(OpCode::GetLocal, 2);  // return $result
+    consBuilder.emit(OpCode::Return);
+    ObjFunction* consFn = consBuilder.build(2, "cons");
+
+    ChunkBuilder b(vm);
+    uint16_t consIndex = b.addFunctionConstant(consFn);
+    uint16_t itemVal = b.addNumberConstant(1);
+    uint16_t tailA = b.addNumberConstant(2);
+    uint16_t tailB = b.addNumberConstant(3);
+    uint16_t result = b.addStringConstant("result");
+
+    b.emitClosure(consIndex, {});
+    b.emitU16(OpCode::Constant, itemVal);
+    b.emitU16(OpCode::Constant, tailA);
+    b.emitU16(OpCode::Constant, tailB);
+    b.emitU16(OpCode::BuildVector, 2);  // list = [2, 3]
+    b.emitU16(OpCode::Call, 2);
+    b.emitU16(OpCode::DefineGlobal, result);
+
+    vm.interpret(b.build());
+
+    const Value* resultVal = vm.getGlobal("result");
+    REQUIRE(isObj(*resultVal));
+    auto& elements = static_cast<ObjVector*>(asObj(*resultVal))->elements;
+    REQUIRE(elements.size() == 3);
+    REQUIRE(asNumber(elements[0]) == 1.0);
+    REQUIRE(asNumber(elements[1]) == 2.0);
+    REQUIRE(asNumber(elements[2]) == 3.0);
+}
+
+TEST_CASE("end-to-end: consing onto an empty list produces a single-element vector", "[vm]") {
+    // Regression test for the exact bug the synthetic-closure redesign
+    // fixed: `[1 | []]` used to corrupt local-slot addressing when the
+    // cons's hidden locals were declared directly in the enclosing scope
+    // instead of an isolated closure frame.
+    Vm vm;
+
+    ChunkBuilder consBuilder(vm);
+    uint16_t zero = consBuilder.addNumberConstant(0);
+    uint16_t one = consBuilder.addNumberConstant(1);
+    consBuilder.emitU16(OpCode::GetLocal, 0);
+    consBuilder.emitU16(OpCode::BuildVector, 1);
+    consBuilder.emitU16(OpCode::Constant, zero);
+    size_t loopStart = consBuilder.here();
+    consBuilder.emitU16(OpCode::GetLocal, 3);
+    consBuilder.emitU16(OpCode::GetLocal, 1);
+    consBuilder.emit(OpCode::VectorLength);
+    consBuilder.emit(OpCode::Less);
+    size_t exitJump = consBuilder.emitJump(OpCode::JumpIfFalse);
+    consBuilder.emit(OpCode::Pop);
+    consBuilder.emitU16(OpCode::GetLocal, 2);
+    consBuilder.emitU16(OpCode::GetLocal, 1);
+    consBuilder.emitU16(OpCode::GetLocal, 3);
+    consBuilder.emit(OpCode::GetIndex);
+    consBuilder.emit(OpCode::VectorAppend);
+    consBuilder.emit(OpCode::Nil);
+    consBuilder.emit(OpCode::Pop);
+    consBuilder.emitU16(OpCode::GetLocal, 3);
+    consBuilder.emitU16(OpCode::Constant, one);
+    consBuilder.emit(OpCode::Add);
+    consBuilder.emitU16(OpCode::SetLocal, 3);
+    consBuilder.emit(OpCode::Pop);
+    consBuilder.emitJumpTo(OpCode::Jump, loopStart);
+    consBuilder.patch(exitJump);
+    consBuilder.emit(OpCode::Pop);
+    consBuilder.emitU16(OpCode::GetLocal, 2);
+    consBuilder.emit(OpCode::Return);
+    ObjFunction* consFn = consBuilder.build(2, "cons");
+
+    ChunkBuilder b(vm);
+    uint16_t consIndex = b.addFunctionConstant(consFn);
+    uint16_t itemVal = b.addNumberConstant(1);
+    uint16_t result = b.addStringConstant("result");
+
+    // print(item) as a preceding call, matching the original failing
+    // repro (`print [1 | []]`) -- the callee occupying a stack slot ahead
+    // of the cons call's own arguments is exactly what the old hidden-
+    // local-slot design got wrong.
+    b.emitClosure(consIndex, {});
+    b.emitU16(OpCode::Constant, itemVal);
+    b.emitU16(OpCode::BuildVector, 0);  // list = []
+    b.emitU16(OpCode::Call, 2);
+    b.emitU16(OpCode::DefineGlobal, result);
+
+    vm.interpret(b.build());
+
+    const Value* resultVal = vm.getGlobal("result");
+    REQUIRE(isObj(*resultVal));
+    auto& elements = static_cast<ObjVector*>(asObj(*resultVal))->elements;
+    REQUIRE(elements.size() == 1);
+    REQUIRE(asNumber(elements[0]) == 1.0);
+}
+
 TEST_CASE("calling print with the wrong argument count is a runtime error", "[vm][natives]") {
     Vm vm;
     ChunkBuilder b(vm);

@@ -511,16 +511,37 @@ type private ParserState(tokens: Token[]) =
             consume RightParen "Expect ')' after expression." |> ignore
             Grouping expr
         elif matchAny [ LeftBracket ] then
+            let bracket = previous ()
             let previousCommaAsOperator = commaAsOperator
             commaAsOperator <- false
             try
-                let values = ResizeArray<Expr>()
-                if not (check RightBracket) then
-                    values.Add(this.Expression())
-                    while matchAny [ Comma ] do
-                        values.Add(this.Expression())
-                consume RightBracket "Expect ']' after vector elements." |> ignore
-                Vector(List.ofSeq values)
+                if check RightBracket then
+                    advance () |> ignore
+                    Vector []
+                else
+                    let first = this.Expression()
+                    if matchAny [ VerticalBar ] then
+                        // Cons ([item | list]) and list comprehensions
+                        // ([expr | x <- xs]) share this `[expr |` prefix,
+                        // told apart by lookahead on the generator marker
+                        // `<-` (docs/PLAN-0.2.md decision 2).
+                        if check Identifier && checkAt 1 LeftArrow then
+                            let variable = advance ()
+                            advance () |> ignore // '<-'
+                            let source = this.Expression()
+                            consume RightBracket "Expect ']' after list comprehension." |> ignore
+                            ListComprehension(first, variable, source, bracket)
+                        else
+                            let list = this.Expression()
+                            consume RightBracket "Expect ']' after cons." |> ignore
+                            Cons(first, list, bracket)
+                    else
+                        let values = ResizeArray<Expr>()
+                        values.Add(first)
+                        while matchAny [ Comma ] do
+                            values.Add(this.Expression())
+                        consume RightBracket "Expect ']' after vector elements." |> ignore
+                        Vector(List.ofSeq values)
             finally
                 // Bug fix vs. poc: poc restores comma_as_operator with a
                 // plain assignment *after* the elements loop, so a parse

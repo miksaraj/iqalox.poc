@@ -457,3 +457,48 @@ let ``a curried lambda's body is itself a lambda`` () =
         Assert.Equal("x", x.Lexeme)
         Assert.Equal("y", y.Lexeme)
     | e -> failwith $"expected a Lambda whose body is another Lambda, got %A{e}"
+
+[<Fact>]
+let ``a bare vertical bar with no generator marker is a cons`` () =
+    match singleExpr "[1 | xs]" with
+    | Cons(Literal(NumberValue 1.0), Variable list_, _) -> Assert.Equal("xs", list_.Lexeme)
+    | e -> failwith $"expected Cons, got %A{e}"
+
+[<Fact>]
+let ``a vertical bar followed by identifier-arrow is a list comprehension`` () =
+    match singleExpr "[x * 2 | x <- xs]" with
+    | ListComprehension(Binary(Variable bodyX, _, _), variable, Variable source, _) ->
+        Assert.Equal("x", bodyX.Lexeme)
+        Assert.Equal("x", variable.Lexeme)
+        Assert.Equal("xs", source.Lexeme)
+    | e -> failwith $"expected ListComprehension, got %A{e}"
+
+[<Fact>]
+let ``a plain multi-element vector literal has no vertical bar at all`` () =
+    match singleExpr "[1, 2, 3]" with
+    | Vector _ -> ()
+    | e -> failwith $"expected Vector, got %A{e}"
+
+[<Fact>]
+let ``an identifier immediately after the bar without an arrow is still a cons, not a comprehension`` () =
+    // Disambiguation is lookahead on the generator marker (docs/PLAN-0.2.md
+    // decision 2): `[x | y]` has an identifier right after `|`, but no
+    // `<-` follows it, so this is cons -- not a comprehension missing its
+    // generator.
+    match singleExpr "[x | y]" with
+    | Cons(Variable item, Variable list_, _) ->
+        Assert.Equal("x", item.Lexeme)
+        Assert.Equal("y", list_.Lexeme)
+    | e -> failwith $"expected Cons, got %A{e}"
+
+[<Fact>]
+let ``cons can nest to build up a list from multiple items`` () =
+    match singleExpr "[1 | [2 | []]]" with
+    | Cons(Literal(NumberValue 1.0), Cons(Literal(NumberValue 2.0), Vector [], _), _) -> ()
+    | e -> failwith $"expected nested Cons, got %A{e}"
+
+[<Fact>]
+let ``list comprehension source can be an arbitrary expression, not just an identifier`` () =
+    match singleExpr "[x | x <- [1, 2, 3]]" with
+    | ListComprehension(_, variable, Vector _, _) -> Assert.Equal("x", variable.Lexeme)
+    | e -> failwith $"expected ListComprehension, got %A{e}"

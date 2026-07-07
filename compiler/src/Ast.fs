@@ -45,6 +45,16 @@ type Expr =
     | Index of obj: Expr * index: Expr * bracket: Token
     | IndexSet of obj: Expr * index: Expr * value: Expr * bracket: Token
     | Lambda of parameters: Token list * arrow: Token * body: Expr
+    | Cons of item: Expr * list: Expr * bracket: Token
+    | ListComprehension of body: Expr * variable: Token * source: Expr * bracket: Token
+    /// Internal-only, never produced by `Parser.fs` -- `Resolver.fs`
+    /// synthesizes these while desugaring `Cons`/`ListComprehension` into
+    /// a call to a synthetic closure (see its doc comment on those
+    /// cases). `InternalVectorLength`/`InternalVectorAppend` are the only
+    /// two primitives that desugaring needs and that don't already exist
+    /// as ordinary surface syntax.
+    | InternalVectorLength of vector: Expr
+    | InternalVectorAppend of vector: Expr * value: Expr
     | SelfExpr of keyword: Token
     | SuperExpr of keyword: Token * method: Token
 

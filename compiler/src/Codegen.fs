@@ -90,6 +90,8 @@ let rec private lineOfExpr (expr: BoundExpr) : int option =
     | BIndex(_, _, bracket) -> Some bracket.Line
     | BIndexSet(_, _, _, bracket) -> Some bracket.Line
     | BLambda decl -> Some decl.Name.Line
+    | BVectorLengthInternal vector -> lineOfExpr vector
+    | BVectorAppendInternal(vector, _) -> lineOfExpr vector
     | BSelf(_, keyword) -> Some keyword.Line
     | BSuper(_, _, keyword, _) -> Some keyword.Line
 
@@ -157,6 +159,8 @@ let private stackEffect (instr: Instruction) : int =
     // an expression) -- net -2.
     | GetIndex -> -1
     | SetIndex -> -2
+    | VectorLength -> 0
+    | VectorAppend -> -2
 
 type private LoopContext =
     { BreakTargetDepth: int
@@ -409,6 +413,14 @@ type private Codegen() =
             this.CompileExpr value
             state.Emit SetIndex |> ignore
         | BLambda decl -> this.CompileFunctionValue(decl, isMethod = false)
+        | BVectorLengthInternal vector ->
+            this.CompileExpr vector
+            state.Emit VectorLength |> ignore
+        | BVectorAppendInternal(vector, value) ->
+            this.CompileExpr vector
+            this.CompileExpr value
+            state.Emit VectorAppend |> ignore
+            state.Emit Nil |> ignore // VectorAppend itself pushes nothing; this expression still needs a value
         | BSuper(selfBinding, binding, _, method) ->
             this.CompileGetBinding selfBinding
             this.CompileGetBinding binding

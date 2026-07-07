@@ -77,6 +77,8 @@ let disassembleInstruction (chunk: Chunk) (index: int) : string =
     | GetSuper i -> withConstant "GET_SUPER" i
     | GetIndex -> simple "GET_INDEX"
     | SetIndex -> simple "SET_INDEX"
+    | VectorLength -> simple "VECTOR_LENGTH"
+    | VectorAppend -> simple "VECTOR_APPEND"
 
 let rec disassembleChunk (name: string) (chunk: Chunk) : string =
     let sb = StringBuilder()
