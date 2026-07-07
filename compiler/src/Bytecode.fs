@@ -108,6 +108,12 @@ type Instruction =
     | GetProperty of nameIndex: int
     | SetProperty of nameIndex: int
     | GetSuper of nameIndex: int
+    /// Indexed vector read/write (`v[i]`, `v[i] = x` -- `docs/PLAN-0.2.md`
+    /// Phase 1). Unlike `GetProperty`/`SetProperty`, the "name" (here, the
+    /// index) is a runtime value already on the stack, not a compile-time
+    /// constant, so neither opcode takes an operand at all.
+    | GetIndex
+    | SetIndex
 
 type Constant =
     | NumberConstant of float
@@ -170,6 +176,8 @@ let private opcodeOf =
     | GetProperty _ -> 0x27uy
     | SetProperty _ -> 0x28uy
     | GetSuper _ -> 0x29uy
+    | GetIndex -> 0x2Auy
+    | SetIndex -> 0x2Buy
 
 /// Serialized byte length of one instruction -- see the module doc
 /// comment's "Instruction encoding" table.
@@ -195,7 +203,9 @@ let instructionByteLength (instruction: Instruction) : int =
     | Less
     | LessEqual
     | Return
-    | Inherit -> 1
+    | Inherit
+    | GetIndex
+    | SetIndex -> 1
     | Closure(_, upvalues) -> 1 + 2 + 2 + (3 * List.length upvalues)
     | _ -> 3
 
@@ -269,7 +279,9 @@ let rec private writeChunk (writer: BinaryWriter) (chunk: Chunk) : unit =
         | Less
         | LessEqual
         | Return
-        | Inherit -> ()
+        | Inherit
+        | GetIndex
+        | SetIndex -> ()
         | Constant i
         | PopN i
         | GetLocal i

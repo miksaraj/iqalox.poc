@@ -262,6 +262,9 @@ type private Resolver(globals: Dictionary<string, bool>) =
         | Call(callee, arguments) -> BCall(this.ResolveExpr callee, arguments |> List.map this.ResolveExpr)
         | Get(obj, name) -> BGet(this.ResolveExpr obj, name)
         | Set(obj, name, value) -> BSet(this.ResolveExpr obj, name, this.ResolveExpr value)
+        | Index(obj, index, bracket) -> BIndex(this.ResolveExpr obj, this.ResolveExpr index, bracket)
+        | IndexSet(obj, index, value, bracket) ->
+            BIndexSet(this.ResolveExpr obj, this.ResolveExpr index, this.ResolveExpr value, bracket)
         | SelfExpr keyword ->
             match resolveReference "self" with
             | GlobalBinding _, None ->

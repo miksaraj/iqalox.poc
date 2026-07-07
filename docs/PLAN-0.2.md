@@ -74,7 +74,30 @@ overwriting the earlier text.
    error, matching every other bounds/type check's error style. Negative
    indices and slice syntax (`v[a:b]`) are deferred to `ROADMAP.md`'s
    `0.3` entry ("array-manipulation standard library improvements"),
-   named explicitly there now rather than just implied.
+   named explicitly there now rather than just implied. A non-integer or
+   negative-*numeric* index (there being no separate integer type,
+   `v[1.5]`) is also a runtime error, matching every other arithmetic/
+   domain check's error style — an obvious edge case decided the same way
+   as every other operator's type checking, not a fresh design axis.
+
+   **Addendum, found during Phase 1 implementation, not caught by this
+   document's original grammar draft or `langspec/SYNTAX_GRAMMAR.md`'s
+   Phase 0 rewrite: `v[0]` is byte-for-byte ambiguous with `0.1`'s
+   existing "bare identifier/property + vector-literal argument" call
+   syntax** (`concat [1, 2]`, used throughout every existing example) —
+   both parse to the identical token stream (`IDENTIFIER LEFT_BRACKET ...
+   RIGHT_BRACKET`), so `Parser.fs` can't tell "index `v` at 0" from "call
+   `v` with the one-element vector argument `[0]`" without a tiebreaker.
+   Resolved via **whitespace adjacency**: a `[` with no space before it
+   (`v[0]`) is always postfix indexing; a `[` preceded by a space
+   (`v [0]`, `concat [1, 2]`) is always the pre-existing vector-literal-
+   argument call, completely unchanged. Uses `Token.Column`/`Lexeme`
+   (already tracked since the column-tracking work predating `0.2`) — no
+   new scanner state needed. This is the first place whitespace is
+   *ever* significant in Iqalox's grammar; flagged here explicitly since
+   it's a real language-design tradeoff, not an implementation detail,
+   and the tradeoff was made by necessity (the alternative was a breaking
+   change to `0.1`'s call syntax) rather than by preference.
 7. **Variadic unpacking (`...`) ships as vector-literal spread only:
    `[...a, ...b]`.** Splices `a`'s and `b`'s elements into the new vector.
    Variadic *parameters* (`fun f(...args)`) and call-site spread
@@ -316,7 +339,7 @@ stale for nine phases and then need a special pass to fix it.**
 
 | Feature | Design decision(s) | Status |
 |---|---|---|
-| Vector indexing (`v[i]` get/set) | §1.6 | Not started |
+| Vector indexing (`v[i]` get/set) | §1.6 | Done |
 | Lambdas (`(a, b) -> expr`) | §1.1 | Not started |
 | Cons operator (`[item \| list]`) | §1.2 | Not started |
 | List comprehensions (single generator) | §1.2-4 | Not started |
@@ -366,10 +389,26 @@ examples: decision 8's addendum (§1) now spells out that undeclared,
 implicitly-created fields (`0.1`'s model) can't coexist with the
 pub/mut access table, so `0.2` requires every property to be declared.
 
-**Phase 1 — Indexing.** `v[i]` read/write, bounds-checked, 0-based. New
-postfix grammar on any primary expression (not just identifiers — `f()[0]`
-should work too, matching how `.property` access already composes with
-calls).
+**Phase 1 — Indexing.** *Done.* `v[i]` read/write, bounds-checked,
+0-based, postfix on any primary expression (`f()[0]`, chained `grid[i][j]`,
+all compose the same way `.property` access already does) --
+`Ast.Index`/`IndexSet` through `Bound.BIndex`/`BIndexSet` to two new
+no-operand opcodes, `GetIndex`/`SetIndex` (the index is a runtime stack
+value, not a compile-time constant like `GetProperty`'s name). Found and
+resolved a real grammar collision along the way that this document's
+original draft missed entirely — decision 6's addendum (§1) covers the
+whitespace-adjacency disambiguation between `v[0]` (indexing) and `concat
+[1, 2]` (the pre-existing vector-literal-argument call syntax, unchanged).
+11 new xUnit tests (parser disambiguation/chaining, resolver, codegen
+instruction sequences) and 7 new Catch2 tests (happy path, out-of-range,
+negative, non-integer, non-number-index, non-vector-receiver for both
+`GetIndex`/`SetIndex`). Also surfaced (not fixed — out of scope here) a
+real, pre-existing `0.1` scanner limitation while validating
+`langspec/examples/matrices.iqx` end to end: every newline scans as an
+implicit `;` with no bracket-depth awareness at all, so a multi-line
+vector literal (or any multi-line grouping expression) has never actually
+worked — logged as `docs/LANGUAGE.md` §13 item 9; `matrices.iqx`'s matrix
+literal was rewritten onto one line to work around it.
 
 **Phase 2 — Lambdas.** `(a, b) -> expr`, single-expression body, closing
 over enclosing scope exactly like a named nested function already does.

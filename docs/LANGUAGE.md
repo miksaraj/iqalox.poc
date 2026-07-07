@@ -651,6 +651,18 @@ each was arrived at.
    forward (see `docs/PLAN-0.1-POC.md`'s running list) — see
    `docs/LANGUAGE-POC.md` §13 for the `0.1-poc`-side version of this
    limitation.
+9. **A vector literal or grouping expression can't span multiple lines.**
+   `compiler/src/Scanner.fs` turns *every* newline into an implicit
+   `;` unconditionally, with no awareness of bracket/paren depth — so
+   `print (\n1 + 2\n)` or a `[...]` literal split across lines both fail
+   with `Expect expression.` at the line following the opening bracket,
+   the newline having already terminated the "statement" right after it.
+   Found while writing a `0.2`-target example (`docs/PLAN-0.2.md` Phase
+   1), not by any existing test, since every fixture up to now happened
+   to keep every bracketed expression on one line. Not fixed here —
+   making the scanner bracket-depth-aware is a real scanner change with
+   its own test surface, out of scope for the indexing work that
+   surfaced it.
 
 The following `0.1-poc` limitations are **resolved** as of `0.1` (see
 `docs/LANGUAGE-POC.md` §13 for their original write-ups): no escape

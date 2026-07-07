@@ -265,3 +265,37 @@ let ``a codegen error reports the line of the statement it occurred on, not line
     let _, codegenErrors = compile bound
     Assert.Single codegenErrors |> ignore
     Assert.Equal(3, codegenErrors.[0].Line)
+
+[<Fact>]
+let ``indexing pushes obj and index, then emits GetIndex with no operand`` () =
+    let chunk = compileSource "var v = [1, 2]\nv[0]"
+    Assert.Equal<Instruction[]>(
+        [| Constant 0; Constant 1; BuildVector 2; DefineGlobal 2; GetGlobal 2; Constant 3; GetIndex; Pop; Nil; Return |],
+        chunk.Code
+    )
+    Assert.Equal<Constant[]>(
+        [| NumberConstant 1.0; NumberConstant 2.0; StringConstant "v"; NumberConstant 0.0 |],
+        chunk.Constants
+    )
+
+[<Fact>]
+let ``indexed assignment pushes obj, index, and value, then emits SetIndex with no operand`` () =
+    let chunk = compileSource "var v = [1, 2]\nv[0] = 9"
+    Assert.Equal<Instruction[]>(
+        [| Constant 0
+           Constant 1
+           BuildVector 2
+           DefineGlobal 2
+           GetGlobal 2
+           Constant 3
+           Constant 4
+           SetIndex
+           Pop
+           Nil
+           Return |],
+        chunk.Code
+    )
+    Assert.Equal<Constant[]>(
+        [| NumberConstant 1.0; NumberConstant 2.0; StringConstant "v"; NumberConstant 0.0; NumberConstant 9.0 |],
+        chunk.Constants
+    )

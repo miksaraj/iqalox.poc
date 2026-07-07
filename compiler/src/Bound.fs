@@ -58,6 +58,8 @@ type BoundExpr =
     | BCall of callee: BoundExpr * arguments: BoundExpr list
     | BGet of obj: BoundExpr * name: Token
     | BSet of obj: BoundExpr * name: Token * value: BoundExpr
+    | BIndex of obj: BoundExpr * index: BoundExpr * bracket: Token
+    | BIndexSet of obj: BoundExpr * index: BoundExpr * value: BoundExpr * bracket: Token
     | BSelf of binding: VariableBinding * keyword: Token
     | BSuper of selfBinding: VariableBinding * binding: VariableBinding * keyword: Token * method: Token
 

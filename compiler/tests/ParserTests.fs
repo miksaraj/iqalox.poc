@@ -359,3 +359,50 @@ let ``self is an expression`` () =
     match singleExpr "self" with
     | SelfExpr _ -> ()
     | e -> failwith $"expected SelfExpr, got %A{e}"
+
+[<Fact>]
+let ``no-space bracket after an identifier is indexing`` () =
+    match singleExpr "v[0]" with
+    | Index(Variable objName, Literal(NumberValue 0.0), _) -> Assert.Equal("v", objName.Lexeme)
+    | e -> failwith $"expected Index, got %A{e}"
+
+[<Fact>]
+let ``space before bracket after an identifier is still a vector-literal call argument`` () =
+    // docs/PLAN-0.2.md decision 6's whitespace-adjacency resolution: this
+    // must keep meaning exactly what it meant before indexing existed.
+    match singleExpr "concat [1, 2]" with
+    | Call(Variable name, [ Vector [ Literal(NumberValue 1.0); Literal(NumberValue 2.0) ] ]) ->
+        Assert.Equal("concat", name.Lexeme)
+    | e -> failwith $"expected Call with a Vector argument, got %A{e}"
+
+[<Fact>]
+let ``chained indexing`` () =
+    match singleExpr "grid[0][1]" with
+    | Index(Index(Variable objName, Literal(NumberValue 0.0), _), Literal(NumberValue 1.0), _) ->
+        Assert.Equal("grid", objName.Lexeme)
+    | e -> failwith $"expected nested Index, got %A{e}"
+
+[<Fact>]
+let ``indexing a zero-arg call result needs no extra parens`` () =
+    match singleExpr "makeVector()[0]" with
+    | Index(Call(Variable name, []), Literal(NumberValue 0.0), _) -> Assert.Equal("makeVector", name.Lexeme)
+    | e -> failwith $"expected Index over a Call, got %A{e}"
+
+[<Fact>]
+let ``no-space bracket after a property access is indexing, not a call`` () =
+    match singleExpr "obj.method[0]" with
+    | Index(Get(_, name), Literal(NumberValue 0.0), _) -> Assert.Equal("method", name.Lexeme)
+    | e -> failwith $"expected Index over a Get, got %A{e}"
+
+[<Fact>]
+let ``space before bracket after a property access is still a vector-literal call argument`` () =
+    match singleExpr "obj.method [0]" with
+    | Call(Get(_, name), [ Vector [ Literal(NumberValue 0.0) ] ]) -> Assert.Equal("method", name.Lexeme)
+    | e -> failwith $"expected Call with a Vector argument, got %A{e}"
+
+[<Fact>]
+let ``indexing is a valid assignment target`` () =
+    match singleExpr "v[0] = 1" with
+    | IndexSet(Variable objName, Literal(NumberValue 0.0), Literal(NumberValue 1.0), _) ->
+        Assert.Equal("v", objName.Lexeme)
+    | e -> failwith $"expected IndexSet, got %A{e}"

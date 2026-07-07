@@ -22,6 +22,18 @@
 /// disabled for the rest of that parse, since the restoring assignment
 /// never runs. Fixed here with a `try`/`finally` so the flag is always
 /// restored, matching what was clearly intended.
+///
+/// `0.2` (`docs/PLAN-0.2.md` Phase 1) adds postfix indexing (`v[0]`,
+/// `Ast.Index`/`Ast.IndexSet`) to `Call()`'s existing `.`-chaining loop.
+/// This collides, at the token-stream level, with the pre-existing "bare
+/// identifier/property + vector-literal argument" call syntax (`concat
+/// [1, 2]`) -- `v[0]` and `v` called with a one-element vector argument
+/// `[0]` are otherwise indistinguishable. Resolved by whitespace
+/// adjacency (`isAdjacent`/`startsArgumentAfter`): a `[` with no space
+/// before it is always postfix indexing; a `[` with a space is always the
+/// existing vector-literal-argument call, unchanged. A real design
+/// question the original `0.2` grammar draft missed entirely -- see
+/// `docs/PLAN-0.2.md` decision 6's addendum.
 module Iqalox.Parser
 
 open Iqalox.Token
@@ -39,6 +51,28 @@ let private argumentStartTokens =
     Set.ofList [
         LeftParen; LeftBracket; False; True; Nil; Number; String; Identifier; Break; Continue; Underscore; Self; Super
     ]
+
+/// True when `right` immediately follows `left` with no whitespace
+/// between them on the same line -- e.g. `v` and `[` in `v[0]`. Tells
+/// postfix indexing (`v[0]`, no space) apart from the pre-existing "bare
+/// identifier/property + vector-literal argument" call syntax
+/// (`concat [1, 2]`, always space-separated in practice): both parse to
+/// the identical token stream, so this adjacency check is the only
+/// tiebreaker (docs/PLAN-0.2.md decision 6's whitespace-adjacency
+/// resolution -- a real grammar collision the original `0.2` grammar
+/// draft missed).
+let private isAdjacent (left: Token) (right: Token) =
+    left.Line = right.Line && right.Column = left.Column + left.Lexeme.Length
+
+/// Like `startsArgument`, but a `[` immediately adjacent to `prev` is
+/// reserved for postfix indexing, never a vector-literal call argument --
+/// the only argument-start token that collides with a postfix operator
+/// this way (see `isAdjacent`).
+let private startsArgumentAfter (prev: Token) (token: Token) =
+    if token.Type = LeftBracket && isAdjacent prev token then
+        false
+    else
+        Set.contains token.Type argumentStartTokens
 
 let private literalValueOf (token: Token) : LiteralValue =
     match token.Literal with
@@ -81,8 +115,6 @@ type private ParserState(tokens: Token[]) =
 
     let consume (tokenType: TokenType) (message: string) : Token =
         if check tokenType then advance () else error (peek ()) message
-
-    let startsArgument (token: Token) = Set.contains token.Type argumentStartTokens
 
     member this.Parse() : Stmt list * ParseError list =
         let statements = ResizeArray<Stmt>()
@@ -216,6 +248,7 @@ type private ParserState(tokens: Token[]) =
             match expr with
             | Variable name -> Assign(name, value)
             | Get(obj, name) -> Set(obj, name, value)
+            | Index(obj, index, bracket) -> IndexSet(obj, index, value, bracket)
             | _ -> error equals "Invalid assignment target."
         else
             expr
@@ -344,9 +377,18 @@ type private ParserState(tokens: Token[]) =
 
     member this.Call() : Expr =
         let mutable expr = this.CallHead()
-        while matchAny [ Dot ] do
-            let name = consume Identifier "Expect property name after '.'."
-            expr <- this.FinishPropertyAccess(Get(expr, name))
+        let mutable more = true
+        while more do
+            if matchAny [ Dot ] then
+                let name = consume Identifier "Expect property name after '.'."
+                expr <- this.FinishPropertyAccess(Get(expr, name))
+            elif check LeftBracket && isAdjacent (previous ()) (peek ()) then
+                let bracket = advance ()
+                let index = this.Expression()
+                consume RightBracket "Expect ']' after index." |> ignore
+                expr <- Index(expr, index, bracket)
+            else
+                more <- false
         expr
 
     member this.CallHead() : Expr =
@@ -354,14 +396,16 @@ type private ParserState(tokens: Token[]) =
         // marker; `f a`, `f a, b` (fixed-arity, comma-separated, no
         // wrapping parens) are calls with arguments; a bare `f` with
         // nothing recognizable as an argument following it is just a
-        // value reference, not a call.
+        // value reference, not a call. `f[0]` (no space) is postfix
+        // indexing instead, handled by Call()'s own loop once this
+        // returns a bare Variable -- see startsArgumentAfter.
         if check Identifier then
             if checkAt 1 LeftParen && checkAt 2 RightParen then
                 let name = advance ()
                 advance () |> ignore
                 advance () |> ignore
                 Call(Variable name, [])
-            elif startsArgument (peekAt 1) then
+            elif startsArgumentAfter (peek ()) (peekAt 1) then
                 let name = advance ()
                 let arguments = ResizeArray<Expr>()
                 arguments.Add(this.Argument())
@@ -381,12 +425,15 @@ type private ParserState(tokens: Token[]) =
         // expr is a Get or a Super -- same zero-arg/argument-start call
         // detection as CallHead(), just anchored on whatever comes right
         // after the property/method name instead of after a bare
-        // identifier.
+        // identifier. `previous()` is that property/method name token
+        // (or Super's `method`), used only for the adjacent-`[`-is-
+        // indexing carve-out (see startsArgumentAfter).
+        let nameToken = previous ()
         if check LeftParen && checkAt 1 RightParen then
             advance () |> ignore
             advance () |> ignore
             Call(expr, [])
-        elif startsArgument (peek ()) then
+        elif startsArgumentAfter nameToken (peek ()) then
             let arguments = ResizeArray<Expr>()
             arguments.Add(this.Argument())
             while matchAny [ Comma ] do

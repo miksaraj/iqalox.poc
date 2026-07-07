@@ -49,6 +49,17 @@ are still exactly true.
   specifically when it's immediately followed by `=`, and treat *that*
   step as the mutable target — not a general "any call is assignable"
   rule. See the `assignment` production below.
+* **`v[0]` (indexing) and `v [0]` (a call with a vector-literal argument)
+  are told apart by whitespace, resolved during Phase 1 implementation
+  after this document's first draft missed the collision entirely.**
+  `0.1`'s call syntax already lets a bare identifier/property be "called"
+  with a vector literal as its sole argument (`concat [1, 2]`, used
+  throughout every example) — that parses to the exact same token stream
+  as postfix indexing on the same identifier. A `[` with no space before
+  it is always indexing; a `[` with a space is always the pre-existing
+  call form, completely unchanged. This is the only place whitespace is
+  significant anywhere in Iqalox's grammar — see `docs/PLAN-0.2.md`
+  decision 6's addendum for the full reasoning.
 * **Lambda vs. a grouped comma expression share the same opening
   `(`.** `0.1`'s comma operator already makes `(a, b)` a valid grouped
   expression (evaluate `a`, discard it, yield `b`) — `docs/PLAN-0.2.md`
