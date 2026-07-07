@@ -1,6 +1,7 @@
 module ResolverTests
 
 open Xunit
+open Iqalox.Ast
 open Iqalox.Scanner
 open Iqalox.Parser
 open Iqalox.Bound
@@ -211,4 +212,23 @@ let ``LocalCount includes self plus every declared local`` () =
     Assert.Empty errors
     match bound with
     | [ BClassStmt(_, _, _, [ quackDecl ]) ] -> Assert.Equal(3, quackDecl.LocalCount) // self, a, b
+    | _ -> failwith $"unexpected shape: %A{bound}"
+
+[<Fact>]
+let ``indexing resolves the object and index sub-expressions`` () =
+    let bound, errors = resolveSource "var v = [1, 2]\nv[0]"
+    Assert.Empty errors
+    match bound with
+    | [ BVarStmt(DeclaredGlobal "v", _, _)
+        BExpressionStmt(BIndex(BVariable(GlobalBinding "v", _), BLiteral(NumberValue 0.0), _)) ] -> ()
+    | _ -> failwith $"unexpected shape: %A{bound}"
+
+[<Fact>]
+let ``indexed assignment resolves obj, index, and value sub-expressions`` () =
+    let bound, errors = resolveSource "var v = [1, 2]\nv[0] = 9"
+    Assert.Empty errors
+    match bound with
+    | [ BVarStmt(DeclaredGlobal "v", _, _)
+        BExpressionStmt(BIndexSet(BVariable(GlobalBinding "v", _), BLiteral(NumberValue 0.0), BLiteral(NumberValue 9.0), _)) ] ->
+        ()
     | _ -> failwith $"unexpected shape: %A{bound}"

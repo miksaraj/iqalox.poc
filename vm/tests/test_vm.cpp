@@ -124,6 +124,114 @@ TEST_CASE("vectors compare equal element-wise and recursively", "[vm]") {
     REQUIRE(asBool(*vm.getGlobal("result")) == true);  // [1, 2] != [1, 3]
 }
 
+TEST_CASE("indexed get/set read and write vector elements", "[vm]") {
+    // docs/PLAN-0.2.md Phase 1: v[i] read/write, 0-based, bounds-checked.
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t ten = b.addNumberConstant(10);
+    uint16_t twenty = b.addNumberConstant(20);
+    uint16_t ninetyNine = b.addNumberConstant(99);
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t vName = b.addStringConstant("v");
+    uint16_t resultName = b.addStringConstant("result");
+
+    b.emitU16(OpCode::Constant, ten);
+    b.emitU16(OpCode::Constant, twenty);
+    b.emitU16(OpCode::BuildVector, 2);
+    b.emitU16(OpCode::DefineGlobal, vName);  // v = [10, 20]
+
+    b.emitU16(OpCode::GetGlobal, vName);
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::Constant, ninetyNine);
+    b.emit(OpCode::SetIndex);  // v[1] = 99 -- leaves 99 on the stack (assignment is an expression)
+    b.emit(OpCode::Pop);
+
+    b.emitU16(OpCode::GetGlobal, vName);
+    b.emitU16(OpCode::Constant, one);
+    b.emit(OpCode::GetIndex);
+    b.emitU16(OpCode::DefineGlobal, resultName);
+
+    vm.interpret(b.build());
+
+    REQUIRE(asNumber(*vm.getGlobal("result")) == 99.0);
+}
+
+TEST_CASE("indexing out of range is a runtime error", "[vm]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t five = b.addNumberConstant(5);
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::BuildVector, 1);  // [1] -- valid indices are just 0
+    b.emitU16(OpCode::Constant, five);
+    b.emit(OpCode::GetIndex);
+
+    REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
+}
+
+TEST_CASE("indexing with a negative index is a runtime error", "[vm]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t negOne = b.addNumberConstant(-1);
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::BuildVector, 1);
+    b.emitU16(OpCode::Constant, negOne);
+    b.emit(OpCode::GetIndex);
+
+    REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
+}
+
+TEST_CASE("indexing with a non-integer index is a runtime error", "[vm]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t half = b.addNumberConstant(0.5);
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::BuildVector, 1);
+    b.emitU16(OpCode::Constant, half);
+    b.emit(OpCode::GetIndex);
+
+    REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
+}
+
+TEST_CASE("indexing with a non-number index is a runtime error", "[vm]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t one = b.addNumberConstant(1);
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::BuildVector, 1);
+    b.emit(OpCode::True);  // index = true, not a number
+    b.emit(OpCode::GetIndex);
+
+    REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
+}
+
+TEST_CASE("indexing a non-vector value is a runtime error", "[vm]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t zero = b.addNumberConstant(0);
+    b.emitU16(OpCode::Constant, one);  // receiver = 1, not a vector
+    b.emitU16(OpCode::Constant, zero);
+    b.emit(OpCode::GetIndex);
+
+    REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
+}
+
+TEST_CASE("assigning into a non-vector value via index is a runtime error", "[vm]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t zero = b.addNumberConstant(0);
+    b.emitU16(OpCode::Constant, one);  // receiver = 1, not a vector
+    b.emitU16(OpCode::Constant, zero);
+    b.emitU16(OpCode::Constant, one);
+    b.emit(OpCode::SetIndex);
+
+    REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
+}
+
 TEST_CASE("reading an Undef local is a runtime error", "[vm]") {
     Vm vm;
     ChunkBuilder b(vm);

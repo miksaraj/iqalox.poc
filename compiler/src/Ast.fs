@@ -42,6 +42,8 @@ type Expr =
     | Call of callee: Expr * arguments: Expr list
     | Get of obj: Expr * name: Token
     | Set of obj: Expr * name: Token * value: Expr
+    | Index of obj: Expr * index: Expr * bracket: Token
+    | IndexSet of obj: Expr * index: Expr * value: Expr * bracket: Token
     | SelfExpr of keyword: Token
     | SuperExpr of keyword: Token * method: Token
 

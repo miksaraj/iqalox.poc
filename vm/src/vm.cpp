@@ -102,6 +102,26 @@ void Vm::checkNumberOperands(const Value& a, const Value& b, const char* message
     if (!isNumber(a) || !isNumber(b)) throw RuntimeError(message);
 }
 
+size_t Vm::checkVectorIndex(const Value& receiver, const Value& indexValue) {
+    if (!isObj(receiver) || asObj(receiver)->type != ObjType::Vector) {
+        runtimeError("Only vectors can be indexed, got " + typeName(receiver) + ".");
+    }
+    if (!isNumber(indexValue)) {
+        runtimeError("Vector index must be a number, got " + typeName(indexValue) + ".");
+    }
+    double indexNum = asNumber(indexValue);
+    if (indexNum < 0.0 || std::floor(indexNum) != indexNum) {
+        runtimeError("Vector index must be a non-negative integer, got " + stringify(indexValue) + ".");
+    }
+    auto* vector = static_cast<ObjVector*>(asObj(receiver));
+    size_t index = static_cast<size_t>(indexNum);
+    if (index >= vector->elements.size()) {
+        runtimeError("Vector index " + std::to_string(index) + " out of range for vector of length " +
+                      std::to_string(vector->elements.size()) + ".");
+    }
+    return index;
+}
+
 uint8_t Vm::readByte(CallFrame& frame) { return frame.closure->function->chunk.code[frame.ip++]; }
 
 uint16_t Vm::readU16(CallFrame& frame) {
@@ -550,6 +570,22 @@ void Vm::run() {
                 auto* superclass = static_cast<ObjClass*>(asObj(pop()));
                 Value self = pop();
                 push(bindMethod(superclass, self, name->value));
+                break;
+            }
+            case OpCode::GetIndex: {
+                Value indexValue = pop();
+                Value receiver = pop();
+                size_t index = checkVectorIndex(receiver, indexValue);
+                push(static_cast<ObjVector*>(asObj(receiver))->elements[index]);
+                break;
+            }
+            case OpCode::SetIndex: {
+                Value value = pop();
+                Value indexValue = pop();
+                Value receiver = pop();
+                size_t index = checkVectorIndex(receiver, indexValue);
+                static_cast<ObjVector*>(asObj(receiver))->elements[index] = value;
+                push(value);
                 break;
             }
         }

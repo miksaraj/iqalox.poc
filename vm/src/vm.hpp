@@ -164,6 +164,14 @@ private:
     void checkNotUndef(const Value& value, const std::string& contextForGlobals);
     static void checkNumberOperand(const Value& value, const char* message);
     static void checkNumberOperands(const Value& a, const Value& b, const char* message);
+    // Shared by GetIndex/SetIndex (docs/PLAN-0.2.md Phase 1): validates
+    // `receiver` is a vector and `indexValue` is an in-range, non-negative
+    // integer index, returning the validated index. Throws via
+    // `runtimeError` (not a bare `RuntimeError`, unlike
+    // `checkNumberOperand(s)`) so an out-of-range/wrong-type index gets
+    // the same `[line N]` treatment `GetProperty`/`SetProperty` already
+    // get.
+    size_t checkVectorIndex(const Value& receiver, const Value& indexValue);
 
     uint8_t readByte(CallFrame& frame);
     uint16_t readU16(CallFrame& frame);

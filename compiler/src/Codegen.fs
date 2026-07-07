@@ -26,6 +26,12 @@
 /// closure nested *within* a method still finds the right `self` --
 /// `Bound.BSuper`/`Resolver.fs`'s `SuperExpr` case carry/compute both.
 ///
+/// `BIndex`/`BIndexSet` (`docs/PLAN-0.2.md` Phase 1) compile like
+/// `BGet`/`BSet`, just with the index pushed as an ordinary runtime value
+/// instead of `AddStringConstant`-ing a compile-time-known property name
+/// -- `GetIndex`/`SetIndex` take no operand at all, unlike
+/// `GetProperty`/`SetProperty`'s `nameIndex`.
+///
 /// `FunctionState.StackDepth` is `Codegen`'s own running counter (distinct
 /// from `Resolver`'s already-computed slot numbers) of how many values are
 /// currently pushed, kept in sync by routing every emission through
@@ -73,6 +79,8 @@ let rec private lineOfExpr (expr: BoundExpr) : int option =
     | BCall(callee, _) -> lineOfExpr callee
     | BGet(_, name) -> Some name.Line
     | BSet(_, name, _) -> Some name.Line
+    | BIndex(_, _, bracket) -> Some bracket.Line
+    | BIndexSet(_, _, _, bracket) -> Some bracket.Line
     | BSelf(_, keyword) -> Some keyword.Line
     | BSuper(_, _, keyword, _) -> Some keyword.Line
 
@@ -135,6 +143,11 @@ let private stackEffect (instr: Instruction) : int =
     | GetProperty _ -> 0
     | SetProperty _ -> -1
     | GetSuper _ -> -1
+    // Pops obj + index, pushes the element: net -1. SetIndex additionally
+    // pops the value being assigned, then pushes it back (assignment is
+    // an expression) -- net -2.
+    | GetIndex -> -1
+    | SetIndex -> -2
 
 type private LoopContext =
     { BreakTargetDepth: int
@@ -377,6 +390,15 @@ type private Codegen() =
             this.CompileExpr obj
             this.CompileExpr value
             state.Emit(SetProperty(state.AddStringConstant name.Lexeme)) |> ignore
+        | BIndex(obj, index, _) ->
+            this.CompileExpr obj
+            this.CompileExpr index
+            state.Emit GetIndex |> ignore
+        | BIndexSet(obj, index, value, _) ->
+            this.CompileExpr obj
+            this.CompileExpr index
+            this.CompileExpr value
+            state.Emit SetIndex |> ignore
         | BSuper(selfBinding, binding, _, method) ->
             this.CompileGetBinding selfBinding
             this.CompileGetBinding binding
