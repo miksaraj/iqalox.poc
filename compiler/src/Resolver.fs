@@ -386,7 +386,8 @@ type private Resolver(globals: Dictionary<string, bool>) =
                 BSuper(selfBinding, binding, keyword, method)
 
 /// Native functions the VM provides without any user declaration (Phase
-/// 7: `print`, `concat`) -- pre-registered as immutable globals, exactly
+/// 7: `print`, `concat`; Phase 8 of `docs/PLAN-0.2.md`: `push`, `pop`,
+/// `length`, `reverse`) -- pre-registered as immutable globals, exactly
 /// like a user-declared `fun`, so `print = 5` is a compile-time
 /// immutability error and `var print = 1` is a compile-time redeclaration
 /// error instead of silently succeeding just because the resolver has
@@ -394,8 +395,11 @@ type private Resolver(globals: Dictionary<string, bool>) =
 /// defines both in the same environment chain user code runs in, with
 /// `is_mutable=False`, before any user statement executes. Keep this in
 /// sync with `vm/src/vm.cpp`'s `defineNatives` -- the two toolchains have
-/// no shared source of truth for this list.
-let private nativeGlobals = [ "print"; "concat" ]
+/// no shared source of truth for this list. `map`/`filter`/`reduce`/`sort`
+/// are deliberately NOT here -- they're ordinary `fun` declarations
+/// (`Prelude.fs`) resolved as part of the same program as any user `fun`,
+/// needing no special-casing at all.
+let private nativeGlobals = [ "print"; "concat"; "push"; "pop"; "length"; "reverse" ]
 
 /// Resolves `stmts` into a `BoundStmt` list plus any resolution errors
 /// (compile-time immutability violations, redeclarations, `self`/`super`

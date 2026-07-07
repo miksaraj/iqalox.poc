@@ -475,7 +475,26 @@ type private ParserState(tokens: Token[]) =
         // A grouped expression, a nested call, or a bare primary --
         // Call() already covers all three, falling through to Primary(),
         // which handles "(" expression ")" as a Grouping.
-        this.Call()
+        //
+        // Bug found while writing docs/PLAN-0.2.md Phase 5's array-stdlib
+        // prelude (`map fn, v`, with `fn` a lambda in *non-last* position):
+        // a lambda argument's own body is parsed via the *full* Expression()
+        // chain (through Comma()), which -- unless suppressed, exactly like
+        // `[...]`'s own element-parsing already suppresses it for itself --
+        // treats a bare comma as its own operator. Without this, `map (x)
+        // -> x * 2, v` had the lambda's unparenthesized body swallow the `,
+        // v` that was meant to be this call's *second* argument, silently
+        // producing a 1-argument call. `Grouping`'s own explicit `(...)`
+        // re-suppresses/re-enables around itself (see Primary()), so a
+        // parenthesized comma-tuple passed as one argument (`f (a, b)`)
+        // still works exactly as before -- only an unparenthesized nested
+        // expression (a lambda body, here) is affected.
+        let previousCommaAsOperator = commaAsOperator
+        commaAsOperator <- false
+        try
+            this.Call()
+        finally
+            commaAsOperator <- previousCommaAsOperator
 
     member this.Primary() : Expr =
         if matchAny [ False ] then Literal(BoolValue false)
@@ -507,7 +526,20 @@ type private ParserState(tokens: Token[]) =
             let body = this.Expression()
             Lambda(List.ofSeq parameters, arrow, body)
         elif matchAny [ LeftParen ] then
-            let expr = this.Expression()
+            // A parenthesized sub-expression is always self-delimiting --
+            // its own closing ')' is the real terminator, so the comma
+            // operator is always available inside, regardless of whatever
+            // outer context suppressed it (a vector literal's elements, or
+            // -- see Argument()'s doc comment -- a call's own unparenthesized
+            // argument list). Restored afterward so the outer context's own
+            // suppression (if any) resumes correctly once these parens close.
+            let previousCommaAsOperator = commaAsOperator
+            commaAsOperator <- true
+            let expr =
+                try
+                    this.Expression()
+                finally
+                    commaAsOperator <- previousCommaAsOperator
             consume RightParen "Expect ')' after expression." |> ignore
             Grouping expr
         elif matchAny [ LeftBracket ] then

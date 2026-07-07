@@ -248,14 +248,11 @@ resolving, the same convention `docs/PLAN-0.1-POC.md` and
    dispatch/overriding at all, or is effectively non-virtual since no
    external caller can ever reach it polymorphically. Blocks Phase 7
    (properties) and its methods-privacy extension alike.
-4. **Exact array-manipulation stdlib surface.** "Julia-inspired
-   single/multi-dimensional array manipulation" is a vision statement, not
-   a function list. Candidates to confirm/prune before Phase 5: `push`,
-   `pop`, `map`, `filter`, `reduce`, `sort`, `reverse`, `length` — as
-   builtin functions (matching `print`/`concat`'s no-parens-call
-   convention) or as methods on vectors (which `0.1`'s object model
-   explicitly says primitives don't have, `docs/LANGUAGE.md` §13 item 5)?
-   Blocks Phase 5.
+4. ~~Exact array-manipulation stdlib surface.~~ **Resolved during Phase 5**
+   (see its own entry in §5): `length`, `push`, `pop`, `reverse`, `map`,
+   `filter`, `reduce`, `sort` — all plain global functions, not methods
+   (`0.1`'s object model has no method-dispatch-on-primitives concept at
+   all). `push`/`pop` mutate in place; the rest return a new vector.
 5. **Exact matrix stdlib surface.** Multiply, transpose, elementwise
    arithmetic are the obvious Julia-flavored candidates — full list not
    yet confirmed. Blocks Phase 6.
@@ -344,7 +341,7 @@ stale for nine phases and then need a special pass to fix it.**
 | Cons operator (`[item \| list]`) | §1.2 | Done |
 | List comprehensions (single generator) | §1.2-4 | Done |
 | Vector-literal spread (`[...a, ...b]`) | §1.7 | Done |
-| Array-manipulation stdlib | §2.4 (list not yet final) | Not started |
+| Array-manipulation stdlib | §2.4 | Done |
 | Matrices (nested vectors + stdlib) | §1.5, §2.5 (list not yet final) | Not started |
 | Property `pub`/`mut` modifiers | §1.8-10, §2.3 | Not started |
 | Method `pub`/private | §1.11, §2.3 | Not started |
@@ -576,9 +573,129 @@ runtime error, a full end-to-end hand-assembled reproduction matching
 `langspec/examples/spread.iqx` verified end to end through the real
 `iqaloxc`+`iqaloxvm` toolchain.
 
-**Phase 5 — Array-manipulation standard library.** Depends on Phases 1-2
-(indexing, lambdas) for anything map/filter/reduce-shaped. Needs §2.4
-resolved first.
+**Phase 5 — Array-manipulation standard library.** *Done.* Resolves §2.4:
+`length`, `push`, `pop`, `reverse`, `map`, `filter`, `reduce`, `sort`,
+decided live (via a design-questions round with the repository owner,
+following this project's "ask rather than guess" convention) rather than
+guessed from the original candidate list. Key decisions: plain global
+functions, not methods on vectors (`0.1`'s object model has no
+method-dispatch-on-primitives concept at all, and adding one is a much
+bigger change than a stdlib phase); `push`/`pop` mutate their vector
+argument in place (matching how `VectorAppend`/spread already treat
+vectors as mutable heap objects regardless of the binding's own `mut`
+status), the rest return a new vector; argument order is function-first
+for the four that take one (`map fn, v`, matching Lisp/mathematical
+convention over `push`'s own receiver-first shape); `reduce` always takes
+an explicit `initial` (`reduce fn, v, initial`) rather than silently
+seeding from the vector's first element; `sort` always takes an explicit
+comparator (`sort fn, v`, `fn(a, b)` truthy meaning "`a` sorts before
+`b`") rather than assuming a numbers-only default order, since `<`/`<=`
+only accept numbers today and teaching them about strings too is out of
+scope here.
+
+**A real gap in the first design-questions round, caught by the owner
+after the fact, not by this document's own review.** "Plain functions vs.
+methods on vectors" was framed as a binary, but that framing silently
+conflated two different things: instance-method dispatch on a primitive
+value (`v.push(x)`, which really does need a new object-model capability)
+and a *namespaced* access style (`Vector.push v, x`), which needs no such
+thing but *does* bear directly on `ROADMAP.md`'s already-planned `0.5`
+module support (`pub` is explicitly meant to "define what a module
+exports" then) -- a stdlib shipped now as flat, unconditionally-injected
+globals is a different starting point for that migration than one shipped
+under a namespace, or gated behind explicit inclusion, would be. Resolved
+via a second, correctly-scoped question: keep `0.2`'s array stdlib flat
+and always-available (matching `print`/`concat`'s precedent, cheapest
+now), explicitly logged as a deliberate stopgap rather than a silent
+default -- see the new bullet under `ROADMAP.md`'s `0.5` entry, to be
+revisited once real module support actually exists to make a namespaced
+or gated shape meaningful. Building either now would have meant starting
+`0.5`'s own module-design work early, inside this phase.
+
+**A second question raised during PR review, on the same "ask, don't
+guess" grounds**: is comma-separated no-parens multi-arg calling
+(`push v, 4`) actually the intended `0.2` design, or did it just carry
+forward unquestioned? Checked directly against `poc/src/parser.py`'s
+`call_head()` -- it's `0.1-poc`'s own original grammar, not something
+introduced by this phase or any `0.2` phase before it, and a
+whitespace-only alternative (`push v 4`, no comma) doesn't parse at all
+today (verified: `add 1 2` fails with `Expect line break or ';' after
+expression.`). Kept as-is for `0.2` -- logged as a real `0.3` revisit
+item on `ROADMAP.md` instead of decided inline, since dropping the comma
+is a breaking grammar change (needs its own answer for where a
+whitespace-only argument list ends) touching every existing example and
+the whole call-argument test suite, not something to fold into a
+stdlib-functions phase's docs fix.
+
+An architectural split feeds directly from a technical fact checked
+against the real VM before deciding anything: `Vm::callNative` invokes a
+native function's C++ implementation synchronously and expects a `Value`
+back immediately, while calling a closure only ever queues a new
+`CallFrame` for the *existing* bytecode dispatch loop to pick up later --
+there's no "call this closure and synchronously get its result" primitive
+a native could use. `push`/`pop`/`length`/`reverse` need no such thing
+(direct `ObjVector` element-list access, implemented as ordinary natives
+in `vm/src/natives.cpp`, registered the same way as `print`/`concat` was
+in Phase 7). `map`/`filter`/`reduce`/`sort` do need to call back into a
+user-supplied lambda -- rather than build a new, untested VM reentrant-call
+capability, they're ordinary Iqalox *source* (`compiler/src/Prelude.fs`,
+a plain embedded string), textually prepended to every program's own
+parsed statements (`Program.fs`) before one combined resolve/codegen
+pass -- each one is a completely unremarkable `fun` declaration, using
+`for`/lambda-calls/indexing/`push` exactly like any user program could,
+needing zero special-casing in `Resolver.fs` or `Codegen.fs` and no new
+opcodes at all. `push`/`pop`/`length`/`reverse` *are* added to
+`Resolver.fs`'s `nativeGlobals` (pre-registered, immutable, matching
+`print`/`concat`); `map`/`filter`/`reduce`/`sort` deliberately are not --
+an ordinary top-level `fun` already resolves to a protected global on its
+own, so redeclaring any of the eight is an "already declared" compile
+error either way.
+
+**A real, pre-existing parser bug was found and fixed** while writing the
+prelude's own source, blocking its `map fn, v`-shaped calls specifically
+when `fn` is a lambda in *non-last* argument position (verified this is
+genuinely pre-existing, not something Phase 1-4 introduced, by reproducing
+it against plain user-facing syntax with no prelude involved at all --
+`apply (x) -> x * 2, 5` on a fresh test file was already broken before any
+Phase 5 code existed). Root cause: a call argument is parsed via
+`Argument()`, which (unlike `[...]`'s own element-parsing) never
+suppressed the comma operator around itself -- so a lambda argument's own
+*unparenthesized* body, parsed through the full `Expression()` chain,
+would treat a bare comma as its own operator and silently swallow
+whatever argument was meant to follow it (`map (x) -> x * 2, v` produced
+a 1-argument call, not 2). Every existing Phase 2 lambda-as-call-argument
+test happened to put the lambda *last*, so nothing was ever after it to
+swallow. Fixed with the same `commaAsOperator` suppression `[...]`
+already uses, applied around `Argument()` itself; `Primary()`'s `Grouping`
+branch was given a matching, opposite fix (always *re-enabling* the comma
+operator for its own parenthesized contents, restoring the outer state
+afterward) so a legitimate parenthesized comma-tuple passed as a single
+argument (`f (a, b)`) -- or nested inside a vector literal (`[(a, b), c]`,
+previously silently broken the same way, just never noticed) -- keeps
+working exactly as before. Verified via the full existing xUnit suite
+(no regressions) plus new regression tests for both the bug and the fix's
+own boundary (parenthesized comma-tuples still working).
+
+Two known, accepted limitations logged rather than solved (`docs/LANGUAGE.md`
+§13 items 11-12): a one-line function body ending in a bare `return x`
+needs an explicit `;` before `}` (an ASI gap, found while writing the
+prelude in as few lines as reasonable -- ASI only ever fires on a real
+newline, ` }` doesn't imply one); and a runtime error raised from *inside*
+a prelude function's own body reports a line number relative to
+`Prelude.fs`'s own source text, not the user's file, since nothing in
+this pipeline has ever needed multi-file source-position tracking before
+now.
+
+23 new xUnit tests (5 parser: the swallowed-argument bug and its fix,
+the Grouping-comma-scope fix, both standalone and inside a vector
+literal; 6 prelude-specific: the embedded source scans/parses/resolves/
+compiles cleanly on its own, a user program can call all four as ordinary
+globals once merged, redeclaring any of them is an "already declared"
+error) and 10 new Catch2 tests (`push`/`pop`/`length`/`reverse` presence,
+happy path, mutation-vs-pure-return semantics, and non-vector-argument
+runtime errors for each). `langspec/examples/array_stdlib.iqx` verified
+end to end through the real `iqaloxc`+`iqaloxvm` toolchain, exercising
+all eight functions plus `sort`'s non-mutating contract.
 
 **Phase 6 — Matrices.** Nested-vector convention plus dedicated stdlib
 (multiply, transpose, elementwise ops — §2.5). Mostly a stdlib-layer

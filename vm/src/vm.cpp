@@ -32,6 +32,14 @@ Vm::Vm() { defineNatives(); }
 void Vm::defineNatives() {
     globals["print"] = objValue(allocate<ObjNativeFunction>("print", 1, nativePrint));
     globals["concat"] = objValue(allocate<ObjNativeFunction>("concat", 1, nativeConcat));
+    // docs/PLAN-0.2.md Phase 5: push/pop/length/reverse need direct access
+    // to an ObjVector's own element list, so they're true natives; map/
+    // filter/reduce/sort don't (see compiler/src/Prelude.fs) -- they're
+    // ordinary Iqalox functions the compiler prepends to every program.
+    globals["push"] = objValue(allocate<ObjNativeFunction>("push", 2, nativePush));
+    globals["pop"] = objValue(allocate<ObjNativeFunction>("pop", 1, nativePop));
+    globals["length"] = objValue(allocate<ObjNativeFunction>("length", 1, nativeLength));
+    globals["reverse"] = objValue(allocate<ObjNativeFunction>("reverse", 1, nativeReverse));
 }
 
 Vm::~Vm() {

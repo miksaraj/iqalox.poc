@@ -674,6 +674,33 @@ each was arrived at.
     once lambdas (`0.2`, `docs/PLAN-0.2.md` Phase 2) make "produce a
     callable value inline" common — an immediately-invoked lambda
     expression isn't currently expressible.
+11. **A one-line block whose last statement is a bare `return <value>`
+    needs an explicit trailing `;` before the closing `}`.** `Scanner.fs`'s
+    ASI only ever fires on an actual newline, so `fun f(x) { return x }`
+    (everything on one line) fails to parse (`Expect line break or ';'
+    after return value.`) — the closing `}` doesn't itself imply a
+    statement terminator. Writing the body across multiple lines (or an
+    explicit `; }`) works fine, and every fixture in this repository
+    already does one or the other, which is why this went unnoticed until
+    `docs/PLAN-0.2.md` Phase 5's array-stdlib prelude tried the single-line
+    form. Not fixed here — a real scanner change (teaching ASI that `}`
+    also implies a terminator, mirroring how many C-like languages'
+    "automatic semicolon insertion" rules work) with its own test surface,
+    out of scope for a stdlib-functions phase.
+12. **A runtime error raised from inside a `docs/PLAN-0.2.md` Phase 5
+    prelude function (`map`/`filter`/`reduce`/`sort`) reports a `[line N]`
+    relative to the prelude's own source text, not the user's file.**
+    `Program.fs` scans and parses `Prelude.fs`'s embedded source
+    separately from the user's own, purely so a failure in each can be
+    attributed correctly at *compile* time — but once both are merged
+    into one program and compiled to one `Chunk`, a *runtime* fault
+    raised from inside a prelude function's own closure body carries that
+    function's own internal line number (1-based within `Prelude.fs`'s
+    `source` string), with nothing to indicate it came from a different
+    "file" than the one the user is looking at. Not solved here — nothing
+    in this pipeline has ever needed multi-file source-position tracking
+    before now, and adding it is a bigger change than this stdlib phase's
+    own scope.
 
 The following `0.1-poc` limitations are **resolved** as of `0.1` (see
 `docs/LANGUAGE-POC.md` §13 for their original write-ups): no escape

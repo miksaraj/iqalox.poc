@@ -562,6 +562,201 @@ TEST_CASE("concat with a non-vector argument is a clean runtime error, not a cra
     REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
 }
 
+TEST_CASE("push/pop/length/reverse are present as globals without any user declaration", "[vm][natives]") {
+    // docs/PLAN-0.2.md Phase 5: true natives (need direct ObjVector
+    // access), unlike map/filter/reduce/sort which are ordinary Iqalox
+    // source (compiler/src/Prelude.fs) prepended to every program.
+    Vm vm;
+    REQUIRE(vm.getGlobal("push") != nullptr);
+    REQUIRE(vm.getGlobal("pop") != nullptr);
+    REQUIRE(vm.getGlobal("length") != nullptr);
+    REQUIRE(vm.getGlobal("reverse") != nullptr);
+}
+
+TEST_CASE("push appends in place and returns nil", "[vm][natives]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t pushName = b.addStringConstant("push");
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t two = b.addNumberConstant(2);
+    uint16_t vName = b.addStringConstant("v");
+    uint16_t pushResult = b.addStringConstant("pushResult");
+
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::BuildVector, 1);
+    b.emitU16(OpCode::DefineGlobal, vName);  // v = [1]
+
+    b.emitU16(OpCode::GetGlobal, pushName);
+    b.emitU16(OpCode::GetGlobal, vName);
+    b.emitU16(OpCode::Constant, two);
+    b.emitU16(OpCode::Call, 2);  // push(v, 2) -- mutates v, returns nil
+    b.emitU16(OpCode::DefineGlobal, pushResult);
+
+    vm.interpret(b.build());
+
+    REQUIRE(isNil(*vm.getGlobal("pushResult")));
+    const Value* vVal = vm.getGlobal("v");
+    auto& elements = static_cast<ObjVector*>(asObj(*vVal))->elements;
+    REQUIRE(elements.size() == 2);
+    REQUIRE(asNumber(elements[0]) == 1.0);
+    REQUIRE(asNumber(elements[1]) == 2.0);
+}
+
+TEST_CASE("push on a non-vector is a runtime error", "[vm][natives]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t pushName = b.addStringConstant("push");
+    uint16_t one = b.addNumberConstant(1);
+
+    b.emitU16(OpCode::GetGlobal, pushName);
+    b.emitU16(OpCode::Constant, one);  // receiver = 1, not a vector
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::Call, 2);
+
+    REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
+}
+
+TEST_CASE("pop removes and returns the last element in place", "[vm][natives]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t popName = b.addStringConstant("pop");
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t two = b.addNumberConstant(2);
+    uint16_t vName = b.addStringConstant("v");
+    uint16_t popResult = b.addStringConstant("popResult");
+
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::Constant, two);
+    b.emitU16(OpCode::BuildVector, 2);
+    b.emitU16(OpCode::DefineGlobal, vName);  // v = [1, 2]
+
+    b.emitU16(OpCode::GetGlobal, popName);
+    b.emitU16(OpCode::GetGlobal, vName);
+    b.emitU16(OpCode::Call, 1);
+    b.emitU16(OpCode::DefineGlobal, popResult);
+
+    vm.interpret(b.build());
+
+    REQUIRE(asNumber(*vm.getGlobal("popResult")) == 2.0);
+    const Value* vVal = vm.getGlobal("v");
+    auto& elements = static_cast<ObjVector*>(asObj(*vVal))->elements;
+    REQUIRE(elements.size() == 1);
+    REQUIRE(asNumber(elements[0]) == 1.0);
+}
+
+TEST_CASE("pop from an empty vector is a runtime error", "[vm][natives]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t popName = b.addStringConstant("pop");
+
+    b.emitU16(OpCode::GetGlobal, popName);
+    b.emitU16(OpCode::BuildVector, 0);
+    b.emitU16(OpCode::Call, 1);
+
+    REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
+}
+
+TEST_CASE("pop on a non-vector is a runtime error", "[vm][natives]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t popName = b.addStringConstant("pop");
+    uint16_t one = b.addNumberConstant(1);
+
+    b.emitU16(OpCode::GetGlobal, popName);
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::Call, 1);
+
+    REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
+}
+
+TEST_CASE("length returns the element count, first user-facing exposure of VectorLength's own logic", "[vm][natives]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t lengthName = b.addStringConstant("length");
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t two = b.addNumberConstant(2);
+    uint16_t three = b.addNumberConstant(3);
+    uint16_t result = b.addStringConstant("result");
+
+    b.emitU16(OpCode::GetGlobal, lengthName);
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::Constant, two);
+    b.emitU16(OpCode::Constant, three);
+    b.emitU16(OpCode::BuildVector, 3);
+    b.emitU16(OpCode::Call, 1);
+    b.emitU16(OpCode::DefineGlobal, result);
+
+    vm.interpret(b.build());
+
+    REQUIRE(asNumber(*vm.getGlobal("result")) == 3.0);
+}
+
+TEST_CASE("length on a non-vector is a runtime error", "[vm][natives]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t lengthName = b.addStringConstant("length");
+    uint16_t one = b.addNumberConstant(1);
+
+    b.emitU16(OpCode::GetGlobal, lengthName);
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::Call, 1);
+
+    REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
+}
+
+TEST_CASE("reverse returns a new vector, leaving the original untouched", "[vm][natives]") {
+    // docs/PLAN-0.2.md Phase 5: push/pop mutate (classic stack ops);
+    // reverse reads as a pure transformation, so it returns new instead.
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t reverseName = b.addStringConstant("reverse");
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t two = b.addNumberConstant(2);
+    uint16_t three = b.addNumberConstant(3);
+    uint16_t vName = b.addStringConstant("v");
+    uint16_t result = b.addStringConstant("result");
+
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::Constant, two);
+    b.emitU16(OpCode::Constant, three);
+    b.emitU16(OpCode::BuildVector, 3);
+    b.emitU16(OpCode::DefineGlobal, vName);  // v = [1, 2, 3]
+
+    b.emitU16(OpCode::GetGlobal, reverseName);
+    b.emitU16(OpCode::GetGlobal, vName);
+    b.emitU16(OpCode::Call, 1);
+    b.emitU16(OpCode::DefineGlobal, result);
+
+    vm.interpret(b.build());
+
+    const Value* resultVal = vm.getGlobal("result");
+    auto& reversedElements = static_cast<ObjVector*>(asObj(*resultVal))->elements;
+    REQUIRE(reversedElements.size() == 3);
+    REQUIRE(asNumber(reversedElements[0]) == 3.0);
+    REQUIRE(asNumber(reversedElements[1]) == 2.0);
+    REQUIRE(asNumber(reversedElements[2]) == 1.0);
+
+    const Value* vVal = vm.getGlobal("v");
+    auto& originalElements = static_cast<ObjVector*>(asObj(*vVal))->elements;
+    REQUIRE(originalElements.size() == 3);
+    REQUIRE(asNumber(originalElements[0]) == 1.0);
+    REQUIRE(asNumber(originalElements[1]) == 2.0);
+    REQUIRE(asNumber(originalElements[2]) == 3.0);
+}
+
+TEST_CASE("reverse on a non-vector is a runtime error", "[vm][natives]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t reverseName = b.addStringConstant("reverse");
+    uint16_t one = b.addNumberConstant(1);
+
+    b.emitU16(OpCode::GetGlobal, reverseName);
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::Call, 1);
+
+    REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
+}
+
 TEST_CASE("VectorLength pushes the element count of a vector", "[vm]") {
     // docs/PLAN-0.2.md Phase 3: an internal-only primitive, never emitted
     // by any surface syntax -- only Codegen.fs's desugared Cons/
