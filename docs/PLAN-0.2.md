@@ -102,6 +102,19 @@ overwriting the earlier text.
    expected to apply to classes themselves then too (private-by-default at
    the module level, defining what a module actually exports) — called
    out explicitly on `ROADMAP.md`'s `0.5` entry now so it isn't forgotten.
+
+   **Necessary consequence, not separately asked about: `0.1`'s "a field
+   springs into existence on first assignment" model is gone.** Decision
+   10's access table only makes sense if `self.x`/`instance.x` always
+   refers to a *declared* property with known `pub`/`mut` flags to check
+   against — an undeclared, implicitly-created field would have no
+   visibility/mutability metadata at all, silently bypassing the whole
+   mechanism. So every property a `0.2` class uses must have a `var`
+   declaration somewhere in the class body; a bare `self.x = value` with
+   no matching declaration is a compile-time error, the same category of
+   error as assigning to an undeclared local. This is inferred from
+   decision 10's own internal logic rather than a separate, explicit
+   answer — flag it if declared-only state wasn't actually intended.
 9. **Property immutability is enforced at runtime, "assign at most once,
    ever" — not compile-time, and not "once per instance is fine as long as
    it's early."** `0.1`'s local-variable immutability is a compile-time
@@ -326,12 +339,32 @@ self-contained (class-system-only) changes and don't block the
 array/stdlib work at all — feel free to swap their order if you'd rather
 tackle the biggest risk first instead of last.
 
-**Phase 0 — `langspec/` versioning move.** Move `0.1`'s current
+**Phase 0 — `langspec/` versioning move.** *Done.* Moved `0.1`'s
 `langspec/` snapshot (grammar docs + examples) into `langspec/versions/0.1/`
-(decision 13) before anything else changes what's at the top level —
-mirrors `docs/PLAN-0.1.md`'s own Phase 0 (repository reorganization)
-pattern of doing the structural move first, separately from any feature
-work, so it's easy to review on its own.
+(decision 13) — mirroring `docs/PLAN-0.1.md`'s own Phase 0 (repository
+reorganization) pattern of doing the structural move first, separately
+from any feature work. A light accuracy pass came first (the pre-move
+`langspec/README.md`/`SYNTAX_GRAMMAR.md` still described `0.1-poc`, not
+the real, shipped `0.1` — `0.1`'s four additions over `0.1-poc` are
+semantic, not grammatical, so the BNF itself needed no changes, just the
+prose). Per owner request, this phase also went further than the move
+alone: the new top-level `langspec/SYNTAX_GRAMMAR.md`, a repurposed
+`langspec/README.md` (now a directory-navigation guide rather than a
+version-specific spec), and a full `langspec/examples/*.iqx` set
+exercising every decision in §1 were all written now, ahead of Phases
+1-8 actually implementing any of it — a deliberate spec-first departure
+from this document's original Phase 9 framing ("the current, `0.2`-syntax
+top-level examples become a `compiler/`+`vm/`-only check" was written
+assuming that wiring would happen at the *end*). To keep CI green through
+Phases 1-8, `scripts/conformance-test.sh`, `scripts/phase7-run-smoke-test.sh`,
+the CI `poc` job, and `.github/workflows/release.yml`'s example-bundling
+step all point at `langspec/versions/0.1/examples/` for now (verified:
+both scripts still pass against it) — flipping back to the top-level
+`langspec/examples/` once `0.2` fully lands remains Phase 9's job. One
+necessary-but-unstated consequence surfaced while writing property
+examples: decision 8's addendum (§1) now spells out that undeclared,
+implicitly-created fields (`0.1`'s model) can't coexist with the
+pub/mut access table, so `0.2` requires every property to be declared.
 
 **Phase 1 — Indexing.** `v[i]` read/write, bounds-checked, 0-based. New
 postfix grammar on any primary expression (not just identifiers — `f()[0]`

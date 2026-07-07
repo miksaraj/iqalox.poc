@@ -30,7 +30,7 @@ cmake --build vm/build --target iqaloxvm -j
 Either way, running a program is a two-step pipeline — compile to bytecode, then run it:
 
 ```sh
-iqaloxc langspec/examples/classes.iqx classes.iqbc
+iqaloxc langspec/versions/0.1/examples/classes.iqx classes.iqbc
 iqaloxvm classes.iqbc
 ```
 

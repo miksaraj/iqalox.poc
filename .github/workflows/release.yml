@@ -63,7 +63,12 @@ jobs:
           cp dist/Iqaloxc "$name/iqaloxc"
           cp vm/build/iqaloxvm "$name/"
           cp README.md LICENSE "$name/"
-          cp -r langspec/examples "$name/examples"
+          # langspec/versions/0.1/examples/, not the top-level
+          # langspec/examples/: while 0.2 is mid-flight the top level holds
+          # its target-spec examples, which these 0.1 binaries can't run
+          # yet (docs/PLAN-0.2.md). Flip back to the top-level dir once a
+          # release actually ships 0.2.
+          cp -r langspec/versions/0.1/examples "$name/examples"
           tar czf "$name.tar.gz" "$name"
           gh release upload "${{ github.event.release.tag_name }}" "$name.tar.gz" --clobber --repo "${{ github.repository }}"
 
@@ -81,6 +86,11 @@ jobs:
           Copy-Item dist/Iqaloxc.exe "$name/iqaloxc.exe"
           Copy-Item vm/build/Release/iqaloxvm.exe "$name/"
           Copy-Item README.md,LICENSE "$name/"
-          Copy-Item -Recurse langspec/examples "$name/examples"
+          # langspec/versions/0.1/examples/, not the top-level
+          # langspec/examples/: while 0.2 is mid-flight the top level holds
+          # its target-spec examples, which these 0.1 binaries can't run
+          # yet (docs/PLAN-0.2.md). Flip back to the top-level dir once a
+          # release actually ships 0.2.
+          Copy-Item -Recurse langspec/versions/0.1/examples "$name/examples"
           Compress-Archive -Path $name -DestinationPath "$name.zip"
           gh release upload "${{ github.event.release.tag_name }}" "$name.zip" --clobber --repo "${{ github.repository }}"

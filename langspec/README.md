@@ -1,68 +1,67 @@
-# Iqalox Proof-of-Concept
+# `langspec/` — the Iqalox language specification
 
-The first iteration of **Iqalox** development. The overarching intention is to address
-the most glaring features omitted in the educational toy language that is *Lox*, as
-well as steer it more into a direction more amenable to the author's personal
-preferences.
+This directory holds the **language specification**: the syntax grammar, a directory
+README (this file) explaining how to navigate the spec itself, and runnable example
+programs — kept independent of any one implementation (`poc/`, `compiler/`+`vm/`). See
+the root `README.md` for the lexical grammar and precedence table, `../ROADMAP.md` for
+the full version plan, and `../CLAUDE.md` for the repo-wide conventions this directory
+follows.
 
-This directory holds the language specification (this README, `SYNTAX_GRAMMAR.md`,
-and the runnable examples under `examples/`) for the **current** target, `0.1-poc`.
-See `../ROADMAP.md` for the full version plan and `../docs/PLAN-0.1-POC.md` for the
-detailed, up-to-date status of this milestone. `archived/` holds frozen snapshots of
-earlier planning iterations — historical record, not the current spec.
+## Directory layout
 
-## `0.1-poc` — implemented
+```
+langspec/
+├── README.md            this file
+├── SYNTAX_GRAMMAR.md     current active-target version's grammar
+├── examples/             current active-target version's example programs
+├── versions/             frozen snapshots of versions that have fully shipped
+│   └── 0.1/
+│       ├── README.md
+│       ├── SYNTAX_GRAMMAR.md
+│       └── examples/
+└── archived/             unrelated: pre-renumbering planning-era snapshots (see below)
+    ├── 0.1/
+    ├── 0.2/
+    └── 0.3/
+```
 
-- Arrays: vector literals only (`[1, 2, 3]`) — no indexing, mutation, or stdlib
-  methods yet (full array support is `0.2`)
-- Block comments (`<# ... #>`) and line comments (`# ...`)
-- Implicit semicolons (a newline ends a statement, same as a real `;`)
-- `continue` and `break`, usable anywhere an expression is (including as a
-  ternary branch), since there's no separate loop-statement machinery for
-  them to be special-cased inside
-- Prefix increment/decrement (`++x` / `--x`) with standard mutating semantics;
-  reassigning an immutable (`mut`-less) target is a runtime error
-- `extends` for single inheritance, `super.method()` for calling up to it
-- Chainable ternary (`? :`, plus the elvis short form `?:`) **completely
-  replaces** `if`/`else` — there is no `if` statement
-- `while` does not exist — `for` is the only loop construct
-- **No function call — builtin or user-defined — takes parentheses.** See
-  `SYNTAX_GRAMMAR.md`'s notes and `../docs/PLAN-0.1-POC.md` decision 4 for
-  the full grammar (grouping parens for compound arguments, `()` as an
-  explicit zero-arg marker, comma-separated arguments, fixed arity, no
-  currying)
-- No string concatenation via `+` (numbers only); use `concat` for strings
-- Pipe operator (`|>`)
-- Ignore operator (`_`)
-- Nullable infix operator (`??`)
-- Modulo (`%`) and power (`^`), at the same precedence as `*`/`/`
-- Comma operator
-- Immutability by default (`var x` is immutable; `var x mut` opts in)
-- The self-reference keyword is `self`, not `this`
-- `print`/`concat` are ordinary builtin function bindings, not keywords —
-  callable, shadowable, passable like any other function value
-- Classes: declarations, fields (freely mutable, no `mut` concept for them),
-  methods, constructors (`init`), single inheritance, `super` — baseline Lox
-  method dispatch, nothing fancier
+- **Top level** (`README.md`, `SYNTAX_GRAMMAR.md`, `examples/`) is the **current active
+  target** — right now, `0.2` (`../docs/PLAN-0.2.md`). "Active target" means this is
+  what the language is being designed and built *towards*, not necessarily what's fully
+  implemented yet: `compiler/`+`vm/` land `0.2`'s features incrementally across several
+  phases, and `../docs/PLAN-0.2.md` §4's feature checklist tracks exactly what's landed
+  so far. Until every phase lands, the top-level `examples/` describe the target spec
+  and may not yet run against `compiler/`+`vm/` — see `../CLAUDE.md`'s "Example scripts"
+  convention for how this is tracked during the transition.
+- **`versions/<version>/`** holds a frozen, complete snapshot of a version's spec once
+  it has fully shipped and the next version's work begins moving the top level forward.
+  Each snapshot is a full copy of what the top level looked like at that version's
+  release — its own `README.md`, `SYNTAX_GRAMMAR.md`, and `examples/`. Currently just
+  `versions/0.1/`, moved here when `0.2` planning began
+  (`../docs/PLAN-0.2.md` decision 13, Phase 0).
+- **`archived/<version>/`** is a **different, unrelated thing** — don't confuse the two.
+  These are frozen snapshots from *before* `../ROADMAP.md`'s version renumbering
+  decision: early planning drafts of what "`0.1`," "`0.2`," "`0.3`" meant back when that
+  document was first being written, which do **not** correspond to the real, shipped
+  versions of the same name today (see `../ROADMAP.md`'s "Old → new version mapping"
+  table for the full translation). They're kept purely as a historical record of how
+  the plan evolved, and are never edited or added to. This naming collision with
+  `versions/` is exactly why `versions/` was named the way it was, rather than reusing
+  a bare version number at the top of `langspec/` itself.
+- **`examples/`** (wherever it appears — top level or inside a `versions/<n>/`
+  snapshot) holds cross-implementation conformance fixtures: the same `.iqx` source,
+  expected to produce the same output regardless of which implementation runs it (where
+  more than one implementation can run it at all — see `../CLAUDE.md`).
 
-## Explicitly out of scope for `0.1-poc`
+## Finding what you're looking for
 
-Deferred to `0.2` (see `../ROADMAP.md`):
-
-- Matrix support and the full array-manipulation standard library (list
-  comprehensions, indexing, mutation)
-- Maps and sets
-- Anonymous function literals (lambdas/closures) — distinct from the named
-  nested-function closures already supported
-- Variadic unpacking (`...`)
-- Getters/setters (forced or optional — still an open question)
-- Mixin support (`class A extends B with C`, `A with B`) and trait support
-  (`trait A {...}` / `class B { use A }`)
-
-## Breaking changes vs. Lox
-
-- `extends` instead of `<` for inheritance
-- Chainable ternary operator (`? :` / `?:`) instead of `if`/`else`
-- No string concatenation via `+`; use `concat` (array-manipulation
-  standard library methods, once they exist, will offer more)
-- No parenthesized function calls anywhere in the grammar
+- **"What does Iqalox actually do today, as shipped?"** → `../docs/LANGUAGE.md` (the
+  full prose reference for `0.1`, the current primary implementation) — or, for the
+  terser grammar-level equivalent, `versions/0.1/SYNTAX_GRAMMAR.md` and
+  `versions/0.1/examples/`.
+- **"What's being planned/built for the next version?"** → this directory's top-level
+  `SYNTAX_GRAMMAR.md` and `examples/`, alongside `../docs/PLAN-0.2.md` for the design
+  decisions, open questions, and implementation status behind them.
+- **"What did an early planning draft look like, before versions got renumbered?"** →
+  `archived/<version>/` — but read `../ROADMAP.md`'s renumbering note first so the
+  version number there isn't mistaken for today's version of the same name.
