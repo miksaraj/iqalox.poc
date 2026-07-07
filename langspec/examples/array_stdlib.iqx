@@ -7,15 +7,15 @@
 #>
 
 var v = [1, 2, 3]
-print length(v)
+print length v
 
 push v, 4
 print v
 
-print pop(v)
+print pop v
 print v
 
-print reverse(v)
+print reverse v
 print v
 
 var doubled = map (x) -> x * 2, v

@@ -157,6 +157,18 @@ plan — design decisions, open questions, and phased sequencing:
   guard-expression syntax, e.g. whether `not` is real or just informal
   pseudocode for "not equal," still needs pinning down when this starts)
 - First set of compiler optimizations (see below)
+- **Revisit whether the comma should be a no-parens multi-argument call's
+  separator at all** (`push v, 4`, `map fn, v, initial`), and whether a
+  lambda's own parameter list needs one either (`(a, b) -> ...`). Both are
+  `0.1-poc`'s original design (`poc/src/parser.py`'s `call_head()`),
+  faithfully carried through every phase since — not something that crept
+  in during `0.2`. Raised by the repository owner while reviewing Phase
+  5's array-stdlib examples; kept as-is for `0.2` (comma stays the
+  separator) since dropping it is a real breaking grammar change — a
+  whitespace-only argument list needs its own answer for where it ends
+  (is `f a b + c` a third argument `b + c`, or `+ c` applied to `f a b`'s
+  result?) — touching every existing example and the whole call-argument
+  test suite, not a small tweak to make inline while reviewing a doc fix.
 
 ### 0.4 *(formerly `0.3`)*
 

@@ -612,6 +612,21 @@ revisited once real module support actually exists to make a namespaced
 or gated shape meaningful. Building either now would have meant starting
 `0.5`'s own module-design work early, inside this phase.
 
+**A second question raised during PR review, on the same "ask, don't
+guess" grounds**: is comma-separated no-parens multi-arg calling
+(`push v, 4`) actually the intended `0.2` design, or did it just carry
+forward unquestioned? Checked directly against `poc/src/parser.py`'s
+`call_head()` -- it's `0.1-poc`'s own original grammar, not something
+introduced by this phase or any `0.2` phase before it, and a
+whitespace-only alternative (`push v 4`, no comma) doesn't parse at all
+today (verified: `add 1 2` fails with `Expect line break or ';' after
+expression.`). Kept as-is for `0.2` -- logged as a real `0.3` revisit
+item on `ROADMAP.md` instead of decided inline, since dropping the comma
+is a breaking grammar change (needs its own answer for where a
+whitespace-only argument list ends) touching every existing example and
+the whole call-argument test suite, not something to fold into a
+stdlib-functions phase's docs fix.
+
 An architectural split feeds directly from a technical fact checked
 against the real VM before deciding anything: `Vm::callNative` invokes a
 native function's C++ implementation synchronously and expects a `Value`
