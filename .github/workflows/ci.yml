@@ -64,7 +64,7 @@ jobs:
         run: cd poc && pytest
       - name: Run every example script
         run: |
-          for f in langspec/examples/*.iqx; do
+          for f in langspec/versions/0.1/examples/*.iqx; do
             python3 poc/src/iqalox.py "$f"
           done
 

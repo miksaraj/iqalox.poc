@@ -1,0 +1,72 @@
+<#
+    Mixin (`with`) and trait (`trait`/`use`) composition (0.2), split by
+    keyword etymology: `trait`/`use` is PHP-style static copying,
+    `with`-only mixins are Scala-style dynamic linearization. See
+    docs/PLAN-0.2.md decision 12. Conflict-resolution and
+    linearization-order semantics are still open
+    (docs/PLAN-0.2.md open questions 1-2) -- this only exercises the
+    syntax, not any conflicting-member scenario.
+#>
+
+trait Flyable {
+    pub fly() {
+        print "Flying!"
+    }
+}
+
+trait Swimmable {
+    pub swim() {
+        print "Swimming!"
+    }
+}
+
+# `use` statically copies a trait's members in at class-declaration time.
+class Duck {
+    use Flyable, Swimmable
+
+    pub quack() {
+        print "Quack!"
+    }
+}
+
+var duck = Duck()
+duck.fly()
+duck.swim()
+duck.quack()
+
+# `with`-only mixins compose dynamically instead, closer to real
+# multiple inheritance -- usable standalone, with no `extends` at all...
+class Named {
+    pub greet() {
+        print "Hello!"
+    }
+}
+
+class Robot with Named {
+    pub beep() {
+        print "Beep boop."
+    }
+}
+
+var robot = Robot()
+robot.greet()
+robot.beep()
+
+# ...or combined with `extends`, per ROADMAP.md's original sketch
+# (`class A extends B with C`).
+class Vehicle {
+    pub honk() {
+        print "Honk!"
+    }
+}
+
+class FlyingCar extends Vehicle with Flyable {
+    pub drive() {
+        print "Driving."
+    }
+}
+
+var car = FlyingCar()
+car.honk()
+car.fly()
+car.drive()

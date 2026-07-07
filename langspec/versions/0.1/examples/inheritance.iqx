@@ -1,17 +1,10 @@
-# Inheritance, updated for 0.2's method visibility (docs/PLAN-0.2.md
-# decision 11): every method called from outside its own class needs an
-# explicit `pub`. `init` is exempt -- always externally callable
-# regardless of any `pub` annotation -- and a `super.method()` call from
-# within a subclass's own method doesn't need `pub` either, since it's
-# an internal call relative to the class hierarchy, not an external one.
-
 # superclass A
 class A {
-    pub show() {
+    show() {
         print "A"
     }
 
-    pub test() {
+    test() {
         print "Hey there, stranger!"
     }
 }
@@ -22,11 +15,11 @@ class B extends A {
         print "This is the initializer."
     }
 
-    pub subShow() {
+    subShow() {
         print "B"
     }
 
-    pub test() {
+    test() {
         print "About to call superclass version of test."
         super.test()
     }
@@ -47,13 +40,13 @@ C().test()
 
 # A little bit tastier example...
 class Doughnut {
-    pub cook() {
+    cook() {
         print "Fry until golden brown."
     }
 }
 
 class BostonCream extends Doughnut {
-    pub cook() {
+    cook() {
         super.cook()
         print "Stuff with tasty cream."
     }

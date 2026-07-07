@@ -25,12 +25,26 @@ across Iqalox's versions**:
 
 Implementation-agnostic material stays at the repository root:
 
-- `langspec/` — the language specification: syntax grammar, lexical grammar,
-  precedence rules, and per-version `README.md`s. `langspec/archived/` holds
-  frozen snapshots of earlier planning iterations (0.1, 0.2, 0.3) — historical
-  record, not to be edited. `langspec/examples/*.iqx` are cross-implementation
-  conformance fixtures — same input, same expected output, regardless of
-  which implementation runs them.
+- `langspec/` — the language specification: syntax grammar and runnable
+  examples, for whichever version is the **current active target** (right
+  now, `0.2` — see `docs/PLAN-0.2.md`). "Active target" can run ahead of
+  what's actually implemented in `compiler/`+`vm/` during a version's
+  phased rollout; check that version's `docs/PLAN-0.X.md` §4 feature
+  checklist for what has actually landed. `langspec/README.md` explains
+  the directory's own layout in full. Two kinds of frozen snapshots live
+  alongside the current spec, and they are **not the same thing**:
+  `langspec/versions/<version>/` holds a complete, frozen copy of a
+  version's spec once it has fully shipped (currently just `versions/0.1/`,
+  moved there when `0.2` planning began, `docs/PLAN-0.2.md` decision 13);
+  `langspec/archived/` holds unrelated frozen snapshots of pre-renumbering
+  *planning* iterations (0.1, 0.2, 0.3, per `ROADMAP.md`'s own renumbering
+  note) — historical record, not to be edited, and not a version-by-version
+  spec history the way `versions/` is. `langspec/examples/*.iqx` (wherever
+  they appear — top level or inside a `versions/<n>/` snapshot) are
+  cross-implementation conformance fixtures — same input, same expected
+  output, regardless of which implementation runs them, *when* more than
+  one implementation can run them at all (see the "Example scripts" bullet
+  below for what that means while a version's features are still landing).
 - `ROADMAP.md` — the version roadmap (0.1-poc onward).
 - `docs/` — implementation planning docs (`docs/PLAN-0.1-POC.md` for
   `0.1-poc`, `docs/PLAN-0.1.md` for `0.1`); `docs/LANGUAGE.md` for the
@@ -95,12 +109,15 @@ Don't hand-edit the structure of the generated classes directly — the next
 regeneration will silently discard the change. (Bug fixes to
 `generate_ast.py`'s templating are fine, just regenerate afterward.)
 
-`langspec/SYNTAX_GRAMMAR.md` is kept in sync with `poc/src/parser.py` as of
-this writing (see its own header notes for anything still flagged stale).
-Keep it and the language README in sync as grammar actually lands in
-whichever implementation currently leads — but don't treat a stale grammar
-doc as authorization to implement something differently than what's
-actually specified elsewhere.
+`langspec/SYNTAX_GRAMMAR.md` tracked `poc/src/parser.py` while `0.1-poc` was
+the active target; as of `0.2` planning, the top-level `langspec/` describes
+the **active-target spec**, which is written ahead of `compiler/`+`vm/`
+actually implementing it and moved to `langspec/versions/<version>/` once a
+version fully ships (see the `langspec/` bullet above and
+`langspec/README.md`). Don't treat a target-spec grammar doc as
+authorization to implement something differently than what's actually
+decided elsewhere, and don't assume everything it describes already works —
+check the relevant `docs/PLAN-0.X.md` §4 feature checklist first.
 
 ## Architecture (`compiler/` + `vm/`, 0.1)
 
@@ -240,8 +257,12 @@ identical output to `poc`.
   `docs/PLAN-0.1-POC.md` §5 if that ever needs revisiting.
 - **`compiler/`/`vm/` testing**: xUnit (F#) and Catch2 (C++) respectively,
   per `docs/PLAN-0.1.md` §7 — plus `scripts/conformance-test.sh` (Phase 9),
-  a CI job running every `langspec/examples/*.iqx` fixture through both
-  `poc/` and `compiler/`+`vm/` and diffing output byte-for-byte.
+  a CI job running every `langspec/versions/0.1/examples/*.iqx` fixture
+  through both `poc/` and `compiler/`+`vm/` and diffing output
+  byte-for-byte. Points at the frozen `0.1` snapshot rather than the
+  top-level `langspec/examples/`, since `poc/` is frozen forever at
+  `0.1-poc`-equivalent grammar and can never parse a later active-target
+  spec's examples (see the `langspec/` bullet above).
 - **`compiler/` F# style**: targets the current F# language version (F# 10
   as of .NET 10) — prefer newer idioms where they cleanly simplify existing
   code (e.g. a discriminated union's auto-generated `.IsCaseName` property,
@@ -250,11 +271,20 @@ identical output to `poc`.
   force-fit a newer feature where it doesn't clearly help, though — e.g.
   nullable reference types (F# 9) have no real application here, since this
   codebase doesn't interoperate with null-returning APIs.
-- **Example scripts**: live in `langspec/examples/*.iqx` (current) —
-  `langspec/archived/*/examples/*.iqlx` used the old extension and are
-  frozen. These are cross-implementation conformance fixtures: keep them
-  runnable as features land in *any* implementation; if an example depends
-  on an unresolved design question, leave a note rather than changing the
+- **Example scripts**: live in `langspec/examples/*.iqx` (current
+  active-target version) — `langspec/archived/*/examples/*.iqlx` used the
+  old extension and are frozen, unrelated pre-renumbering planning
+  snapshots (see the `langspec/` bullet above), not the same thing as
+  `langspec/versions/<version>/examples/`'s per-version snapshots. These
+  are cross-implementation conformance fixtures: keep them runnable as
+  features land in *any implementation that has actually reached that
+  version*. While a version is still being phased into `compiler/`+`vm/`
+  (`docs/PLAN-0.X.md` §5), the top-level `examples/` describe that
+  version's target spec and are expected to be ahead of what currently
+  runs — CI is wired to exercise them against a real toolchain only once
+  their version fully ships (see `docs/PLAN-0.2.md`'s Phase 9 and the
+  scripts it points at in the meantime). If an example depends on an
+  unresolved design question, leave a note rather than changing the
   example to match a guess.
 - **Commit style**: short, lowercase, imperative summaries (see `git log`) —
   no enforced conventional-commits format.

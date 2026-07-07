@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 # Cross-implementation conformance test (docs/PLAN-0.1.md, Phase 9): builds
-# compiler/ and vm/, then runs every langspec/examples/*.iqx fixture through
-# both poc/ and the compiler/+vm/ pipeline, diffing their stdout
-# byte-for-byte. These fixtures are language-level, not implementation-
-# specific, so their output must match exactly across implementations --
-# behavioral drift is either an intentional 0.1-poc limitation being fixed
-# (expected, and should be noted rather than silently accepted here) or a
-# real regression worth catching immediately.
+# compiler/ and vm/, then runs every langspec/versions/0.1/examples/*.iqx
+# fixture through both poc/ and the compiler/+vm/ pipeline, diffing their
+# stdout byte-for-byte. These fixtures are language-level, not
+# implementation-specific, so their output must match exactly across
+# implementations -- behavioral drift is either an intentional 0.1-poc
+# limitation being fixed (expected, and should be noted rather than
+# silently accepted here) or a real regression worth catching immediately.
+#
+# Points at langspec/versions/0.1/examples/, not the top-level
+# langspec/examples/, since poc/ is frozen at 0.1-poc-equivalent grammar
+# forever (docs/PLAN-0.2.md decision 13/§2.6) while the top-level examples
+# are now the 0.2 target spec -- poc/ can never parse those.
 #
 # Distinct from scripts/phase7-run-smoke-test.sh, which only checks that
 # compiler/+vm/ runs each fixture to completion (exit 0) -- this script is
@@ -28,7 +33,7 @@ cmake -S "$repo_root/vm" -B "$repo_root/vm/build" -DCMAKE_BUILD_TYPE=Debug >/dev
 cmake --build "$repo_root/vm/build" -j"$(nproc)" >/dev/null
 
 failed=0
-for source in "$repo_root"/langspec/examples/*.iqx; do
+for source in "$repo_root"/langspec/versions/0.1/examples/*.iqx; do
     name="$(basename "$source")"
     echo "==> Comparing $name"
 
@@ -44,8 +49,8 @@ for source in "$repo_root"/langspec/examples/*.iqx; do
 done
 
 if [ "$failed" -ne 0 ]; then
-    echo "FAIL: one or more langspec/examples/*.iqx fixtures produced diverging output"
+    echo "FAIL: one or more langspec/versions/0.1/examples/*.iqx fixtures produced diverging output"
     exit 1
 fi
 
-echo "OK: every langspec/examples/*.iqx fixture produces identical output in poc/ and compiler/+vm/"
+echo "OK: every langspec/versions/0.1/examples/*.iqx fixture produces identical output in poc/ and compiler/+vm/"
