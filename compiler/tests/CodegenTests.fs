@@ -311,3 +311,75 @@ let ``a lambda compiles to a Closure over an implicit-return function, no new op
         Assert.Equal<Instruction[]>([| GetLocal 0; GetLocal 0; Multiply; Return; Nil; Return |], proto.Chunk.Code)
     | other -> failwith $"expected a FunctionConstant, got %A{other}"
     Assert.Equal<Constant>(StringConstant "square", chunk.Constants.[1])
+
+[<Fact>]
+let ``cons compiles to a call of a synthetic closure, item and list evaluated in the enclosing scope`` () =
+    let chunk = compileSource "[1 | xs]"
+    Assert.Equal<Instruction[]>(
+        [| Closure(0, [])
+           Constant 1 // item = 1
+           GetGlobal 2 // "xs", evaluated in the enclosing scope
+           Call 2
+           Pop
+           Nil
+           Return |],
+        chunk.Code
+    )
+    match chunk.Constants.[0] with
+    | FunctionConstant proto ->
+        Assert.Equal("cons", proto.Name)
+        Assert.Equal(2, proto.Arity)
+        // The synthetic body: $result = [$item]; for ($index = 0; $index <
+        // len($list); ++$index) { $result.append($list[$index]); } return
+        // $result -- InternalVectorLength/InternalVectorAppend compile
+        // straight to VECTOR_LENGTH/VECTOR_APPEND, no loop-specific opcode
+        // needed.
+        Assert.Equal<Instruction[]>(
+            [| GetLocal 0 // $item
+               BuildVector 1 // $result = [$item]
+               Constant 0 // $index = 0
+               GetLocal 3 // condition: $index
+               GetLocal 1 // $list
+               VectorLength
+               Less
+               JumpIfFalse 22
+               Pop
+               GetLocal 2 // $result
+               GetLocal 1 // $list
+               GetLocal 3 // $index
+               GetIndex
+               VectorAppend
+               Nil
+               Pop
+               GetLocal 3 // increment: $index
+               Constant 1
+               Add
+               SetLocal 3
+               Pop
+               Jump 3
+               Pop
+               GetLocal 2 // return $result
+               Return
+               Nil
+               Return |],
+            proto.Chunk.Code
+        )
+    | other -> failwith $"expected a FunctionConstant, got %A{other}"
+
+[<Fact>]
+let ``list comprehension compiles to a call of a synthetic closure, source evaluated in the enclosing scope`` () =
+    let chunk = compileSource "[x * 2 | x <- xs]"
+    Assert.Equal<Instruction[]>(
+        [| Closure(0, [])
+           GetGlobal 1 // "xs", evaluated in the enclosing scope
+           Call 1
+           Pop
+           Nil
+           Return |],
+        chunk.Code
+    )
+    match chunk.Constants.[0] with
+    | FunctionConstant proto ->
+        Assert.Equal("comprehension", proto.Name)
+        Assert.Equal(1, proto.Arity)
+    | other -> failwith $"expected a FunctionConstant, got %A{other}"

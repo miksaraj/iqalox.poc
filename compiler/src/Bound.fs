@@ -69,6 +69,20 @@ type BoundExpr =
     /// lambda has no name to bind) and a body desugared to a single
     /// implicit `return` (`Resolver.fs`'s `Lambda` case).
     | BLambda of decl: BoundFunctionDecl
+    /// Internal-only primitives (`docs/PLAN-0.2.md` Phase 3) with no
+    /// surface syntax of their own -- `Resolver.fs` synthesizes them only
+    /// while desugaring `Cons`/`ListComprehension` (see its doc comment
+    /// on those cases for why: both need a real runtime loop over a
+    /// vector of unknown-at-compile-time length, which they get by
+    /// desugaring to a call of a synthetic closure built from ordinary
+    /// `var`/`for`/`return` statements -- these two are the only
+    /// primitives that don't already exist in that vocabulary). Wraps
+    /// `VectorLength`/`VectorAppend` directly; `BVectorAppendInternal`
+    /// evaluates to `Nil` (the opcode itself pushes nothing back) purely
+    /// so it satisfies the "every expression pushes one value" contract
+    /// when used as a bare `ExpressionStmt`.
+    | BVectorLengthInternal of vector: BoundExpr
+    | BVectorAppendInternal of vector: BoundExpr * value: BoundExpr
     | BSelf of binding: VariableBinding * keyword: Token
     | BSuper of selfBinding: VariableBinding * binding: VariableBinding * keyword: Token * method: Token
 

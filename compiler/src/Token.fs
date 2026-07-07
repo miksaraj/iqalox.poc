@@ -46,6 +46,8 @@ type TokenType =
     | QuestionMarkColon
     | DoubleQuestionMark
     | Pipe
+    | VerticalBar
+    | LeftArrow
 
     // Keywords.
     | And

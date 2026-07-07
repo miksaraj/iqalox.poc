@@ -114,6 +114,21 @@ type Instruction =
     /// constant, so neither opcode takes an operand at all.
     | GetIndex
     | SetIndex
+    /// Pops a vector, pushes its element count as a number -- a runtime
+    /// type error if the popped value isn't a vector. `docs/PLAN-0.2.md`
+    /// Phase 3: both `Cons` and list comprehensions need to loop a
+    /// runtime-determined number of times (the source vector's length
+    /// isn't known at compile time), which a fixed-operand `BuildVector`
+    /// can't express. Only `Codegen.fs`'s `BCons`/`BListComprehension`
+    /// compilation emits this -- no dedicated `BoundExpr` case for it.
+    | VectorLength
+    /// Pops a value, then pops a vector, appends the value to the
+    /// vector's own element list, and pushes nothing back. Since a
+    /// vector is a heap reference (`Obj*`), any other copy of the same
+    /// pointer already sitting elsewhere on the stack (e.g. an
+    /// accumulator local slot) observes the mutation immediately -- no
+    /// need to re-store anything after appending.
+    | VectorAppend
 
 type Constant =
     | NumberConstant of float
@@ -178,6 +193,8 @@ let private opcodeOf =
     | GetSuper _ -> 0x29uy
     | GetIndex -> 0x2Auy
     | SetIndex -> 0x2Buy
+    | VectorLength -> 0x2Cuy
+    | VectorAppend -> 0x2Duy
 
 /// Serialized byte length of one instruction -- see the module doc
 /// comment's "Instruction encoding" table.
@@ -205,7 +222,9 @@ let instructionByteLength (instruction: Instruction) : int =
     | Return
     | Inherit
     | GetIndex
-    | SetIndex -> 1
+    | SetIndex
+    | VectorLength
+    | VectorAppend -> 1
     | Closure(_, upvalues) -> 1 + 2 + 2 + (3 * List.length upvalues)
     | _ -> 3
 
@@ -281,7 +300,9 @@ let rec private writeChunk (writer: BinaryWriter) (chunk: Chunk) : unit =
         | Return
         | Inherit
         | GetIndex
-        | SetIndex -> ()
+        | SetIndex
+        | VectorLength
+        | VectorAppend -> ()
         | Constant i
         | PopN i
         | GetLocal i

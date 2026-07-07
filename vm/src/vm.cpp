@@ -588,6 +588,29 @@ void Vm::run() {
                 push(value);
                 break;
             }
+            case OpCode::VectorLength: {
+                Value receiver = pop();
+                if (!isObj(receiver) || asObj(receiver)->type != ObjType::Vector) {
+                    runtimeError("Only vectors have a length, got " + typeName(receiver) + ".");
+                }
+                push(numberValue(static_cast<double>(static_cast<ObjVector*>(asObj(receiver))->elements.size())));
+                break;
+            }
+            case OpCode::VectorAppend: {
+                Value value = pop();
+                Value receiver = pop();
+                // Only ever emitted by Codegen.fs's own BCons/
+                // BListComprehension loops onto an accumulator it just
+                // built with BuildVector -- never reachable with a
+                // non-vector receiver from any user-written program, so
+                // this is an internal-consistency check, not a
+                // user-facing type error.
+                if (!isObj(receiver) || asObj(receiver)->type != ObjType::Vector) {
+                    runtimeError("Internal error: VectorAppend on a non-vector.");
+                }
+                static_cast<ObjVector*>(asObj(receiver))->elements.push_back(value);
+                break;
+            }
         }
     }
 }

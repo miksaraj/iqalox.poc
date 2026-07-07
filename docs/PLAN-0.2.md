@@ -341,8 +341,8 @@ stale for nine phases and then need a special pass to fix it.**
 |---|---|---|
 | Vector indexing (`v[i]` get/set) | §1.6 | Done |
 | Lambdas (`(a, b) -> expr`) | §1.1 | Done |
-| Cons operator (`[item \| list]`) | §1.2 | Not started |
-| List comprehensions (single generator) | §1.2-4 | Not started |
+| Cons operator (`[item \| list]`) | §1.2 | Done |
+| List comprehensions (single generator) | §1.2-4 | Done |
 | Vector-literal spread (`[...a, ...b]`) | §1.7 | Not started |
 | Array-manipulation stdlib | §2.4 (list not yet final) | Not started |
 | Matrices (nested vectors + stdlib) | §1.5, §2.5 (list not yet final) | Not started |
@@ -446,8 +446,86 @@ non-lambda case, a lambda as a call argument, curried lambdas), 4 resolver
 needed at all, so the existing 58 Catch2 tests, the smoke test, and the
 conformance suite all stay untouched and green.
 
-**Phase 3 — Cons and list comprehensions.** `[item | list]`,
+**Phase 3 — Cons and list comprehensions.** *Done.* `[item | list]`,
 `[expr | pattern <- iterable]` (§1.3's single-generator, no-guards slice).
+Both share `Ast.fs`'s pre-existing `[...]` bracket syntax with plain vector
+literals and each other, disambiguated in `Parser.fs`'s `Primary()` purely
+by lookahead after a bare `|` (decision 2): an identifier immediately
+followed by `<-` means a comprehension, anything else means cons.
+`Token.fs`/`Scanner.fs` needed two new single/two-character tokens
+(`VerticalBar`, `LeftArrow`), both already distinct from their nearest
+lookalikes (`Pipe`'s `|>`, `Less`/`LessEqual`) via the scanner's existing
+longest-match table -- no bespoke lookahead there either.
+
+Both constructs need a real runtime loop over a vector whose length isn't
+known at compile time, which rules out compiling them as a fixed-operand
+`BuildVector`. Two new no-operand opcodes support that loop:
+`VectorLength` (pop a vector, push its element count, a runtime type error
+otherwise) and `VectorAppend` (pop a value and a vector, `push_back` the
+value into the vector's own heap-allocated element storage, push nothing
+back -- the mutation is visible through every other reference to the same
+`ObjVector*` for free, without ever needing to store the vector back
+anywhere).
+
+**A real design bug was found and fixed during implementation**, not
+caught by this document's original draft: the first attempt had
+`Resolver.fs` allocate hidden accumulator/index locals (`$result`,
+`$index`) directly in the *enclosing* scope, the same way an ordinary
+`var` gets a slot. That works when a `Cons`/`ListComprehension` sits at
+statement level (e.g. a `var` initializer) but silently corrupts stack
+addressing the moment one appears **mid-expression** -- e.g. as a call
+argument (`print [1 | []]`) -- because `Resolver.fs`'s static slot count
+has no visibility into transient values `Codegen.fs` pushes mid-expression
+(the callee itself, in that example), which already occupy stack positions
+the hidden locals' slot numbers didn't account for. Found via manual
+end-to-end testing (`var squares = [n * n | n <- ...]` worked; `print [1 |
+[]]` corrupted an unrelated global lookup into a runtime type error) rather
+than by any unit test, since every test at the time exercised these
+constructs only at statement level.
+
+Fixed by discarding the hidden-local design entirely and desugaring both
+constructs, in `Resolver.fs`, into a call of a synthetic, nameless closure
+-- exactly `Lambda`'s own desugaring (Phase 2), reused wholesale: `item`/
+`list` (or `source`, for a comprehension) are evaluated once, in the
+*enclosing* scope, and passed in as ordinary call arguments; everything
+the loop itself needs lives in the synthetic closure's own fresh
+`FunctionState`/`FunctionContext`, whose slot numbering is completely
+decoupled from whatever the enclosing expression already has on the stack
+-- the same isolation any nested closure already gets. Extracting the
+loop's final accumulator value out from under its own now-discarded locals
+falls out for free from `Return`'s existing native pop/truncate/push
+mechanism, needing no new opcode of its own. (An interim opcode,
+`PopNKeepTop`, was added and then fully removed once this became clear --
+never shipped, so it left nothing behind to migrate.) Two new internal-only
+`Ast.Expr`/`Bound.BoundExpr` node pairs
+(`InternalVectorLength`/`InternalVectorAppend` -> `BVectorLengthInternal`/
+`BVectorAppendInternal`) wrap `VectorLength`/`VectorAppend` for the
+synthetic closure's own body to call -- neither has any surface syntax of
+its own; `Resolver.fs` is the only place that ever synthesizes them.
+
+A comprehension's bound variable (`x` in `x <- xs`) is declared fresh
+inside the loop body's own block scope each iteration, exactly like any
+other block-scoped `var` -- so it correctly shadows an enclosing variable
+of the same name without corrupting it, and its slot is correctly reused
+iteration to iteration. Both `item`/`body` are resolved *within* the
+synthetic closure, so a reference to any other enclosing-scope name
+correctly captures it as an upvalue, exactly like a lambda body would
+(verified: a comprehension inside a function body correctly closes over
+that function's own locals).
+
+14 new xUnit tests (2 scanner: `VerticalBar`/`LeftArrow` distinct from
+`Pipe`/`Less`/`LessEqual`; 6 parser: cons vs. comprehension vs. plain
+vector-literal disambiguation, nesting, arbitrary comprehension sources; 6
+resolver: the desugared `BCall(BLambda(...), args)` shape, enclosing-scope
+argument evaluation, upvalue capture from within the synthetic closure's
+body, comprehension-variable shadowing, internal-primitive usage) and 2
+codegen (instruction-level shape of both desugared calls, including the
+full loop body for cons). 7 new Catch2 tests (`VectorLength`/`VectorAppend`
+happy path and non-vector runtime errors, cross-reference aliasing, and two
+full end-to-end hand-assembled reproductions of the exact bytecode
+`Codegen.fs` emits for cons -- including the originally-failing `[1 | []]`
+call-argument case, now passing). `langspec/examples/cons_and_comprehensions.iqx`
+verified end to end through the real `iqaloxc`+`iqaloxvm` toolchain.
 
 **Phase 4 — Vector-literal spread.** `[...a, ...b]`.
 
