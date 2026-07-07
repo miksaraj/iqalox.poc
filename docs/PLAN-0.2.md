@@ -172,6 +172,16 @@ overwriting the earlier text.
     deliver the class-scoped case (module-level composition needs
     `module` itself, which isn't real until `0.5` — now called out
     explicitly on `ROADMAP.md`'s `0.5` entry).
+13. **`langspec/` versioned-snapshot subdirectory is `langspec/versions/<version>/`**
+    (PR review, resolving the naming-collision question raised in this
+    document's first draft). The current version's grammar docs and
+    examples stay at `langspec/`'s top level as always; once a version is
+    superseded, its snapshot moves to `langspec/versions/<version>/` (e.g.
+    `langspec/versions/0.1/`) rather than reusing the bare version number,
+    which would collide with (or be confused for) the pre-existing
+    `langspec/archived/<version>/` directories — those hold unrelated,
+    pre-renumbering *planning-era* snapshots per `ROADMAP.md`'s own
+    renumbering note, and keep their existing name/meaning unchanged.
 
 ## 2. Open questions (flagged, not decided)
 
@@ -213,34 +223,16 @@ resolving, the same convention `docs/PLAN-0.1-POC.md` and
 5. **Exact matrix stdlib surface.** Multiply, transpose, elementwise
    arithmetic are the obvious Julia-flavored candidates — full list not
    yet confirmed. Blocks Phase 6.
-6. **`langspec/`'s versioning convention, and where the "current version
-   at the top, old versions in a numbered subdirectory" rule actually
-   puts things.** Resolved in principle (PR review on the first draft):
-   the current version's grammar docs and examples live at
-   `langspec/`'s top level as always; once a version is superseded, its
-   snapshot moves into a subdirectory named after that version, and
-   `langspec/examples/*.iqx` gets updated (and possibly extended with new
-   fixtures) for the new current version. **Not yet resolved: the exact
-   subdirectory name.** `langspec/archived/0.1/` (and `/0.2/`, `/0.3/`)
-   **already exist** — but per `ROADMAP.md`'s own renumbering note, those
-   are pre-renumbering *planning-era* snapshots from before `0.1`/`0.2`
-   meant what they mean today, not a snapshot of the real, shipped `0.1`.
-   Reusing the bare version number for the real `0.1` snapshot would
-   collide with (or worse, get confused for) that unrelated existing
-   directory. Needs an explicit name before Phase 9 actually performs the
-   move — a distinct top-level location (e.g. `langspec/versions/0.1/`,
-   name not decided) is one option, keeping `langspec/archived/` scoped
-   to exactly what it already means. Blocks Phase 9.
-7. **What happens to the Phase 9 conformance suite once `langspec/
+6. **What happens to the Phase 9 conformance suite once `langspec/
    examples/` moves to `0.2` syntax.** `poc/` is frozen and can't parse
    `0.2`'s new syntax at all — once the *current*, top-level
    `langspec/examples/*.iqx` stops being `0.1-poc`-compatible,
    `scripts/conformance-test.sh` can no longer diff `poc/` output against
    the live top-level examples the way it does today. It would need to
-   point specifically at wherever `0.1`'s examples snapshot lands (§2.6)
-   for the `poc/`-vs-`compiler/`+`vm/` comparison, while the *current*
-   top-level examples become a `compiler/`+`vm/`-only smoke test with no
-   `poc/` counterpart at all. Blocks Phase 9.
+   point specifically at `langspec/versions/0.1/` (decision 13) for the
+   `poc/`-vs-`compiler/`+`vm/` comparison, while the *current* top-level
+   examples become a `compiler/`+`vm/`-only smoke test with no `poc/`
+   counterpart at all. Blocks Phase 9.
 
 ## 3. Grammar and architecture additions (overview)
 
@@ -334,12 +326,12 @@ self-contained (class-system-only) changes and don't block the
 array/stdlib work at all — feel free to swap their order if you'd rather
 tackle the biggest risk first instead of last.
 
-**Phase 0 — `langspec/` versioning move.** Resolve §2.6's naming question,
-then move `0.1`'s current `langspec/` snapshot (grammar docs + examples)
-into its own versioned location before anything else changes what's at
-the top level — mirrors `docs/PLAN-0.1.md`'s own Phase 0 (repository
-reorganization) pattern of doing the structural move first, separately
-from any feature work, so it's easy to review on its own.
+**Phase 0 — `langspec/` versioning move.** Move `0.1`'s current
+`langspec/` snapshot (grammar docs + examples) into `langspec/versions/0.1/`
+(decision 13) before anything else changes what's at the top level —
+mirrors `docs/PLAN-0.1.md`'s own Phase 0 (repository reorganization)
+pattern of doing the structural move first, separately from any feature
+work, so it's easy to review on its own.
 
 **Phase 1 — Indexing.** `v[i]` read/write, bounds-checked, 0-based. New
 postfix grammar on any primary expression (not just identifiers — `f()[0]`
@@ -367,7 +359,7 @@ single change to the object model this version — property declarations,
 the internal-vs-external access split (decisions 10-11), and needs §2.3
 (subclass privacy scope) resolved first. Also the phase that determines
 how existing `langspec/examples/classes.iqx`/`inheritance.iqx` are
-affected (§2.7) — every external method call in every existing example
+affected (§2.6) — every external method call in every existing example
 needs an explicit `pub`, found and fixed here, not discovered later.
 
 **Phase 8 — Mixins and traits.** `with`-dynamic and `trait`/`use`-static
@@ -376,10 +368,10 @@ Needs §2.1 (static conflict resolution) and §2.2 (dynamic linearization
 algorithm) resolved first. Builds on Phase 7's (by-then-updated)
 class/property model.
 
-**Phase 9 — Conformance and docs.** Resolve §2.7's conformance-suite split
-in practice (`scripts/conformance-test.sh` pointed at wherever Phase 0
-moved `0.1`'s examples to, for the `poc/` comparison; the current,
-`0.2`-syntax top-level examples become a `compiler/`+`vm/`-only check);
+**Phase 9 — Conformance and docs.** Resolve §2.6's conformance-suite split
+in practice (`scripts/conformance-test.sh` pointed at `langspec/versions/0.1/`,
+for the `poc/` comparison; the current, `0.2`-syntax top-level examples
+become a `compiler/`+`vm/`-only check);
 fork `docs/LANGUAGE.md` into `docs/LANGUAGE-0.1.md` (frozen) plus a new,
 current `docs/LANGUAGE.md` for `0.2` — the same fork-not-addendum pattern
 `docs/PLAN-0.1.md`'s own Phase 10 used; `ROADMAP.md` marks `0.2` delivered
@@ -389,7 +381,7 @@ and moves the active-target goalposts to `0.3`.
 
 Same split `0.1` already established (`docs/PLAN-0.1.md` §7): xUnit for
 `compiler/`, Catch2 for `vm/`, plus whatever `langspec/examples/`
-strategy §2.6-7 lands on in practice. No new testing *infrastructure*
+strategy §2.6 lands on in practice. No new testing *infrastructure*
 needed — this version is entirely new language surface on an
 already-proven pipeline, not a new implementation to stand up.
 
@@ -399,9 +391,9 @@ already-proven pipeline, not a new implementation to stand up.
   real breaking change to `0.1`'s object model**, not an additive
   feature — every existing class-using script needs auditing for any
   property or method ever accessed from outside its own class, which
-  would newly require an explicit `pub`. See §2.7 for the concrete
-  conformance-suite fallout, and §2.6 for the `langspec/` reorganization
-  this forces.
+  would newly require an explicit `pub`. See §2.6 for the concrete
+  conformance-suite fallout, and decision 13 for the `langspec/`
+  reorganization this forces.
 - **Four new keyword/token additions in one version** (`->`, `<-`, `...`
   finally given meaning, plus the new `pub` keyword) grows the
   scanner/parser's surface area meaningfully in a single pass — keep test
@@ -413,8 +405,8 @@ already-proven pipeline, not a new implementation to stand up.
   Phase 7's already-changed class model risks getting extended twice in
   slightly different directions.
 - **`langspec/` now needs an ongoing versioning convention it never
-  needed before** (§2.6-7), and the obvious naming choice for it
-  (`langspec/<version>/`) collides with the pre-existing, differently-
-  scoped `langspec/archived/<version>/` planning snapshots — resolve the
-  naming question deliberately (§2.6) rather than picking whichever path
-  happens to not immediately error when Phase 0 starts.
+  needed before** (decision 13, §2.6) — `langspec/versions/<version>/`
+  was chosen specifically to avoid colliding with the pre-existing,
+  differently-scoped `langspec/archived/<version>/` planning snapshots;
+  don't let Phase 0 casually reuse the bare `langspec/<version>/` form
+  instead.
