@@ -299,3 +299,15 @@ let ``indexed assignment pushes obj, index, and value, then emits SetIndex with 
         [| NumberConstant 1.0; NumberConstant 2.0; StringConstant "v"; NumberConstant 0.0; NumberConstant 9.0 |],
         chunk.Constants
     )
+
+[<Fact>]
+let ``a lambda compiles to a Closure over an implicit-return function, no new opcode`` () =
+    let chunk = compileSource "var square = (n) -> n * n"
+    Assert.Equal<Instruction[]>([| Closure(0, []); DefineGlobal 1; Nil; Return |], chunk.Code)
+    match chunk.Constants.[0] with
+    | FunctionConstant proto ->
+        Assert.Equal("lambda", proto.Name)
+        Assert.Equal(1, proto.Arity)
+        Assert.Equal<Instruction[]>([| GetLocal 0; GetLocal 0; Multiply; Return; Nil; Return |], proto.Chunk.Code)
+    | other -> failwith $"expected a FunctionConstant, got %A{other}"
+    Assert.Equal<Constant>(StringConstant "square", chunk.Constants.[1])

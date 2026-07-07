@@ -43,6 +43,9 @@ type DeclaredBinding =
 type UpvalueDescriptor = { FromEnclosingLocal: bool; Index: int }
 
 type BoundExpr =
+    // Mutually recursive with `BoundFunctionDecl`/`BoundStmt` below (via
+    // `BLambda`, which needs `BoundFunctionDecl` -- itself needing
+    // `BoundStmt` for `Body`, which in turn contains `BoundExpr`s).
     | BAssign of binding: VariableBinding * name: Token * value: BoundExpr
     | BBinary of left: BoundExpr * operator: Token * right: BoundExpr
     | BLogical of left: BoundExpr * operator: Token * right: BoundExpr
@@ -60,6 +63,12 @@ type BoundExpr =
     | BSet of obj: BoundExpr * name: Token * value: BoundExpr
     | BIndex of obj: BoundExpr * index: BoundExpr * bracket: Token
     | BIndexSet of obj: BoundExpr * index: BoundExpr * value: BoundExpr * bracket: Token
+    /// Reuses `BoundFunctionDecl` wholesale -- a lambda resolves through
+    /// exactly the same scope/slot/upvalue machinery as a nested named
+    /// function (`docs/PLAN-0.2.md` §3), just with a synthetic `Name` (a
+    /// lambda has no name to bind) and a body desugared to a single
+    /// implicit `return` (`Resolver.fs`'s `Lambda` case).
+    | BLambda of decl: BoundFunctionDecl
     | BSelf of binding: VariableBinding * keyword: Token
     | BSuper of selfBinding: VariableBinding * binding: VariableBinding * keyword: Token * method: Token
 
@@ -67,7 +76,7 @@ type BoundExpr =
 /// function's frame (including its own implicit `self` slot for methods);
 /// `Upvalues` tells the VM how to populate each captured variable when a
 /// closure over this function is created.
-type BoundFunctionDecl =
+and BoundFunctionDecl =
     { Name: Token
       Parameters: Token list
       Body: BoundStmt list

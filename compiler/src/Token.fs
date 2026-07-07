@@ -36,6 +36,7 @@ type TokenType =
     | LessEqual
     | Minus
     | MinusMinus
+    | Arrow
     | Plus
     | PlusPlus
     | Dot

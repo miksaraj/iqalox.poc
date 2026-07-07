@@ -102,6 +102,35 @@ type private ParserState(tokens: Token[]) =
     let check (tokenType: TokenType) = not (isAtEnd ()) && (peek ()).Type = tokenType
     let checkAt (offset: int) (tokenType: TokenType) = (peekAt offset).Type = tokenType
 
+    /// True when the `(` at the current position starts a lambda
+    /// parameter list (`(a, b) -> expr`, decision 1) rather than a
+    /// grouped/comma expression -- `0.1`'s comma operator already makes
+    /// `(a, b)` a valid expression on its own (evaluate `a`, discard it,
+    /// yield `b`) using the exact same opening token, so the two can only
+    /// be told apart by scanning ahead (without consuming anything) for a
+    /// bare, comma-separated identifier list immediately followed by
+    /// `) ->`. `peekAt 0` is the `(` itself.
+    let isLambdaAhead () =
+        let mutable i = 1
+        let mutable ok = true
+        if not (checkAt i RightParen) then
+            let mutable scanning = true
+            while scanning do
+                if checkAt i Identifier then
+                    i <- i + 1
+                    if checkAt i Comma then
+                        i <- i + 1
+                    else
+                        scanning <- false
+                else
+                    ok <- false
+                    scanning <- false
+            if ok && not (checkAt i RightParen) then
+                ok <- false
+        if ok then
+            i <- i + 1
+        ok && checkAt i Arrow
+
     let matchAny (types: TokenType list) =
         if types |> List.exists check then
             advance () |> ignore
@@ -465,6 +494,18 @@ type private ParserState(tokens: Token[]) =
             Literal(literalValueOf (previous ()))
         elif matchAny [ Identifier ] then
             Variable(previous ())
+        elif check LeftParen && isLambdaAhead () then
+            advance () |> ignore // '('
+            let parameters = ResizeArray<Token>()
+            if not (check RightParen) then
+                let mutable more = true
+                while more do
+                    parameters.Add(consume Identifier "Expect parameter name.")
+                    more <- matchAny [ Comma ]
+            consume RightParen "Expect ')' after lambda parameters." |> ignore
+            let arrow = consume Arrow "Expect '->' after lambda parameters."
+            let body = this.Expression()
+            Lambda(List.ofSeq parameters, arrow, body)
         elif matchAny [ LeftParen ] then
             let expr = this.Expression()
             consume RightParen "Expect ')' after expression." |> ignore

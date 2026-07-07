@@ -159,6 +159,16 @@ let ``elvis and full ternary operators scan distinctly`` () =
     )
 
 [<Fact>]
+let ``arrow scans distinctly from minus and minus-minus`` () =
+    // docs/PLAN-0.2.md decision 1's lambda syntax (`(a, b) -> expr`) --
+    // longest-match already picks the 2-char "->" over the 1-char "-"
+    // via Scanner.fs's generic operatorCandidates table, no special
+    // lookahead logic needed.
+    Assert.Equal<TokenType list>([ Identifier; Arrow; Identifier; Eof ], tokenTypes "x -> y")
+    Assert.Equal<TokenType list>([ Identifier; Minus; Identifier; Eof ], tokenTypes "x - y")
+    Assert.Equal<TokenType list>([ Identifier; MinusMinus; Eof ], tokenTypes "x--")
+
+[<Fact>]
 let ``keywords are recognized and near-misses are not`` () =
     Assert.Equal<TokenType list>([ Self; Eof ], tokenTypes "self")
     Assert.Equal<TokenType list>([ Identifier; Eof ], tokenTypes "selfish")
