@@ -171,6 +171,17 @@ plan — design decisions, open questions, and phased sequencing:
   (`class C extends Base with M1, M2`, `class D { use T; }`) since real
   `module` declarations don't exist yet; `docs/PLAN-0.2.md` explicitly
   flagged this as deferred, not dropped
+- **Revisit whether `0.2`'s array-manipulation stdlib (`length`, `push`,
+  `pop`, `reverse`, `map`, `filter`, `reduce`, `sort` —
+  `docs/PLAN-0.2.md` Phase 5) should move under a namespace (`Vector.map`)
+  and/or become opt-in via explicit inclusion, now that real module
+  support exists to make that meaningful.** Deliberately shipped in `0.2`
+  as flat, always-injected globals (`compiler/src/Prelude.fs`, matching
+  `print`/`concat`'s existing precedent) rather than guessed toward a
+  namespaced/gated shape — building either now would have meant starting
+  real module-system design work early, inside a stdlib-functions phase,
+  ahead of this very entry. Explicitly not a silent lock-in: raised and
+  decided live with the repository owner during Phase 5.
 - Disallow unused variables — **compile-time error** (upgraded from warning)
 - Trigonometric functions standard library
 - Other standard library enhancements

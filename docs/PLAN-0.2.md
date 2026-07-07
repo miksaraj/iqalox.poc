@@ -593,6 +593,25 @@ comparator (`sort fn, v`, `fn(a, b)` truthy meaning "`a` sorts before
 only accept numbers today and teaching them about strings too is out of
 scope here.
 
+**A real gap in the first design-questions round, caught by the owner
+after the fact, not by this document's own review.** "Plain functions vs.
+methods on vectors" was framed as a binary, but that framing silently
+conflated two different things: instance-method dispatch on a primitive
+value (`v.push(x)`, which really does need a new object-model capability)
+and a *namespaced* access style (`Vector.push v, x`), which needs no such
+thing but *does* bear directly on `ROADMAP.md`'s already-planned `0.5`
+module support (`pub` is explicitly meant to "define what a module
+exports" then) -- a stdlib shipped now as flat, unconditionally-injected
+globals is a different starting point for that migration than one shipped
+under a namespace, or gated behind explicit inclusion, would be. Resolved
+via a second, correctly-scoped question: keep `0.2`'s array stdlib flat
+and always-available (matching `print`/`concat`'s precedent, cheapest
+now), explicitly logged as a deliberate stopgap rather than a silent
+default -- see the new bullet under `ROADMAP.md`'s `0.5` entry, to be
+revisited once real module support actually exists to make a namespaced
+or gated shape meaningful. Building either now would have meant starting
+`0.5`'s own module-design work early, inside this phase.
+
 An architectural split feeds directly from a technical fact checked
 against the real VM before deciding anything: `Vm::callNative` invokes a
 native function's C++ implementation synchronously and expects a `Value`
