@@ -32,6 +32,14 @@
 /// -- `GetIndex`/`SetIndex` take no operand at all, unlike
 /// `GetProperty`/`SetProperty`'s `nameIndex`.
 ///
+/// `BLambda` (`docs/PLAN-0.2.md` Phase 2) needs no new opcode at all --
+/// `Resolver.fs`'s `Lambda` case already desugars it to an ordinary
+/// (nameless) `BoundFunctionDecl` with a single implicit `return`, so
+/// `CompileExpr` just hands it to the existing `CompileFunctionValue`
+/// (previously only ever called from `BFunctionStmt`/`CompileClass`),
+/// which pushes a `Closure` the same way any named function or method
+/// already does.
+///
 /// `FunctionState.StackDepth` is `Codegen`'s own running counter (distinct
 /// from `Resolver`'s already-computed slot numbers) of how many values are
 /// currently pushed, kept in sync by routing every emission through
@@ -81,6 +89,7 @@ let rec private lineOfExpr (expr: BoundExpr) : int option =
     | BSet(_, name, _) -> Some name.Line
     | BIndex(_, _, bracket) -> Some bracket.Line
     | BIndexSet(_, _, _, bracket) -> Some bracket.Line
+    | BLambda decl -> Some decl.Name.Line
     | BSelf(_, keyword) -> Some keyword.Line
     | BSuper(_, _, keyword, _) -> Some keyword.Line
 
@@ -399,6 +408,7 @@ type private Codegen() =
             this.CompileExpr index
             this.CompileExpr value
             state.Emit SetIndex |> ignore
+        | BLambda decl -> this.CompileFunctionValue(decl, isMethod = false)
         | BSuper(selfBinding, binding, _, method) ->
             this.CompileGetBinding selfBinding
             this.CompileGetBinding binding

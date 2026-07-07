@@ -232,3 +232,39 @@ let ``indexed assignment resolves obj, index, and value sub-expressions`` () =
         BExpressionStmt(BIndexSet(BVariable(GlobalBinding "v", _), BLiteral(NumberValue 0.0), BLiteral(NumberValue 9.0), _)) ] ->
         ()
     | _ -> failwith $"unexpected shape: %A{bound}"
+
+[<Fact>]
+let ``a lambda's parameters resolve as locals, same as a named function's`` () =
+    let bound, errors = resolveSource "(a, b) -> a + b"
+    Assert.Empty errors
+    match bound with
+    | [ BExpressionStmt(BLambda decl) ] ->
+        Assert.Equal(2, decl.LocalCount) // a, b
+        match decl.Body with
+        | [ BReturnStmt(_, Some(BBinary(BVariable(LocalBinding aSlot, _), _, BVariable(LocalBinding bSlot, _)))) ] ->
+            Assert.Equal(0, aSlot)
+            Assert.Equal(1, bSlot)
+        | body -> failwith $"unexpected lambda body: %A{body}"
+    | _ -> failwith $"unexpected shape: %A{bound}"
+
+[<Fact>]
+let ``a lambda closes over an enclosing local exactly like a nested named function does`` () =
+    let source = "fun outer() {\n    var x mut = 1\n    return (y) -> x + y\n}"
+    let bound, errors = resolveSource source
+    Assert.Empty errors
+    match bound with
+    | [ BFunctionStmt(_, outerDecl) ] ->
+        match outerDecl.Body with
+        | [ BVarStmt(DeclaredLocal xSlot, _, _); BReturnStmt(_, Some(BLambda lambdaDecl)) ] ->
+            Assert.Equal<UpvalueDescriptor list>([ { FromEnclosingLocal = true; Index = xSlot } ], lambdaDecl.Upvalues)
+            match lambdaDecl.Body with
+            | [ BReturnStmt(_, Some(BBinary(BVariable(UpvalueBinding 0, _), _, BVariable(LocalBinding 0, _)))) ] -> ()
+            | body -> failwith $"unexpected lambda body: %A{body}"
+        | body -> failwith $"unexpected outer body: %A{body}"
+    | _ -> failwith $"unexpected shape: %A{bound}"
+
+[<Fact>]
+let ``a lambda parameter is immutable, matching a named function's parameters`` () =
+    let _, errors = resolveSource "(x) -> x = 1"
+    Assert.Single errors |> ignore
+    Assert.Contains("immutable", errors.[0].Message)

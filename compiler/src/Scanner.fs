@@ -52,6 +52,7 @@ let private operatorCandidates: (string * TokenType) list =
       ">=", GreaterEqual
       "<=", LessEqual
       "--", MinusMinus
+      "->", Arrow
       "++", PlusPlus
       "?:", QuestionMarkColon
       "??", DoubleQuestionMark

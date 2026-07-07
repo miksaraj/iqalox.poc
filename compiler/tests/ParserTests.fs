@@ -406,3 +406,54 @@ let ``indexing is a valid assignment target`` () =
     | IndexSet(Variable objName, Literal(NumberValue 0.0), Literal(NumberValue 1.0), _) ->
         Assert.Equal("v", objName.Lexeme)
     | e -> failwith $"expected IndexSet, got %A{e}"
+
+[<Fact>]
+let ``a single-parameter lambda parses as a Lambda expression`` () =
+    match singleExpr "(n) -> n * n" with
+    | Lambda([ param ], _, Binary(Variable left, _, Variable right)) ->
+        Assert.Equal("n", param.Lexeme)
+        Assert.Equal("n", left.Lexeme)
+        Assert.Equal("n", right.Lexeme)
+    | e -> failwith $"expected Lambda, got %A{e}"
+
+[<Fact>]
+let ``a multi-parameter lambda parses both parameter names`` () =
+    match singleExpr "(a, b) -> a + b" with
+    | Lambda([ a; b ], _, _) ->
+        Assert.Equal("a", a.Lexeme)
+        Assert.Equal("b", b.Lexeme)
+    | e -> failwith $"expected Lambda, got %A{e}"
+
+[<Fact>]
+let ``a zero-parameter lambda parses with an empty parameter list`` () =
+    match singleExpr "() -> 1" with
+    | Lambda([], _, Literal(NumberValue 1.0)) -> ()
+    | e -> failwith $"expected zero-parameter Lambda, got %A{e}"
+
+[<Fact>]
+let ``a grouped comma expression with no arrow after it is not a lambda`` () =
+    // docs/PLAN-0.2.md decision 1's lookahead-past-')' disambiguation:
+    // (a, b) alone is still 0.1's comma operator wrapped in a Grouping.
+    match singleExpr "(a, b)" with
+    | Grouping(Binary(Variable a, operator, Variable b)) ->
+        Assert.Equal(Comma, operator.Type)
+        Assert.Equal("a", a.Lexeme)
+        Assert.Equal("b", b.Lexeme)
+    | e -> failwith $"expected a Grouping around a comma Binary, got %A{e}"
+
+[<Fact>]
+let ``a lambda is a valid call argument with no extra wrapping parens`` () =
+    match singleExpr "applyTwice square, (x) -> x + 1" with
+    | Call(Variable name, [ Variable squareName; Lambda([ param ], _, _) ]) ->
+        Assert.Equal("applyTwice", name.Lexeme)
+        Assert.Equal("square", squareName.Lexeme)
+        Assert.Equal("x", param.Lexeme)
+    | e -> failwith $"expected Call with a Lambda argument, got %A{e}"
+
+[<Fact>]
+let ``a curried lambda's body is itself a lambda`` () =
+    match singleExpr "(x) -> (y) -> x + y" with
+    | Lambda([ x ], _, Lambda([ y ], _, _)) ->
+        Assert.Equal("x", x.Lexeme)
+        Assert.Equal("y", y.Lexeme)
+    | e -> failwith $"expected a Lambda whose body is another Lambda, got %A{e}"

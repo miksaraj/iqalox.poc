@@ -265,6 +265,19 @@ type private Resolver(globals: Dictionary<string, bool>) =
         | Index(obj, index, bracket) -> BIndex(this.ResolveExpr obj, this.ResolveExpr index, bracket)
         | IndexSet(obj, index, value, bracket) ->
             BIndexSet(this.ResolveExpr obj, this.ResolveExpr index, this.ResolveExpr value, bracket)
+        | Lambda(parameters, arrow, body) ->
+            // Desugars to a nameless FunctionDecl with a single implicit
+            // `return` statement, then resolves exactly like a nested
+            // named function (`ResolveFunction`, unchanged) -- same
+            // scope/slot/upvalue machinery, per docs/PLAN-0.2.md §3. The
+            // synthetic `Name` token is only ever used for diagnostics/
+            // disassembly (`Codegen.fs`'s `FunctionProto.Name`); nothing
+            // binds a lambda to it.
+            let syntheticDecl: FunctionDecl =
+                { Name = { arrow with Type = Identifier; Lexeme = "lambda" }
+                  Parameters = parameters
+                  Body = [ ReturnStmt(arrow, Some body) ] }
+            BLambda(this.ResolveFunction(syntheticDecl, isMethod = false))
         | SelfExpr keyword ->
             match resolveReference "self" with
             | GlobalBinding _, None ->

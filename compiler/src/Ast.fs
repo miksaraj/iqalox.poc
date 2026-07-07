@@ -44,6 +44,7 @@ type Expr =
     | Set of obj: Expr * name: Token * value: Expr
     | Index of obj: Expr * index: Expr * bracket: Token
     | IndexSet of obj: Expr * index: Expr * value: Expr * bracket: Token
+    | Lambda of parameters: Token list * arrow: Token * body: Expr
     | SelfExpr of keyword: Token
     | SuperExpr of keyword: Token * method: Token
 

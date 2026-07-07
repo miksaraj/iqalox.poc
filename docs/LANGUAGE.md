@@ -663,6 +663,17 @@ each was arrived at.
    making the scanner bracket-depth-aware is a real scanner change with
    its own test surface, out of scope for the indexing work that
    surfaced it.
+10. **A non-identifier callee can't be called at all, with or without
+    parentheses.** `CallHead()`'s "am I followed by something that looks
+    like an argument" check only ever runs for a bare `IDENTIFIER` (or,
+    indirectly, a property/method access via `FinishPropertyAccess`) —
+    a grouped expression never gets that treatment, so neither
+    `(f) 5` nor even `(f)()` parses (`Expect line break or ';' after
+    expression.`); the callee has to be bound to a name first. Pre-existing
+    since `0.1`'s original call grammar, not new here, but newly relevant
+    once lambdas (`0.2`, `docs/PLAN-0.2.md` Phase 2) make "produce a
+    callable value inline" common — an immediately-invoked lambda
+    expression isn't currently expressible.
 
 The following `0.1-poc` limitations are **resolved** as of `0.1` (see
 `docs/LANGUAGE-POC.md` §13 for their original write-ups): no escape

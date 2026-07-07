@@ -340,7 +340,7 @@ stale for nine phases and then need a special pass to fix it.**
 | Feature | Design decision(s) | Status |
 |---|---|---|
 | Vector indexing (`v[i]` get/set) | §1.6 | Done |
-| Lambdas (`(a, b) -> expr`) | §1.1 | Not started |
+| Lambdas (`(a, b) -> expr`) | §1.1 | Done |
 | Cons operator (`[item \| list]`) | §1.2 | Not started |
 | List comprehensions (single generator) | §1.2-4 | Not started |
 | Vector-literal spread (`[...a, ...b]`) | §1.7 | Not started |
@@ -410,8 +410,41 @@ vector literal (or any multi-line grouping expression) has never actually
 worked — logged as `docs/LANGUAGE.md` §13 item 9; `matrices.iqx`'s matrix
 literal was rewritten onto one line to work around it.
 
-**Phase 2 — Lambdas.** `(a, b) -> expr`, single-expression body, closing
-over enclosing scope exactly like a named nested function already does.
+**Phase 2 — Lambdas.** *Done.* `(a, b) -> expr`, single-expression body,
+closing over enclosing scope exactly like a named nested function already
+does -- `Ast.Lambda` desugars in `Resolver.fs` to an ordinary, nameless
+`FunctionDecl` with a single implicit `return` statement, then resolves
+via the *unchanged* `ResolveFunction`, so scope/slot/upvalue capture (and
+parameter immutability) come for free. `Codegen.fs` needed no new opcode
+at all: `BLambda` just calls the existing `CompileFunctionValue` (already
+factored apart from "then bind it to a name" for exactly this kind of
+reuse), pushing a `Closure` the same way a named function or method
+already does. `Token.fs`/`Scanner.fs` needed one addition (`Arrow`, `->`)
+via the scanner's existing longest-match operator table -- no bespoke
+lookahead there either.
+
+Disambiguating `(a, b) -> expr` from `0.1`'s pre-existing grouped comma
+expression `(a, b)` (same opening token, same shape) needed one new
+parser helper, `isLambdaAhead`: a pure lookahead (no backtracking) that
+scans for a bare, comma-separated identifier list immediately followed by
+`) ->` before committing to either parse path.
+
+Also found, while writing tests, a pre-existing `0.1` call-grammar
+limitation unrelated to lambdas themselves: a non-identifier callee can
+never be called, with or without parens (`(f) 5` and even `(f)()` both
+fail to parse) -- `CallHead()`'s "does an argument-shaped token follow"
+check only ever runs for a bare identifier. Not new, not fixed here, but
+newly relevant now that lambdas make "produce a callable value inline" a
+natural thing to reach for immediately-invoked-function-style; logged as
+`docs/LANGUAGE.md` §13 item 10.
+
+18 new xUnit tests: 3 scanner (`Arrow` distinct from `Minus`/`MinusMinus`),
+8 parser (single/multi/zero-parameter lambdas, the grouped-comma-expression
+non-lambda case, a lambda as a call argument, curried lambdas), 4 resolver
+(parameter locals, upvalue capture, parameter immutability), 1 codegen
+(instruction-level `Closure`/implicit-`return` shape). No VM/C++ changes
+needed at all, so the existing 58 Catch2 tests, the smoke test, and the
+conformance suite all stay untouched and green.
 
 **Phase 3 — Cons and list comprehensions.** `[item | list]`,
 `[expr | pattern <- iterable]` (§1.3's single-generator, no-guards slice).
