@@ -121,10 +121,13 @@ overwriting the earlier text.
 
    No new keyword needed for `mut` (already `Token.fs`'s `Mutable`,
    reused as-is); `pub` is the one genuinely new keyword this decision
-   needs. This directly foreshadows `0.5`'s real module support: `pub` is
+   needs. This directly foreshadows `0.3`'s real module support: `pub` is
    expected to apply to classes themselves then too (private-by-default at
    the module level, defining what a module actually exports) — called
-   out explicitly on `ROADMAP.md`'s `0.5` entry now so it isn't forgotten.
+   out explicitly on `ROADMAP.md`'s `0.3` entry now so it isn't forgotten.
+   (Module support was originally slated for `0.5`; moved forward to `0.3`
+   so the string/math/data-structure/I/O stdlib phases starting `0.4` can
+   build on it — see `ROADMAP.md`.)
 
    **Necessary consequence, not separately asked about: `0.1`'s "a field
    springs into existence on first assignment" model is gone.** Decision
@@ -206,8 +209,8 @@ overwriting the earlier text.
     closer to real multiple inheritance. Both forms are usable "anywhere"
     per the original answer, but see §2 for why `0.2` can only actually
     deliver the class-scoped case (module-level composition needs
-    `module` itself, which isn't real until `0.5` — now called out
-    explicitly on `ROADMAP.md`'s `0.5` entry).
+    `module` itself, which isn't real until `0.3` — now called out
+    explicitly on `ROADMAP.md`'s `0.3` entry).
 13. **`langspec/` versioned-snapshot subdirectory is `langspec/versions/<version>/`**
     (PR review, resolving the naming-collision question raised in this
     document's first draft). The current version's grammar docs and
@@ -599,18 +602,19 @@ methods on vectors" was framed as a binary, but that framing silently
 conflated two different things: instance-method dispatch on a primitive
 value (`v.push(x)`, which really does need a new object-model capability)
 and a *namespaced* access style (`Vector.push v, x`), which needs no such
-thing but *does* bear directly on `ROADMAP.md`'s already-planned `0.5`
-module support (`pub` is explicitly meant to "define what a module
-exports" then) -- a stdlib shipped now as flat, unconditionally-injected
-globals is a different starting point for that migration than one shipped
-under a namespace, or gated behind explicit inclusion, would be. Resolved
-via a second, correctly-scoped question: keep `0.2`'s array stdlib flat
-and always-available (matching `print`/`concat`'s precedent, cheapest
-now), explicitly logged as a deliberate stopgap rather than a silent
-default -- see the new bullet under `ROADMAP.md`'s `0.5` entry, to be
-revisited once real module support actually exists to make a namespaced
-or gated shape meaningful. Building either now would have meant starting
-`0.5`'s own module-design work early, inside this phase.
+thing but *does* bear directly on `ROADMAP.md`'s planned module support
+(`pub` is explicitly meant to "define what a module exports" then) -- a
+stdlib shipped now as flat, unconditionally-injected globals is a
+different starting point for that migration than one shipped under a
+namespace, or gated behind explicit inclusion, would be. Resolved via a
+second, correctly-scoped question: keep `0.2`'s array stdlib flat and
+always-available (matching `print`/`concat`'s precedent, cheapest now),
+explicitly logged as a deliberate stopgap rather than a silent default --
+see the bullet under `ROADMAP.md`'s `0.3` entry (module support was
+originally slated for `0.5`, moved forward to `0.3` alongside this very
+revisit item so both are ready before the `0.4`-onward stdlib phases that
+might actually want them), to be revisited once real module support
+actually exists to make a namespaced or gated shape meaningful.
 
 **A second question raised during PR review, on the same "ask, don't
 guess" grounds**: is comma-separated no-parens multi-arg calling

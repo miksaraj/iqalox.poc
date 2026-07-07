@@ -137,7 +137,7 @@ plan — design decisions, open questions, and phased sequencing:
   modifiers**, private and immutable by default (`var name`, `var name
   mut`, `var name pub`, `var name pub mut`) — resolves the private-by-default
   property question raised for the old v0.3 (now 0.4, see below), and
-  foreshadows `0.5`'s module support directly (`pub` is expected to apply
+  foreshadows `0.3`'s module support directly (`pub` is expected to apply
   to classes themselves then, defining what a module exports)
 - Mixin support (`class A extends B with C`, `A with B`) and trait support
   (`trait A {...}` / `class B { use A }`) — resolved as a split by which
@@ -156,33 +156,14 @@ plan — design decisions, open questions, and phased sequencing:
   `[x + y | x <- xs, y <- ys, x not y]`-style sketch's full shape (exact
   guard-expression syntax, e.g. whether `not` is real or just informal
   pseudocode for "not equal," still needs pinning down when this starts)
-- First set of compiler optimizations (see below)
-- **Revisit whether the comma should be a no-parens multi-argument call's
-  separator at all** (`push v, 4`, `map fn, v, initial`), and whether a
-  lambda's own parameter list needs one either (`(a, b) -> ...`). Both are
-  `0.1-poc`'s original design (`poc/src/parser.py`'s `call_head()`),
-  faithfully carried through every phase since — not something that crept
-  in during `0.2`. Raised by the repository owner while reviewing Phase
-  5's array-stdlib examples; kept as-is for `0.2` (comma stays the
-  separator) since dropping it is a real breaking grammar change — a
-  whitespace-only argument list needs its own answer for where it ends
-  (is `f a b + c` a third argument `b + c`, or `+ c` applied to `f a b`'s
-  result?) — touching every existing example and the whole call-argument
-  test suite, not a small tweak to make inline while reviewing a doc fix.
-
-### 0.4 *(formerly `0.3`)*
-
-- File I/O standard library
-- Other standard library enhancements
-- Second set of compiler optimizations
-
-### 0.5 *(formerly `0.4`)*
-
-- Module support — **must also revisit module-scoped mixin/trait
-  composition here**: `0.2` only delivers the class-scoped case
-  (`class C extends Base with M1, M2`, `class D { use T; }`) since real
-  `module` declarations don't exist yet; `docs/PLAN-0.2.md` explicitly
-  flagged this as deferred, not dropped
+- **Module support** — brought forward from `0.5` (see below) so it's
+  ready for the `0.4`-onward standard library buildout to actually use,
+  rather than landing after several stdlib phases have already shipped as
+  flat globals. **Must also revisit module-scoped mixin/trait composition
+  here**: `0.2` only delivers the class-scoped case (`class C extends
+  Base with M1, M2`, `class D { use T; }`) since real `module`
+  declarations don't exist yet; `docs/PLAN-0.2.md` explicitly flagged
+  this as deferred, not dropped
 - **Revisit whether `0.2`'s array-manipulation stdlib (`length`, `push`,
   `pop`, `reverse`, `map`, `filter`, `reduce`, `sort` —
   `docs/PLAN-0.2.md` Phase 5) should move under a namespace (`Vector.map`)
@@ -190,29 +171,73 @@ plan — design decisions, open questions, and phased sequencing:
   support exists to make that meaningful.** Deliberately shipped in `0.2`
   as flat, always-injected globals (`compiler/src/Prelude.fs`, matching
   `print`/`concat`'s existing precedent) rather than guessed toward a
-  namespaced/gated shape — building either now would have meant starting
-  real module-system design work early, inside a stdlib-functions phase,
-  ahead of this very entry. Explicitly not a silent lock-in: raised and
-  decided live with the repository owner during Phase 5.
-- Disallow unused variables — **compile-time error** (upgraded from warning)
-- Trigonometric functions standard library
-- Other standard library enhancements
+  namespaced/gated shape — building either before module support existed
+  would have meant starting real module-system design work early, inside
+  a stdlib-functions phase, ahead of module support's own entry. Moved
+  here alongside module support itself, since this is exactly the version
+  where its precondition ("real module support exists") is first met.
+  Explicitly not a silent lock-in: raised and decided live with the
+  repository owner during Phase 5.
+- First set of compiler optimizations (see below)
+
+Comma-as-no-parens-multi-argument-call-separator (`push v, 4`) was also
+raised for reconsideration while reviewing Phase 5's array-stdlib
+examples (it's `0.1-poc`'s original design, `poc/src/parser.py`'s
+`call_head()`, not something that crept in during `0.2`) — decided to
+leave as-is permanently, not revisited here or in any later version; see
+`docs/PLAN-0.2.md`'s Phase 5 entry for the full exchange.
+
+### 0.4 *(formerly `0.3`)*
+
+Standard library, part 1 of 5 (see "Standard library vision" below for
+the full category breakdown and how it maps onto `0.4`-`0.8`):
+
+- String manipulation standard library — concatenation, search, split,
+  format, regex
+- Mathematical operations standard library — arithmetic, trigonometry,
+  logarithms, random number generation, rounding
+- Second set of compiler optimizations
+
+### 0.5 *(formerly `0.4`)*
+
+Standard library, part 2 of 5:
+
+- Data structures standard library, the rest of it — lists,
+  dictionaries/maps, stacks, queues, sets (arrays/vectors already shipped
+  `0.2`)
+- I/O standard library — file and stream I/O, console interaction
+- Disallow unused variables — **compile-time error** (upgraded from
+  `0.3`'s warning)
 - Third set of compiler optimizations
 
 ### 0.6 *(formerly `0.5`)*
 
-- CLI input standard library
-- Other standard library enhancements
+Standard library, part 3 of 5:
+
+- Date and time standard library
+- Error handling standard library — raising/handling exceptions, logging,
+  error reporting
 - Fourth set of compiler optimizations
 
 ### 0.7 *(formerly `0.6`)*
 
-- Standard library enhancements
+Standard library, part 4 of 5:
+
+- Networking standard library — HTTP requests, TCP/IP, UDP, sockets, URL
+  parsing
+- File system standard library — create/delete/copy/move files and
+  directories, metadata retrieval
 - Fifth set of compiler optimizations
 
 ### 0.8 / 1.0 *(formerly `0.7` / `1.0`)*
 
-- Standard library enhancements
+Standard library, part 5 of 5 (the last of it — every category in the
+vision below is allocated to a version by this point):
+
+- Concurrency and threading standard library — threads, locks,
+  semaphores, synchronization primitives
+- System interaction standard library — executing system commands,
+  environment variables, OS interaction, subprocesses
 - Sixth (and possibly final) set of compiler optimizations
 
 ## Language feature ideas under consideration
@@ -258,24 +283,31 @@ Interpreters* — is:
 
 ## Standard library vision
 
-Not tied to a specific version above; these are the categories the standard
-library is expected to eventually cover, roughly in the order suggested by
-the roadmap (I/O and strings early, concurrency/networking much later):
+The categories the standard library is expected to eventually cover, in
+the order they land — every one now allocated to a version (`0.2` for
+arrays; `0.4`-`0.8` for the rest, two categories per version, roughly
+ordered strings/math early to concurrency/networking/system-level much
+later):
 
-1. **Input/Output** — file and stream I/O, console interaction
+1. **Data structures** — arrays/vectors (`0.2`, already shipped); the
+   rest (lists, dictionaries/maps, stacks, queues, sets) in `0.5`
 2. **String manipulation** — concatenation, search, split, format, regex
-3. **Data structures** — arrays, lists, dictionaries/maps, stacks, queues, sets
-4. **Mathematical operations** — arithmetic, trigonometry, logarithms, random
-   number generation, rounding
-5. **Date and time** — dates, times, timestamps, time zones, formatting, parsing
-6. **Error handling** — raising/handling exceptions, logging, error reporting
+   (`0.4`)
+3. **Mathematical operations** — arithmetic, trigonometry, logarithms,
+   random number generation, rounding (`0.4`)
+4. **Input/Output** — file and stream I/O, console interaction (`0.5`)
+5. **Date and time** — dates, times, timestamps, time zones, formatting,
+   parsing (`0.6`)
+6. **Error handling** — raising/handling exceptions, logging, error
+   reporting (`0.6`)
 7. **Networking** — HTTP requests, TCP/IP, UDP, sockets, URL parsing
-8. **File system operations** — create/delete/copy/move files and directories,
-   metadata retrieval
-9. **Concurrency and threading** — threads, locks, semaphores, synchronization
-   primitives
-10. **System interaction** — executing system commands, environment variables,
-    OS interaction, subprocesses
+   (`0.7`)
+8. **File system operations** — create/delete/copy/move files and
+   directories, metadata retrieval (`0.7`)
+9. **Concurrency and threading** — threads, locks, semaphores,
+   synchronization primitives (`0.8`)
+10. **System interaction** — executing system commands, environment
+    variables, OS interaction, subprocesses (`0.8`)
 
-Exactly which category lands in which version (beyond what's already
-allocated above — I/O, arrays, math, modules, CLI input) is not yet decided.
+Module support itself (`0.3`, brought forward from `0.5` — see above) is
+infrastructure this buildout depends on, not a category of its own.
