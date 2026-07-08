@@ -232,6 +232,72 @@ let ``two independent superclass declarations in the same script both capture sl
         Assert.Equal<UpvalueDescriptor list>([ { FromEnclosingLocal = true; Index = 0 } ], proto.Upvalues)
 
 [<Fact>]
+let ``property declarations emit one opcode per pub/mut combination, and self.x compiles to the *Self variants`` () =
+    // docs/PLAN-0.2.md Phase 7. `quack` (no pub) emits Method; `greet`
+    // (pub) emits MethodPub. Both bodies read `self.name` internally, so
+    // both compile to GetPropertySelf, never the external GetProperty.
+    let source =
+        "class Duck {\n    var name\n    var species pub mut\n    quack() { return self.name; }\n    pub greet() { return self.name; }\n}"
+
+    let chunk = compileSource source
+
+    Assert.Equal<Instruction[]>(
+        [| Class 0 // "Duck"
+           DefineGlobal 0
+           GetGlobal 0 // temp re-fetch
+           PropertyPrivate 1 // "name"
+           PropertyPubMut 2 // "species"
+           Closure(3, []) // quack
+           Method 4 // "quack"
+           Closure(5, []) // greet
+           MethodPub 6 // "greet"
+           Pop
+           Nil
+           Return |],
+        chunk.Code
+    )
+
+    match chunk.Constants with
+    | [| StringConstant "Duck"
+         StringConstant "name"
+         StringConstant "species"
+         FunctionConstant quack
+         StringConstant "quack"
+         FunctionConstant greet
+         StringConstant "greet" |] ->
+        Assert.Equal<Instruction[]>([| GetLocal 0; GetPropertySelf 0; Return; Nil; Return |], quack.Chunk.Code)
+        Assert.Equal<Instruction[]>([| GetLocal 0; GetPropertySelf 0; Return; Nil; Return |], greet.Chunk.Code)
+    | constants -> failwith $"unexpected constants: %A{constants}"
+
+[<Fact>]
+let ``external property get/set compile to GetProperty/SetProperty, never the *Self variants`` () =
+    let source = "class Duck {\n    var species pub mut\n}\nvar d = Duck()\nprint d.species\nd.species = \"x\"\n"
+    let chunk = compileSource source
+
+    Assert.Equal<Instruction[]>(
+        [| Class 0 // "Duck"
+           DefineGlobal 0
+           GetGlobal 0 // temp re-fetch
+           PropertyPubMut 1 // "species"
+           Pop
+           GetGlobal 0 // Duck() callee
+           Call 0
+           DefineGlobal 2 // "d"
+           GetGlobal 3 // print
+           GetGlobal 2 // d
+           GetProperty 1 // .species (external -- d is not self)
+           Call 1
+           Pop
+           GetGlobal 2 // d
+           Constant 4 // "x"
+           SetProperty 1 // .species = (external)
+           Pop
+           Nil
+           Return |],
+        chunk.Code
+    )
+
+[<Fact>]
 let ``the disassembler prints every top-level instruction and recurses into nested function chunks`` () =
     let chunk = compileSource "fun f() { return 1; }"
     let output = disassembleChunk "script" chunk

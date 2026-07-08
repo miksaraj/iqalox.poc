@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "value.hpp"
@@ -145,17 +146,51 @@ struct ObjNativeFunction : Obj {
 // value it needs on the stack (captured via the synthetic `super`
 // upvalue/local, see `Bound.BSuper`), so nothing here ever has to walk a
 // chain to find it.
+//
+// `docs/PLAN-0.2.md` Phase 7 additions: `publicMethods` names which of
+// `methods`' entries were declared `pub` (decision 11) -- checked only by
+// `GetProperty`'s *external* variant (`GetPropertySelf` skips the check
+// entirely, and `init`/`GetSuper` are exempted at the call site, not
+// here). `properties` is declared-property metadata (`pub`/`mut` per
+// decision 8), copied into a subclass by `Inherit` exactly like `methods`
+// is -- so a subclass automatically has every ancestor's property
+// available without redeclaring it, matching the now-resolved open
+// question 3's protected-like reading. Neither map is ever consulted for
+// override bookkeeping the way `methods` overriding is: `Resolver.fs`'s
+// `preRegisterClasses` rejects a property redeclared anywhere up a
+// class's own ancestor chain at compile time, so this map is always a
+// flat, non-conflicting union by the time any bytecode referencing it
+// runs.
+struct PropertyMeta {
+    bool isPub;
+    bool isMut;
+};
+
 struct ObjClass : Obj {
     std::string name;
     std::unordered_map<std::string, ObjClosure*> methods;
+    std::unordered_set<std::string> publicMethods;
+    std::unordered_map<std::string, PropertyMeta> properties;
 
     explicit ObjClass(std::string n) : Obj(ObjType::Class), name(std::move(n)) {}
 };
 
-// Fields spring into existence on first assignment and are always
-// mutable, matching `poc/src/callable.py`'s `IqaloxInstance` exactly --
-// `0.1`'s new compile-time immutability (decision 6, docs/PLAN-0.1.md)
-// is scoped to `var` bindings only, not fields.
+// Every declared property (own class's plus every ancestor's, both
+// already flattened into `klass->properties` by `Inherit`) gets a
+// pre-populated `fields` entry the moment an instance is constructed
+// (`Vm::callClass`), starting at `UndefValue` -- `docs/PLAN-0.2.md`
+// decision 8's addendum retires `0.1`'s "fields spring into existence on
+// first assignment" model entirely: every property a `0.2` class ever
+// touches must have a `var` declaration, so by the time any bytecode
+// runs, `fields` already has exactly one entry per declared property and
+// never gains or loses one afterward. `UndefValue` doubles as decision
+// 9's "not yet assigned" sentinel, the same trick `0.1` already uses for
+// an uninitialized `var mut` local -- reading it before the first
+// assignment is a runtime error the same way (`Vm::checkNotUndef`'s
+// property counterpart), and for an immutable (`mut`-less) property,
+// ever assigning it again after that first, real value is exactly what
+// makes decision 9's "assign at most once" enforceable without a
+// separate per-field "has this been set" bit alongside it.
 struct ObjInstance : Obj {
     ObjClass* klass;
     std::unordered_map<std::string, Value> fields;

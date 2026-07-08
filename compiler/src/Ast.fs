@@ -69,8 +69,18 @@ type Expr =
 /// `Stmt.ClassStmt`'s `methods` field -- `poc`'s `Class.methods` is typed
 /// as `List[Function]`, a Python type hint with no runtime enforcement;
 /// here it's a real, checked type, since a class's methods are never
-/// anything but function declarations.
-type FunctionDecl = { Name: Token; Parameters: Token list; Body: Stmt list }
+/// anything but function declarations. `IsPub` (`docs/PLAN-0.2.md`
+/// decision 11) is only meaningful for a method (a class-body function);
+/// `Parser.fs` always sets it `false` for a top-level `fun`, which has no
+/// visibility concept of its own to carry.
+type FunctionDecl = { Name: Token; Parameters: Token list; Body: Stmt list; IsPub: bool }
+
+/// A class-body property declaration (`var name [pub] [mut]`,
+/// `docs/PLAN-0.2.md` decision 8) -- no initializer and no body, unlike
+/// `VarStmt`: a property's first value always comes from whatever
+/// assignment (commonly, but not necessarily, inside `init`) happens to
+/// set it first (decision 9).
+and PropertyDecl = { Name: Token; IsPub: bool; IsMutable: bool }
 
 and Stmt =
     | Block of statements: Stmt list
@@ -79,4 +89,4 @@ and Stmt =
     | ForStmt of initializer: Stmt option * condition: Expr option * increment: Expr option * body: Stmt
     | FunctionStmt of FunctionDecl
     | ReturnStmt of keyword: Token * value: Expr option
-    | ClassStmt of name: Token * superclass: Expr option * methods: FunctionDecl list
+    | ClassStmt of name: Token * superclass: Expr option * properties: PropertyDecl list * methods: FunctionDecl list

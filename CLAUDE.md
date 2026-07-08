@@ -256,13 +256,16 @@ identical output to `poc`.
   `sys.modules` before importing project modules; see
   `docs/PLAN-0.1-POC.md` §5 if that ever needs revisiting.
 - **`compiler/`/`vm/` testing**: xUnit (F#) and Catch2 (C++) respectively,
-  per `docs/PLAN-0.1.md` §7 — plus `scripts/conformance-test.sh` (Phase 9),
-  a CI job running every `langspec/versions/0.1/examples/*.iqx` fixture
-  through both `poc/` and `compiler/`+`vm/` and diffing output
-  byte-for-byte. Points at the frozen `0.1` snapshot rather than the
-  top-level `langspec/examples/`, since `poc/` is frozen forever at
-  `0.1-poc`-equivalent grammar and can never parse a later active-target
-  spec's examples (see the `langspec/` bullet above).
+  per `docs/PLAN-0.1.md` §7. `scripts/conformance-test.sh` and
+  `scripts/phase7-run-smoke-test.sh` (0.1's Phase 9 cross-implementation
+  diff against `poc/`, and the compiler/+vm/-only "does every 0.1 fixture
+  still run" smoke test) were both **retired during `0.2` Phase 7**
+  (`docs/PLAN-0.2.md`): decisions 8-11's breaking changes to the object
+  model mean `compiler/`+`vm/` can no longer run `poc/`-era class
+  fixtures at all, and the repository owner's explicit call was to drop
+  cross-implementation/backward-compatibility testing entirely rather
+  than maintain it going forward — pre-`1.0`, an earlier version's
+  fixtures are historical artifacts, not a compatibility target.
 - **`compiler/` F# style**: targets the current F# language version (F# 10
   as of .NET 10) — prefer newer idioms where they cleanly simplify existing
   code (e.g. a discriminated union's auto-generated `.IsCaseName` property,
@@ -276,16 +279,18 @@ identical output to `poc`.
   old extension and are frozen, unrelated pre-renumbering planning
   snapshots (see the `langspec/` bullet above), not the same thing as
   `langspec/versions/<version>/examples/`'s per-version snapshots. These
-  are cross-implementation conformance fixtures: keep them runnable as
-  features land in *any implementation that has actually reached that
-  version*. While a version is still being phased into `compiler/`+`vm/`
-  (`docs/PLAN-0.X.md` §5), the top-level `examples/` describe that
-  version's target spec and are expected to be ahead of what currently
-  runs — CI is wired to exercise them against a real toolchain only once
-  their version fully ships (see `docs/PLAN-0.2.md`'s Phase 9 and the
-  scripts it points at in the meantime). If an example depends on an
-  unresolved design question, leave a note rather than changing the
-  example to match a guess.
+  are cross-implementation-*capable* fixtures in principle (same input,
+  same expected output, wherever more than one implementation can parse
+  the syntax at all) — but there's no automated CI enforcing that anymore;
+  see the `compiler/`/`vm/` testing bullet above for why
+  cross-implementation/backward-compatibility conformance testing was
+  retired entirely during `0.2` Phase 7. While a version is still being
+  phased into `compiler/`+`vm/` (`docs/PLAN-0.X.md` §5), the top-level
+  `examples/` describe that version's target spec and are expected to be
+  ahead of what currently runs; verifying they actually run once their
+  features land is a manual, per-phase step now, not a CI job. If an
+  example depends on an unresolved design question, leave a note rather
+  than changing the example to match a guess.
 - **Commit style**: short, lowercase, imperative summaries (see `git log`) —
   no enforced conventional-commits format.
 
@@ -298,8 +303,11 @@ actions. This is a supply-chain security requirement, not a style preference —
 don't relax it for convenience.
 
 Two workflows, two different jobs: `.github/workflows/ci.yml` runs on every
-push/PR (build + test both toolchains, the smoke test, the conformance
-suite); `.github/workflows/release.yml` fires only when a GitHub Release is
+push/PR (build + test both toolchains, plus `poc/`'s own standalone test
+suite — the cross-implementation conformance job and the 0.1-fixture smoke
+test were both retired during `0.2` Phase 7, see the `compiler/`/`vm/`
+testing bullet above); `.github/workflows/release.yml` fires only when a
+GitHub Release is
 published (`on: release: types: [published]`, not on tag push) and builds
 `iqaloxc`/`iqaloxvm` for Linux/macOS/Windows, attaching each platform's
 archive as a release asset. Release notes are written by hand against the

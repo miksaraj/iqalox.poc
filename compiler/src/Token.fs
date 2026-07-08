@@ -70,6 +70,7 @@ type TokenType =
     | Continue
     | Use
     | Mutable
+    | Pub
 
     // Literals.
     | Identifier
@@ -120,4 +121,5 @@ let keywords: Map<string, TokenType> =
         "continue", Continue
         "use", Use
         "mut", Mutable
+        "pub", Pub
     ]

@@ -108,7 +108,7 @@ let rec private lineOfStmt (stmt: BoundStmt) : int option =
         |> List.tryPick id
     | BFunctionStmt(_, decl) -> Some decl.Name.Line
     | BReturnStmt(keyword, _) -> Some keyword.Line
-    | BClassStmt(_, name, _, _) -> Some name.Line
+    | BClassStmt(_, name, _, _, _) -> Some name.Line
 
 /// Net stack effect of one instruction -- the only input `FunctionState`
 /// needs to keep `StackDepth` accurate as instructions are emitted.
@@ -150,11 +150,18 @@ let private stackEffect (instr: Instruction) : int =
     | Closure _ -> 1
     | Return -> -1
     | Class _ -> 1
-    | Method _ -> -1
+    | Method _
+    | MethodPub _ -> -1
     | Inherit -> 0
-    | GetProperty _ -> 0
-    | SetProperty _ -> -1
+    | GetProperty _
+    | GetPropertySelf _ -> 0
+    | SetProperty _
+    | SetPropertySelf _ -> -1
     | GetSuper _ -> -1
+    | PropertyPrivate _
+    | PropertyPrivateMut _
+    | PropertyPub _
+    | PropertyPubMut _ -> 0
     // Pops obj + index, pushes the element: net -1. SetIndex additionally
     // pops the value being assigned, then pushes it back (assignment is
     // an expression) -- net -2.
@@ -428,11 +435,25 @@ type private Codegen() =
             state.Emit(Call(List.length arguments)) |> ignore
         | BGet(obj, name) ->
             this.CompileExpr obj
-            state.Emit(GetProperty(state.AddStringConstant name.Lexeme)) |> ignore
+            let nameIndex = state.AddStringConstant name.Lexeme
+            // `docs/PLAN-0.2.md` decision 10: `self.x` (obj is exactly
+            // `BSelf`) is internal access, skipping the `pub` gate
+            // entirely; every other object expression -- including
+            // `instance.x` on some other, non-`self` reference to an
+            // instance of the very same class -- is external, per
+            // decision 10's own literal wording ("self.x" vs "instance.x
+            // from outside"). A purely syntactic check, needing no
+            // Resolver.fs-level class-hierarchy bookkeeping.
+            match obj with
+            | BSelf _ -> state.Emit(GetPropertySelf nameIndex) |> ignore
+            | _ -> state.Emit(GetProperty nameIndex) |> ignore
         | BSet(obj, name, value) ->
             this.CompileExpr obj
             this.CompileExpr value
-            state.Emit(SetProperty(state.AddStringConstant name.Lexeme)) |> ignore
+            let nameIndex = state.AddStringConstant name.Lexeme
+            match obj with
+            | BSelf _ -> state.Emit(SetPropertySelf nameIndex) |> ignore
+            | _ -> state.Emit(SetProperty nameIndex) |> ignore
         | BIndex(obj, index, _) ->
             this.CompileExpr obj
             this.CompileExpr index
@@ -488,7 +509,8 @@ type private Codegen() =
         | BFunctionStmt(binding, decl) ->
             this.CompileFunctionValue(decl, isMethod = false)
             this.CompileDeclareBinding binding
-        | BClassStmt(binding, name, superclass, methods) -> this.CompileClass(binding, name, superclass, methods)
+        | BClassStmt(binding, name, superclass, properties, methods) ->
+            this.CompileClass(binding, name, superclass, properties, methods)
         | BForStmt(initializer, condition, increment, body) -> this.CompileFor(initializer, condition, increment, body)
 
     member private this.CompileFunctionValue(decl: BoundFunctionDecl, isMethod: bool) : unit =
@@ -519,17 +541,24 @@ type private Codegen() =
         state.Emit(Closure(functionIndex, decl.Upvalues)) |> ignore
 
     member private this.CompileClass
-        (binding: DeclaredBinding, name: Token, superclass: (VariableBinding * Token) option, methods: BoundFunctionDecl list)
-        : unit =
+        (
+            binding: DeclaredBinding,
+            name: Token,
+            superclass: (VariableBinding * Token) option,
+            properties: BoundPropertyDecl list,
+            methods: BoundFunctionDecl list
+        ) : unit =
         state.Emit(Class(state.AddStringConstant name.Lexeme)) |> ignore
         this.CompileDeclareBinding binding
 
         superclass |> Option.iter (fun (superBinding, _) -> this.CompileGetBinding superBinding)
 
-        // A temporary re-fetch of the class value, so `Method` can reliably
-        // peek "the class" at a fixed relative stack position underneath
-        // each compiled method closure, regardless of what (if anything)
-        // is sitting below it -- mirrors `clox`'s own approach.
+        // A temporary re-fetch of the class value, so `Method`/`Property*`
+        // can reliably peek "the class" at a fixed relative stack position
+        // underneath each compiled method closure (or, for a property
+        // declaration, with nothing else pushed at all), regardless of
+        // what (if anything) is sitting below it -- mirrors `clox`'s own
+        // approach.
         match binding with
         | DeclaredLocal slot -> this.CompileGetBinding(LocalBinding slot)
         | DeclaredGlobal globalName -> this.CompileGetBinding(GlobalBinding globalName)
@@ -537,9 +566,31 @@ type private Codegen() =
         if superclass.IsSome then
             state.Emit Inherit |> ignore
 
+        // `docs/PLAN-0.2.md` decision 8: one of four opcodes per property,
+        // matching exactly which of `var name`/`var name mut`/
+        // `var name pub`/`var name pub mut` was declared. Pushes/pops
+        // nothing -- see `Bytecode.fs`'s doc comment on `PropertyPrivate`.
+        for propertyDecl in properties do
+            let nameIndex = state.AddStringConstant propertyDecl.Name.Lexeme
+            let opcode =
+                match propertyDecl.IsPub, propertyDecl.IsMutable with
+                | false, false -> PropertyPrivate nameIndex
+                | false, true -> PropertyPrivateMut nameIndex
+                | true, false -> PropertyPub nameIndex
+                | true, true -> PropertyPubMut nameIndex
+            state.Emit opcode |> ignore
+
         for methodDecl in methods do
             this.CompileFunctionValue(methodDecl, isMethod = true)
-            state.Emit(Method(state.AddStringConstant methodDecl.Name.Lexeme)) |> ignore
+            let nameIndex = state.AddStringConstant methodDecl.Name.Lexeme
+            // decision 11: `pub` methods are externally callable;
+            // everything else (including `init`, which the VM's own
+            // `callClass` always exempts from the check regardless of how
+            // it was declared) is emitted as the private opcode.
+            if methodDecl.IsPub then
+                state.Emit(MethodPub nameIndex) |> ignore
+            else
+                state.Emit(Method nameIndex) |> ignore
 
         state.Emit Pop |> ignore // discards the temporary re-fetch, not the class itself
 
