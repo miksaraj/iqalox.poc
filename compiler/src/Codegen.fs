@@ -108,7 +108,7 @@ let rec private lineOfStmt (stmt: BoundStmt) : int option =
         |> List.tryPick id
     | BFunctionStmt(_, decl) -> Some decl.Name.Line
     | BReturnStmt(keyword, _) -> Some keyword.Line
-    | BClassStmt(_, name, _, _, _) -> Some name.Line
+    | BClassStmt(_, name, _, _, _, _) -> Some name.Line
 
 /// Net stack effect of one instruction -- the only input `FunctionState`
 /// needs to keep `StackDepth` accurate as instructions are emitted.
@@ -153,6 +153,7 @@ let private stackEffect (instr: Instruction) : int =
     | Method _
     | MethodPub _ -> -1
     | Inherit -> 0
+    | Mixin -> -1
     | GetProperty _
     | GetPropertySelf _ -> 0
     | SetProperty _
@@ -509,8 +510,8 @@ type private Codegen() =
         | BFunctionStmt(binding, decl) ->
             this.CompileFunctionValue(decl, isMethod = false)
             this.CompileDeclareBinding binding
-        | BClassStmt(binding, name, superclass, properties, methods) ->
-            this.CompileClass(binding, name, superclass, properties, methods)
+        | BClassStmt(binding, name, superclass, mixins, properties, methods) ->
+            this.CompileClass(binding, name, superclass, mixins, properties, methods)
         | BForStmt(initializer, condition, increment, body) -> this.CompileFor(initializer, condition, increment, body)
 
     member private this.CompileFunctionValue(decl: BoundFunctionDecl, isMethod: bool) : unit =
@@ -545,6 +546,7 @@ type private Codegen() =
             binding: DeclaredBinding,
             name: Token,
             superclass: (VariableBinding * Token) option,
+            mixins: (VariableBinding * Token) list,
             properties: BoundPropertyDecl list,
             methods: BoundFunctionDecl list
         ) : unit =
@@ -553,18 +555,29 @@ type private Codegen() =
 
         superclass |> Option.iter (fun (superBinding, _) -> this.CompileGetBinding superBinding)
 
-        // A temporary re-fetch of the class value, so `Method`/`Property*`
-        // can reliably peek "the class" at a fixed relative stack position
-        // underneath each compiled method closure (or, for a property
-        // declaration, with nothing else pushed at all), regardless of
-        // what (if anything) is sitting below it -- mirrors `clox`'s own
-        // approach.
+        // A temporary re-fetch of the class value, so `Method`/`Property*`/
+        // `Mixin` can reliably peek "the class" at a fixed relative stack
+        // position underneath each compiled method closure (or, for a
+        // property declaration or mixin, with nothing else pushed at all
+        // once its own operand is popped), regardless of what (if
+        // anything) is sitting below it -- mirrors `clox`'s own approach.
         match binding with
         | DeclaredLocal slot -> this.CompileGetBinding(LocalBinding slot)
         | DeclaredGlobal globalName -> this.CompileGetBinding(GlobalBinding globalName)
 
         if superclass.IsSome then
             state.Emit Inherit |> ignore
+
+        // `docs/PLAN-0.2.md` decision 12: each `with`-listed mixin is
+        // pushed then immediately consumed by `Mixin`, unlike the
+        // superclass (which stays on the stack as the synthetic `super`
+        // local's backing slot) -- see `Bytecode.fs`'s doc comment on
+        // `Mixin`. Order doesn't affect correctness (`Resolver.fs`
+        // already guarantees no two composed sources share a member
+        // name), only determinism.
+        for mixinBinding, _ in mixins do
+            this.CompileGetBinding mixinBinding
+            state.Emit Mixin |> ignore
 
         // `docs/PLAN-0.2.md` decision 8: one of four opcodes per property,
         // matching exactly which of `var name`/`var name mut`/

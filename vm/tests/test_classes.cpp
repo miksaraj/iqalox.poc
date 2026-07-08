@@ -784,3 +784,156 @@ TEST_CASE("a subclass method can internally reach a superclass's private propert
     // without throwing (RuntimeError would propagate out of interpret()).
     REQUIRE_NOTHROW(vm.interpret(b.build()));
 }
+
+// docs/PLAN-0.2.md Phase 8: `with`-mixin composition (decision 12, this
+// version's simplified/non-C3 approximation of open question 2).
+
+TEST_CASE("a with-mixin's methods and properties are copied into the class", "[vm][classes][mixins]") {
+    // class Named { var label pub mut; pub greet() { return "hi"; } }
+    // class Robot with Named {}
+    // var r = Robot(); r.label = "R2"; result = r.greet() + r.label
+    Vm vm;
+    ChunkBuilder greetBuilder(vm);
+    uint16_t hi = greetBuilder.addStringConstant("hi");
+    greetBuilder.emitU16(OpCode::Constant, hi);
+    greetBuilder.emit(OpCode::Return);
+    ObjFunction* greetFn = greetBuilder.build(0, "greet");
+
+    ChunkBuilder b(vm);
+    uint16_t namedName = b.addStringConstant("Named");
+    uint16_t robotName = b.addStringConstant("Robot");
+    uint16_t labelName = b.addStringConstant("label");
+    uint16_t greetName = b.addStringConstant("greet");
+    uint16_t greetIndex = b.addFunctionConstant(greetFn);
+    uint16_t rName = b.addStringConstant("r");
+    uint16_t hiValue = b.addStringConstant("hello");
+
+    b.emitU16(OpCode::Class, namedName);
+    b.emitU16(OpCode::DefineGlobal, namedName);
+    b.emitU16(OpCode::GetGlobal, namedName);
+    b.emitU16(OpCode::PropertyPubMut, labelName);
+    b.emitClosure(greetIndex, {});
+    b.emitU16(OpCode::MethodPub, greetName);
+    b.emit(OpCode::Pop);
+
+    b.emitU16(OpCode::Class, robotName);
+    b.emitU16(OpCode::DefineGlobal, robotName);
+    b.emitU16(OpCode::GetGlobal, robotName);  // temp re-fetch
+    b.emitU16(OpCode::GetGlobal, namedName);  // the mixin
+    b.emit(OpCode::Mixin);
+    b.emit(OpCode::Pop);
+
+    b.emitU16(OpCode::GetGlobal, robotName);
+    b.emitU16(OpCode::Call, 0);
+    b.emitU16(OpCode::DefineGlobal, rName);
+
+    // r.label = "hello" (external -- pub mut, so allowed)
+    b.emitU16(OpCode::GetGlobal, rName);
+    b.emitU16(OpCode::Constant, hiValue);
+    b.emitU16(OpCode::SetProperty, labelName);
+    b.emit(OpCode::Pop);
+
+    // r.greet() (external -- pub, so allowed)
+    b.emitU16(OpCode::GetGlobal, rName);
+    b.emitU16(OpCode::GetProperty, greetName);
+    b.emitU16(OpCode::Call, 0);
+    uint16_t resultName = b.addStringConstant("result");
+    b.emitU16(OpCode::DefineGlobal, resultName);
+
+    vm.interpret(b.build());
+
+    REQUIRE(asString(*vm.getGlobal("result")) == "hi");
+}
+
+TEST_CASE("mixing in a non-class value is a runtime error", "[vm][classes][mixins]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t notAClassName = b.addStringConstant("NotAClass");
+    uint16_t five = b.addNumberConstant(5);
+    uint16_t robotName = b.addStringConstant("Robot");
+
+    b.emitU16(OpCode::Constant, five);
+    b.emitU16(OpCode::DefineGlobal, notAClassName);
+
+    b.emitU16(OpCode::Class, robotName);
+    b.emitU16(OpCode::DefineGlobal, robotName);
+    b.emitU16(OpCode::GetGlobal, robotName);
+    b.emitU16(OpCode::GetGlobal, notAClassName);
+    b.emit(OpCode::Mixin);
+
+    REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
+}
+
+TEST_CASE("extends and with compose together: superclass and mixin methods both land on the subclass",
+          "[vm][classes][mixins]") {
+    // class Base { pub baseM() { return "base"; } }
+    // class Mix { pub mixM() { return "mix"; } }
+    // class Combo extends Base with Mix {}
+    Vm vm;
+    ChunkBuilder baseMBuilder(vm);
+    uint16_t baseStr = baseMBuilder.addStringConstant("base");
+    baseMBuilder.emitU16(OpCode::Constant, baseStr);
+    baseMBuilder.emit(OpCode::Return);
+    ObjFunction* baseMFn = baseMBuilder.build(0, "baseM");
+
+    ChunkBuilder mixMBuilder(vm);
+    uint16_t mixStr = mixMBuilder.addStringConstant("mix");
+    mixMBuilder.emitU16(OpCode::Constant, mixStr);
+    mixMBuilder.emit(OpCode::Return);
+    ObjFunction* mixMFn = mixMBuilder.build(0, "mixM");
+
+    ChunkBuilder b(vm);
+    uint16_t baseName = b.addStringConstant("Base");
+    uint16_t mixName = b.addStringConstant("Mix");
+    uint16_t comboName = b.addStringConstant("Combo");
+    uint16_t baseMName = b.addStringConstant("baseM");
+    uint16_t mixMName = b.addStringConstant("mixM");
+    uint16_t baseMIndex = b.addFunctionConstant(baseMFn);
+    uint16_t mixMIndex = b.addFunctionConstant(mixMFn);
+    uint16_t cName = b.addStringConstant("c");
+
+    b.emitU16(OpCode::Class, baseName);
+    b.emitU16(OpCode::DefineGlobal, baseName);
+    b.emitU16(OpCode::GetGlobal, baseName);
+    b.emitClosure(baseMIndex, {});
+    b.emitU16(OpCode::MethodPub, baseMName);
+    b.emit(OpCode::Pop);
+
+    b.emitU16(OpCode::Class, mixName);
+    b.emitU16(OpCode::DefineGlobal, mixName);
+    b.emitU16(OpCode::GetGlobal, mixName);
+    b.emitClosure(mixMIndex, {});
+    b.emitU16(OpCode::MethodPub, mixMName);
+    b.emit(OpCode::Pop);
+
+    b.emitU16(OpCode::Class, comboName);
+    b.emitU16(OpCode::DefineGlobal, comboName);
+    b.emitU16(OpCode::GetGlobal, baseName);  // superclass
+    b.emitU16(OpCode::GetGlobal, comboName); // temp re-fetch
+    b.emit(OpCode::Inherit);
+    b.emitU16(OpCode::GetGlobal, mixName);   // the mixin
+    b.emit(OpCode::Mixin);
+    b.emit(OpCode::Pop);
+    b.emit(OpCode::Pop);  // discards the synthetic `super` local (Combo has a superclass)
+
+    b.emitU16(OpCode::GetGlobal, comboName);
+    b.emitU16(OpCode::Call, 0);
+    b.emitU16(OpCode::DefineGlobal, cName);
+
+    b.emitU16(OpCode::GetGlobal, cName);
+    b.emitU16(OpCode::GetProperty, baseMName);
+    b.emitU16(OpCode::Call, 0);
+    uint16_t r1Name = b.addStringConstant("r1");
+    b.emitU16(OpCode::DefineGlobal, r1Name);
+
+    b.emitU16(OpCode::GetGlobal, cName);
+    b.emitU16(OpCode::GetProperty, mixMName);
+    b.emitU16(OpCode::Call, 0);
+    uint16_t r2Name = b.addStringConstant("r2");
+    b.emitU16(OpCode::DefineGlobal, r2Name);
+
+    vm.interpret(b.build());
+
+    REQUIRE(asString(*vm.getGlobal("r1")) == "base");
+    REQUIRE(asString(*vm.getGlobal("r2")) == "mix");
+}

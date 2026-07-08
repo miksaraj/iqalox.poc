@@ -230,17 +230,36 @@ item) — not the whole plan. Add to this list rather than silently
 resolving, the same convention `docs/PLAN-0.1-POC.md` and
 `docs/PLAN-0.1.md` §2 already used.
 
-1. **Static (`trait`/`use`) conflict resolution.** If two `use`d traits
-   (or a trait and the class's own superclass) define the same member
-   name, what happens? PHP itself requires explicit `insteadof`/`as`
-   conflict resolution rather than silently picking one — does `0.2` need
-   the same, or is last-`use`d-wins (matching a flat, ordered copy)
-   acceptable? Blocks Phase 8.
-2. **Dynamic (`with`) linearization algorithm.** Scala's own `with` uses
-   C3 linearization over the full inheritance graph to resolve conflicts
-   and `super`-style chaining among mixed-in traits. Does `0.2` need the
-   full algorithm, or a simpler ordered-fallback approximation for a first
-   pass? Blocks Phase 8.
+1. ~~Static (`trait`/`use`) conflict resolution.~~ **Resolved by the
+   repository owner when Phase 8 began: compile-time error on any
+   conflict**, not PHP's `insteadof`/`as` (not in the frozen grammar,
+   `langspec/SYNTAX_GRAMMAR.md`) and not silent last-`use`d-wins. Two
+   `use`d traits sharing a member name, or a `use`d trait sharing one
+   with the class's own superclass, is a compile-time error the user
+   must resolve by renaming or by declaring the member directly on the
+   composing class (which always silently wins — that's normal
+   overriding, not a conflict). See Phase 8's own entry in §5 for the
+   implementation (`Resolver.fs`'s `checkNoConflicts`).
+2. ~~Dynamic (`with`) linearization algorithm.~~ **Resolved by the
+   repository owner when Phase 8 began, after a follow-up on the real
+   cost: ship a simplified approximation now, defer full C3.** `with`
+   composes via the same kind of flat, compile-time-conflict-checked
+   copy as `use` — just from a real class's already-compiled runtime
+   method/property table (a new `Mixin` opcode, mirroring `Inherit`)
+   rather than from a compile-time-only trait declaration. `super`
+   continues to resolve only against the `extends` superclass; it does
+   not chain through `with`-mixins under this approximation. Real C3
+   (a computed per-class Method Resolution Order, live MRO-walking
+   dispatch, and a `super` that resolves relative to the *runtime*
+   receiver's actual MRO position rather than a single value captured
+   once at class-declaration time) is logged as a genuine future
+   direction on `ROADMAP.md`'s "Language feature ideas under
+   consideration" section rather than attempted here — its blast radius
+   turned out to be much larger than the question's own framing
+   suggested (a foundational redesign of dispatch/`super` for every
+   `with`-using class, not an incremental addition), confirmed with the
+   repository owner via a dedicated scope-check before proceeding either
+   way. See Phase 8's own entry in §5 for the implementation.
 3. ~~Does privacy (properties *and* methods) extend to subclasses, or stop
    at exactly the declaring class?~~ **Resolved by the repository owner
    when Phase 7 began: protected-like.** A subclass's own methods count as
@@ -317,10 +336,16 @@ pending §2.3, a subclass) the member belongs to" — to implement decision
 10/11's internal/external split, since `0.1`'s `GetProperty`/
 `SetProperty`/method-call resolution never distinguished internal from
 external access at all; mixin/trait member resolution happens at
-class-declaration time, extending the existing superclass-method-table-copy
-mechanism (`vm/src/vm.cpp`'s `Inherit` opcode handler) to also fold in
-`use`d traits' members (flat copy) or `with`-listed mixins' members
-(linearized chain, pending §2.2's algorithm question).
+class-declaration time -- **as actually built in Phase 8, `use`d traits'
+members are inlined entirely at compile time in `Resolver.fs` (a trait
+has no runtime representation at all), while `with`-listed mixins extend
+the existing superclass-method-table-copy mechanism (`vm/src/vm.cpp`'s
+`Inherit` opcode handler) via a new sibling `Mixin` opcode, since a
+mixin is a real, independently-instantiable class whose members only
+exist once its own bytecode has actually run** (§2.2's algorithm
+question resolved as a simplified, non-C3 approximation of "linearized
+chain" — see Phase 8's own entry in §5 for the reasoning and the
+follow-up scope-check that led there).
 
 **`Codegen.fs`**: new opcodes for indexed get/set (bounds-checked at
 runtime, matching the existing `GetProperty`/`SetProperty` error-reporting
@@ -364,8 +389,8 @@ special pass to fix it.**
 | Matrices (nested vectors + stdlib) | §1.5, §2.5 | Done |
 | Property `pub`/`mut` modifiers | §1.8-10, §2.3 | Done |
 | Method `pub`/private | §1.11, §2.3 | Done |
-| Mixins (`with`, dynamic linearization) | §1.12, §2.2 | Not started |
-| Traits (`trait`/`use`, static copy) | §1.12, §2.1 | Not started |
+| Mixins (`with`, simplified non-C3 composition) | §1.12, §2.2 | Done |
+| Traits (`trait`/`use`, static copy) | §1.12, §2.1 | Done |
 
 ## 5. Suggested sequencing
 
@@ -914,11 +939,124 @@ since Phase 6 shipped. Renamed to `sum`/`addFive` — an example-authoring
 fix, not a language or compiler bug, and not logged in `docs/LANGUAGE.md`
 §13 for that reason.
 
-**Phase 8 — Mixins and traits.** `with`-dynamic and `trait`/`use`-static
-composition, extending `Inherit`'s existing method-table-copy mechanism.
-Needs §2.1 (static conflict resolution) and §2.2 (dynamic linearization
-algorithm) resolved first. Builds on Phase 7's (by-then-updated)
-class/property model.
+**Phase 8 — Mixins and traits — done.** §2.1/§2.2 resolved at the start
+of this phase (compile-time error on any conflict; a simplified,
+non-C3 approximation of `with`, full C3 deferred to `ROADMAP.md`'s
+language-feature-ideas list) — see their own entries above for the
+resolutions and the scope-check round that led to deferring C3
+specifically.
+
+Front end: `trait`/`with`/`use` were already reserved keywords with no
+grammar (`Token.fs`'s doc comment, since `0.1`); this phase gives them
+one. `Ast.fs` gains `TraitStmt(name, properties, methods, usedTraits)`
+(grammared identically to a class body per `langspec/SYNTAX_GRAMMAR.md`
+-- properties, nested `use`, methods) and extends `ClassStmt` with
+`mixins: Expr list` (the `with M1, M2` header list, each an ordinary
+`Variable` reference exactly like `superclass`) and `usedTraits: Token
+list` (every `use A, B` found anywhere in the class body, however many
+separate `use` clauses there are). `Parser.fs`'s `ClassDeclaration`/new
+`TraitDeclaration` share one `ClassBody` helper for the `classMember*`
+loop (`var` → property, `use` → trait-use, else → method).
+
+The real work is entirely in `Resolver.fs`, which now distinguishes
+three kinds of "does this class have member X" question, all answered
+from one small algebra (`MemberSet` = a name-keyed `Properties`/
+`Methods` map pair; `overrideWith`/`mergeAll`/`checkNoConflicts` compose
+them):
+
+1. **Traits are pure compile-time inlining, no runtime representation at
+   all.** `preRegisterTraits` builds a `TraitInfo` table; `flattenTrait`
+   recursively resolves a trait's own nested `use`s (with cycle
+   detection and memoization for the diamond case) into one flattened
+   `MemberSet`, applying `checkNoConflicts` at every level -- two
+   nested-used traits conflicting is exactly as much an error as two of
+   a *class*'s own used traits conflicting. `preRegisterClasses` then
+   merges each class's own literal body over its used traits' flattened
+   members (`overrideWith` -- the class's own declaration always
+   silently wins, matching PHP's real semantics for a class overriding
+   what a trait provides) into `InlinedProperties`/`InlinedMethods`,
+   which `Resolver.fs`'s `ClassStmt` case resolves directly as if the
+   user had written them by hand -- so a trait method's `self`/`super`
+   naturally resolve relative to whichever class actually uses it,
+   exactly like PHP (a trait has no inheritance identity of its own).
+   `resolve` filters every top-level `TraitStmt` out of the statement
+   list before the main pass ever runs; no `BTraitStmt`, no opcode, no
+   runtime object anywhere below `Resolver.fs` at all.
+2. **Mixins compose at runtime, since a mixin is a real, independently-
+   instantiable class**, not a compile-time-only declaration -- its
+   members only exist once its own `Class`/`Property*`/`Method*`
+   opcodes have actually run. One new opcode, `Mixin`, mirrors
+   `Inherit`'s "peek the class, copy members in" mechanics but pops its
+   operand (the mixin value) rather than leaving it on the stack: unlike
+   a superclass, a mixin's value is never needed again once copied in,
+   since `super` does not chain through `with`-mixins under this
+   version's approximation.
+3. **Conflict-checking needed a genuine new recursive computation,
+   `effectiveClassMembers`**, walking a class's superclass and every
+   mixin (each resolved the same way, transitively, with cycle detection
+   for a pathological `extends`/`with` loop) and applying
+   `checkNoConflicts` to them as siblings -- open question 1's answer
+   applied symmetrically to `with`, since nothing else was specified for
+   "what if two mixins disagree." A real subtlety found while writing
+   this, not anticipated by either open question's own framing: a
+   *trait*-contributed member conflicting with the superclass/a mixin
+   needed checking too (open question 1 explicitly names "a trait and
+   the class's own superclass" as a conflict scenario) -- but the
+   class's own *literal* body must NOT be checked against composed
+   sources the same way `use` is (that's just normal overriding). This
+   needed splitting `ClassInfo` into `OwnLiteral` (the literal body
+   alone) and `TraitContributed` (post-trait-merge, pre-own-override),
+   checked against the superclass/mixin set separately: `TraitContributed`
+   conflicting there is an error (same rule as any other composed-source
+   pair); `OwnLiteral` always wins, silently for methods (ordinary
+   polymorphism), but a redeclared *property* stays the compile-time
+   error `docs/PLAN-0.2.md` Phase 7 already established for the
+   superclass-only case (properties have no override semantics under
+   decision 9's write-once model), now extended to mixins for the same
+   reason. `effectiveClassMembers` also replaces Phase 7's
+   `findDeclaredProperty`/`findDeclaredMethod` ancestor walk outright --
+   decision 8's addendum ("declared somewhere in its own body or an
+   ancestor's") now also needs to see mixin- and trait-contributed
+   properties, which the unified computation already covers for free.
+
+A second real gap found only by actually running every top-level
+example end to end (not anticipated by any unit test, since it's a
+cross-cutting concern no single test exercises): a plain class with
+*no* `use` at all -- true of every class from Phases 1-7 -- must keep
+its exact declaration-order property/method sequence in the emitted
+bytecode, unchanged from before this phase. The conflict-checked merge
+is `Map`-keyed (alphabetical, not declaration-order) by necessity, so
+`preRegisterClasses` special-cases `usedTraits.IsEmpty` to skip the
+`Map` round-trip entirely and pass a plain class's own `properties`/
+`methods` straight through -- only a class that actually composes
+traits pays for (and needs) the reordering, new functionality with no
+prior ordering to preserve. Caught by two pre-existing Phase 7 Codegen/
+Resolver tests failing on exact-order assertions, not by any Phase 8
+test.
+
+`langspec/examples/mixins_and_traits.iqx` (already written, Phase 0)
+needed one real fix, not just verification: its last section tried
+`extends Vehicle with Flyable` where `Flyable` is a *trait* -- but a
+trait has no runtime existence at all, so `with` (which resolves its
+list as ordinary variable references to real classes) can't reach it,
+"Undefined variable 'Flyable'." Fixed by adding a genuine `Winged`
+class alongside the existing `Flyable` trait, mixing that in instead --
+an example-authoring gap surfaced only by first-time end-to-end
+execution, not a language or compiler bug, and a real, useful
+illustration of exactly why decision 12 splits `use` and `with` onto
+different kinds of entities in the first place.
+
+11 new xUnit tests (trait/mixin/use parsing including nested trait
+`use`; the `use`-inlining `self`/`super`-resolves-relative-to-the-using-
+class case; four distinct conflict-error scenarios -- trait-vs-trait,
+trait-vs-superclass, mixin-vs-mixin, and own-method-overriding-a-trait-
+is-*not*-an-error; circular trait `use` and undefined-trait errors; a
+mixin resolving as an ordinary variable reference; a with-mixin-only
+property satisfying decision 8's declared-property check) and 1 new
+Codegen instruction-sequence test (`Mixin`'s exact placement relative to
+`Inherit`/`Property*`/`Method*`) plus 3 new Catch2 tests (mixin method/
+property copying end-to-end, a non-class `with` target as a runtime
+error, and `extends`+`with` composing together on one class).
 
 **Phase 9 — Docs.** No conformance-suite split left to resolve — §2 item 6
 was resolved (and the underlying scripts/CI jobs retired outright) during
@@ -958,10 +1096,13 @@ already-proven pipeline, not a new implementation to stand up.
   density up per new token, the same lesson `0.1`'s own scanner phase
   already demonstrated (five real bugs found there specifically because
   the port was written carefully token-by-token, not copied wholesale).
-- **Mixin/trait semantics are the least fully specified area of this
-  plan** (§2.1, §2.2) — don't start Phase 8 without those resolved, or
-  Phase 7's already-changed class model risks getting extended twice in
-  slightly different directions.
+- ~~Mixin/trait semantics are the least fully specified area of this
+  plan~~ (§2.1, §2.2) — **resolved at the start of Phase 8** (compile-time
+  error on any composed-source conflict; a simplified, non-C3
+  approximation of `with`, real C3 explicitly deferred rather than
+  attempted after a dedicated scope-check found its actual blast radius
+  much larger than the open question's own framing suggested). Landed as
+  one extension of Phase 7's class model, not two independent ones.
 - **`langspec/` now needs an ongoing versioning convention it never
   needed before** (decision 13, §2.6) — `langspec/versions/<version>/`
   was chosen specifically to avoid colliding with the pre-existing,

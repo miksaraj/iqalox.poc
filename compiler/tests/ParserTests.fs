@@ -302,7 +302,7 @@ let ``the ignore operator is usable as a ternary branch`` () =
 [<Fact>]
 let ``class declaration parses methods`` () =
     match parseSource "class Duck { quack() { return 1; } }" with
-    | [ ClassStmt(name, superclass, [], [ method_ ]) ] ->
+    | [ ClassStmt(name, superclass, [], [], [ method_ ], []) ] ->
         Assert.Equal("Duck", name.Lexeme)
         Assert.True(superclass.IsNone)
         Assert.Equal("quack", method_.Name.Lexeme)
@@ -312,19 +312,19 @@ let ``class declaration parses methods`` () =
 [<Fact>]
 let ``class declaration parses a superclass`` () =
     match parseSource "class B extends A {}" with
-    | [ ClassStmt(_, Some(Variable superName), [], []) ] -> Assert.Equal("A", superName.Lexeme)
+    | [ ClassStmt(_, Some(Variable superName), [], [], [], []) ] -> Assert.Equal("A", superName.Lexeme)
     | stmts -> failwith $"expected one ClassStmt with a Variable superclass, got %A{stmts}"
 
 [<Fact>]
 let ``class body tolerates blank lines`` () =
     match parseSource "class Duck {\n\n    quack() { return 1; }\n\n}" with
-    | [ ClassStmt(_, _, [], [ _ ]) ] -> ()
+    | [ ClassStmt(_, _, [], [], [ _ ], []) ] -> ()
     | stmts -> failwith $"expected one ClassStmt with one method, got %A{stmts}"
 
 [<Fact>]
 let ``pub method is parsed with IsPub true`` () =
     match parseSource "class Duck { pub quack() { return 1; } }" with
-    | [ ClassStmt(_, _, [], [ method_ ]) ] ->
+    | [ ClassStmt(_, _, [], [], [ method_ ], []) ] ->
         Assert.Equal("quack", method_.Name.Lexeme)
         Assert.True(method_.IsPub)
     | stmts -> failwith $"expected one ClassStmt with one pub method, got %A{stmts}"
@@ -335,7 +335,7 @@ let ``property declaration parses all four pub/mut combinations`` () =
         parseSource
             "class Duck { var a; var b mut; var c pub; var d pub mut; init() { self.a = 1; self.b = 1; self.c = 1; self.d = 1; } }"
     with
-    | [ ClassStmt(_, _, [ a; b; c; d ], [ _ ]) ] ->
+    | [ ClassStmt(_, _, [], [ a; b; c; d ], [ _ ], []) ] ->
         Assert.Equal("a", a.Name.Lexeme)
         Assert.False(a.IsPub)
         Assert.False(a.IsMutable)
@@ -349,6 +349,43 @@ let ``property declaration parses all four pub/mut combinations`` () =
         Assert.True(d.IsPub)
         Assert.True(d.IsMutable)
     | stmts -> failwith $"expected one ClassStmt with four properties, got %A{stmts}"
+
+[<Fact>]
+let ``class declaration parses a with-mixin list`` () =
+    match parseSource "class Robot with Named, Steel {}" with
+    | [ ClassStmt(_, None, [ Variable m1; Variable m2 ], [], [], []) ] ->
+        Assert.Equal("Named", m1.Lexeme)
+        Assert.Equal("Steel", m2.Lexeme)
+    | stmts -> failwith $"expected one ClassStmt with two mixins, got %A{stmts}"
+
+[<Fact>]
+let ``class declaration parses extends combined with with`` () =
+    match parseSource "class FlyingCar extends Vehicle with Flyable {}" with
+    | [ ClassStmt(_, Some(Variable superName), [ Variable mixinName ], [], [], []) ] ->
+        Assert.Equal("Vehicle", superName.Lexeme)
+        Assert.Equal("Flyable", mixinName.Lexeme)
+    | stmts -> failwith $"expected one ClassStmt with a superclass and a mixin, got %A{stmts}"
+
+[<Fact>]
+let ``class body parses a use clause`` () =
+    match parseSource "class Duck { use Flyable, Swimmable\n quack() { return 1; } }" with
+    | [ ClassStmt(_, _, [], [], [ method_ ], [ t1; t2 ]) ] ->
+        Assert.Equal("quack", method_.Name.Lexeme)
+        Assert.Equal("Flyable", t1.Lexeme)
+        Assert.Equal("Swimmable", t2.Lexeme)
+    | stmts -> failwith $"expected one ClassStmt with two used traits, got %A{stmts}"
+
+[<Fact>]
+let ``trait declaration parses properties, methods, and nested use`` () =
+    match parseSource "trait Flyable { use Winged\n var altitude mut\n pub fly() { return 1; } }" with
+    | [ TraitStmt(name, [ altitude ], [ fly ], [ winged ]) ] ->
+        Assert.Equal("Flyable", name.Lexeme)
+        Assert.Equal("altitude", altitude.Name.Lexeme)
+        Assert.True(altitude.IsMutable)
+        Assert.Equal("fly", fly.Name.Lexeme)
+        Assert.True(fly.IsPub)
+        Assert.Equal("Winged", winged.Lexeme)
+    | stmts -> failwith $"expected one TraitStmt, got %A{stmts}"
 
 [<Fact>]
 let ``property access is a Get expression`` () =

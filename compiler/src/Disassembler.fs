@@ -73,6 +73,7 @@ let disassembleInstruction (chunk: Chunk) (index: int) : string =
     | Method i -> withConstant "METHOD" i
     | MethodPub i -> withConstant "METHOD_PUB" i
     | Inherit -> simple "INHERIT"
+    | Mixin -> simple "MIXIN"
     | GetProperty i -> withConstant "GET_PROPERTY" i
     | GetPropertySelf i -> withConstant "GET_PROPERTY_SELF" i
     | SetProperty i -> withConstant "SET_PROPERTY" i

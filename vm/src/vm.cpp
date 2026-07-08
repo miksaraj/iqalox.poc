@@ -594,6 +594,39 @@ void Vm::run() {
                 subclass->properties = superclass->properties;
                 break;
             }
+            case OpCode::Mixin: {
+                // docs/PLAN-0.2.md Phase 8, decision 12's `with M1, M2`
+                // (this version's simplified, non-C3 approximation of
+                // open question 2): merges the mixin's own methods/
+                // properties into the class being declared, exactly like
+                // Inherit -- except the mixin value itself is popped, not
+                // left on the stack, since (unlike a superclass) nothing
+                // needs it again afterward. `Resolver.fs`'s
+                // `effectiveClassMembers` already rejects any name shared
+                // between two composed sources (the superclass and each
+                // mixin) at compile time, so plain insertion here can
+                // never silently clobber something the class cares about
+                // -- only the class's own later Property*/Method* opcodes
+                // are expected to overwrite an entry copied in here, and
+                // that's the intended "own declaration always wins" rule,
+                // not a conflict.
+                Value mixinValue = pop();
+                if (!isObj(mixinValue) || asObj(mixinValue)->type != ObjType::Class) {
+                    runtimeError("Mixin must be a class.");
+                }
+                auto* mixin = static_cast<ObjClass*>(asObj(mixinValue));
+                auto* klass = static_cast<ObjClass*>(asObj(peek(0)));
+                for (const auto& entry : mixin->methods) {
+                    klass->methods[entry.first] = entry.second;
+                }
+                for (const auto& name : mixin->publicMethods) {
+                    klass->publicMethods.insert(name);
+                }
+                for (const auto& entry : mixin->properties) {
+                    klass->properties[entry.first] = entry.second;
+                }
+                break;
+            }
             case OpCode::PropertyPrivate: {
                 ObjString* name = stringConstantAt(frame, readU16(frame));
                 static_cast<ObjClass*>(asObj(peek(0)))->properties[name->value] = PropertyMeta{false, false};

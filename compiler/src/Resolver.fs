@@ -100,101 +100,364 @@ let private preRegisterGlobals (globals: Dictionary<string, bool>) (errors: Resi
         match stmt with
         | VarStmt(name, _, isMutable) -> register name isMutable
         | FunctionStmt decl -> register decl.Name false
-        | ClassStmt(name, _, _, _) -> register name false
+        | ClassStmt(name, _, _, _, _, _) -> register name false
         | _ -> ()
+
+/// A class or trait's own property/method declarations, flattened into
+/// name-keyed maps -- the unit `checkNoConflicts`/`overrideWith`/
+/// `mergeAll` below operate on, for `docs/PLAN-0.2.md` decision 12's
+/// compile-time composition (traits via `use`, mixins via `with`).
+type private MemberSet = { Properties: Map<string, PropertyDecl>; Methods: Map<string, FunctionDecl> }
+
+let private emptyMemberSet: MemberSet = { Properties = Map.empty; Methods = Map.empty }
+
+let private memberNames (m: MemberSet) : Set<string> =
+    Set.union (m.Properties |> Map.toSeq |> Seq.map fst |> Set.ofSeq) (m.Methods |> Map.toSeq |> Seq.map fst |> Set.ofSeq)
+
+/// `winner`'s own declarations take priority over anything `loser`
+/// contributes under the same name -- used for "a class's/trait's own
+/// body always overrides whatever composition brings in," never itself a
+/// conflict (only *sibling* composed sources conflicting with each other
+/// is, per `checkNoConflicts`).
+let private overrideWith (winner: MemberSet) (loser: MemberSet) : MemberSet =
+    { Properties = Map.fold (fun acc k v -> Map.add k v acc) loser.Properties winner.Properties
+      Methods = Map.fold (fun acc k v -> Map.add k v acc) loser.Methods winner.Methods }
+
+let private mergeAll (sets: MemberSet list) : MemberSet = sets |> List.fold overrideWith emptyMemberSet
+
+/// docs/PLAN-0.2.md open questions 1-2, both resolved the same way by the
+/// repository owner: two composed sources (used traits, a used trait vs.
+/// the class's own superclass, `with`-mixins, a mixin vs. the superclass,
+/// ...) sharing a member name is a compile-time error -- there is no
+/// `insteadof`/`as`-style resolution syntax (not in `langspec/
+/// SYNTAX_GRAMMAR.md`), so the only way out is renaming, or declaring the
+/// member directly on the composing class/trait itself (which always
+/// wins, silently, via `overrideWith` -- never itself flagged here).
+let private checkNoConflicts
+    (errors: ResizeArray<ResolveError>)
+    (anchor: Token)
+    (contextDescription: string)
+    (sources: (string * MemberSet) list)
+    : unit =
+    let rec loop =
+        function
+        | [] -> ()
+        | (name1: string, m1: MemberSet) :: rest ->
+            for name2, m2 in rest do
+                for overlapping in Set.intersect (memberNames m1) (memberNames m2) do
+                    errors.Add
+                        { Message =
+                            $"'{overlapping}' is declared by both '{name1}' and '{name2}' in {contextDescription} -- rename one, or declare '{overlapping}' directly to resolve the conflict."
+                          Token = anchor }
+            loop rest
+    loop sources
+
+/// A single class or trait body's own declarations as a `MemberSet` --
+/// also where a duplicate property, duplicate method, or a property/
+/// method name collision *within that one body* is caught (unrelated to
+/// `checkNoConflicts`, which is about *separate* composed sources
+/// conflicting with each other, not one body's own internal duplicates).
+let private buildOwnMemberSet
+    (errors: ResizeArray<ResolveError>)
+    (contextDescription: string)
+    (properties: PropertyDecl list)
+    (methods: FunctionDecl list)
+    : MemberSet =
+    let methodMap =
+        methods
+        |> List.fold
+            (fun (acc: Map<string, FunctionDecl>) (m: FunctionDecl) ->
+                if acc.ContainsKey m.Name.Lexeme then
+                    errors.Add
+                        { Message = $"Method '{m.Name.Lexeme}' already declared in {contextDescription}."
+                          Token = m.Name }
+                    acc
+                else
+                    acc.Add(m.Name.Lexeme, m))
+            Map.empty
+    let propMap =
+        properties
+        |> List.fold
+            (fun (acc: Map<string, PropertyDecl>) (p: PropertyDecl) ->
+                if acc.ContainsKey p.Name.Lexeme then
+                    errors.Add
+                        { Message = $"Property '{p.Name.Lexeme}' already declared in {contextDescription}."
+                          Token = p.Name }
+                    acc
+                elif methodMap.ContainsKey p.Name.Lexeme then
+                    errors.Add
+                        { Message = $"'{p.Name.Lexeme}' is declared as both a property and a method in {contextDescription}."
+                          Token = p.Name }
+                    acc
+                else
+                    acc.Add(p.Name.Lexeme, p))
+            Map.empty
+    { Properties = propMap; Methods = methodMap }
+
+/// One top-level `trait T { ... }`'s own raw declarations, keyed by name
+/// -- built by `preRegisterTraits` before any class's `use` is resolved,
+/// exactly like `preRegisterClasses` does for classes. A trait has no
+/// `extends`/`with` of its own (`langspec/SYNTAX_GRAMMAR.md`'s
+/// `traitDecl` grammar), only possibly-nested `use` of other traits.
+type private TraitInfo =
+    { Name: Token
+      Properties: PropertyDecl list
+      Methods: FunctionDecl list
+      UsedTraitNames: Token list }
+
+let private preRegisterTraits (traits: Dictionary<string, TraitInfo>) (errors: ResizeArray<ResolveError>) (stmts: Stmt list) =
+    for stmt in stmts do
+        match stmt with
+        | TraitStmt(name, properties, methods, usedTraits) ->
+            if traits.ContainsKey name.Lexeme then
+                errors.Add { Message = $"Trait '{name.Lexeme}' already declared."; Token = name }
+            else
+                traits.[name.Lexeme] <-
+                    { Name = name; Properties = properties; Methods = methods; UsedTraitNames = usedTraits }
+        | _ -> ()
+
+/// Recursively flattens trait `traitName`'s own members plus everything
+/// its own nested `use` clauses pull in, applying `checkNoConflicts` at
+/// every level (two of a trait's own nested-used traits conflicting is
+/// exactly as much an error as two of a *class*'s used traits
+/// conflicting -- same rule, just one level higher). `visiting` turns a
+/// `trait A { use B }` / `trait B { use A }` cycle into a clean error
+/// instead of unbounded recursion; `cache` means a diamond (two different
+/// traits both using a third) only flattens that third trait once.
+let rec private flattenTrait
+    (traits: Dictionary<string, TraitInfo>)
+    (errors: ResizeArray<ResolveError>)
+    (cache: Dictionary<string, MemberSet>)
+    (visiting: Set<string>)
+    (usageToken: Token)
+    (traitName: string)
+    : MemberSet =
+    match cache.TryGetValue traitName with
+    | true, cached -> cached
+    | false, _ ->
+        if visiting.Contains traitName then
+            errors.Add { Message = $"Circular trait composition involving '{traitName}'."; Token = usageToken }
+            emptyMemberSet
+        else
+            match traits.TryGetValue traitName with
+            | false, _ ->
+                errors.Add { Message = $"Undefined trait '{traitName}'."; Token = usageToken }
+                emptyMemberSet
+            | true, info ->
+                let visiting = visiting.Add traitName
+                let nested =
+                    info.UsedTraitNames
+                    |> List.map (fun t -> t.Lexeme, flattenTrait traits errors cache visiting t t.Lexeme)
+                checkNoConflicts errors info.Name $"trait '{traitName}'" nested
+                let ownSet = buildOwnMemberSet errors $"trait '{traitName}'" info.Properties info.Methods
+                let result = overrideWith ownSet (nested |> List.map snd |> mergeAll)
+                cache.[traitName] <- result
+                result
 
 /// One top-level class's own declared members, keyed by name -- built by
 /// `preRegisterClasses` before any method body is resolved, exactly like
 /// `preRegisterGlobals` above, so forward/mutual references between
-/// classes (and looking up an ancestor's declared properties while
-/// resolving a *subclass*'s methods) don't depend on file order.
+/// classes (and looking up an ancestor's/mixin's declared properties
+/// while resolving a *subclass*'s methods) don't depend on file order.
 /// `docs/PLAN-0.2.md` decision 8's addendum: every property a class uses
-/// must be declared somewhere in its own body or an ancestor's -- this is
-/// the compile-time table that check is answered against.
+/// must be declared somewhere in its own body, an ancestor's, a `with`
+/// mixin's, or a `use`d trait's -- this is the compile-time table that
+/// check is answered against. `InlinedProperties`/`InlinedMethods`
+/// already have every `use`d trait's own members merged in (per
+/// `flattenTrait` above) -- `Resolver.fs`'s `ClassStmt` case resolves
+/// these two lists directly and needs no further `use` handling of its
+/// own at all; only `SuperclassName`/`MixinNames` remain to walk for
+/// `effectiveClassMembers` below, since those two compose at *runtime*
+/// (`Inherit`/`Mixin`), not at compile time.
 type private ClassInfo =
-    { SuperclassName: string option
-      Properties: Map<string, PropertyDecl>
-      MethodNames: Set<string> }
+    { Name: Token
+      SuperclassName: string option
+      MixinNames: string list
+      /// The class's own literal body only -- never conflict-checked
+      /// against a used trait (a class's own explicit declaration always
+      /// silently overrides a trait's, matching PHP's real semantics),
+      /// but *does* still need checking against the superclass/mixins in
+      /// `effectiveClassMembers` (a property redeclaration is still an
+      /// error there; a method override is not).
+      OwnLiteral: MemberSet
+      /// Everything brought in via `use`, already flattened/conflict-
+      /// checked against `OwnLiteral`'s siblings (other used traits) --
+      /// kept separate from `OwnLiteral` because a trait-contributed
+      /// member conflicting with the superclass/a mixin *is* one of
+      /// open question 1's named conflict scenarios ("a trait and the
+      /// class's own superclass"), unlike the class's own literal
+      /// declarations, which always win silently over anything composed.
+      TraitContributed: MemberSet
+      /// `OwnLiteral` merged over `TraitContributed` -- exactly what
+      /// `Resolver.fs`'s `ClassStmt` case resolves as this class's own
+      /// properties/methods, needing no further `use` handling at all.
+      InlinedProperties: PropertyDecl list
+      InlinedMethods: FunctionDecl list }
 
-/// Walks `className`'s own declared properties, then its ancestors',
-/// stopping at the first match -- mirrors decision 10's internal-access
-/// rule ("self.x" resolves against whichever class in the hierarchy
-/// actually declared `x`, own class or ancestor, per the now-resolved
-/// §2.3 protected-like reading).
-let rec private findDeclaredProperty
+let private preRegisterClasses
     (classes: Dictionary<string, ClassInfo>)
-    (className: string)
-    (propName: string)
-    : PropertyDecl option =
-    match classes.TryGetValue className with
-    | false, _ -> None
-    | true, info ->
-        match info.Properties.TryFind propName with
-        | Some p -> Some p
-        | None -> info.SuperclassName |> Option.bind (fun superName -> findDeclaredProperty classes superName propName)
-
-/// Same ancestor walk, for method names -- used only to give a more
-/// specific "that's a method, not a property" diagnostic when a
-/// `self.x = value` targets a declared method instead of an undeclared
-/// name entirely (§8's addendum doesn't cover this case explicitly; a
-/// dedicated message is just better engineering, not a new design axis).
-let rec private findDeclaredMethod
-    (classes: Dictionary<string, ClassInfo>)
-    (className: string)
-    (methodName: string)
-    : bool =
-    match classes.TryGetValue className with
-    | false, _ -> false
-    | true, info ->
-        info.MethodNames.Contains methodName
-        || (info.SuperclassName |> Option.exists (fun superName -> findDeclaredMethod classes superName methodName))
-
-let private preRegisterClasses (classes: Dictionary<string, ClassInfo>) (errors: ResizeArray<ResolveError>) (stmts: Stmt list) =
+    (traits: Dictionary<string, TraitInfo>)
+    (traitCache: Dictionary<string, MemberSet>)
+    (errors: ResizeArray<ResolveError>)
+    (stmts: Stmt list)
+    =
     for stmt in stmts do
         match stmt with
-        | ClassStmt(name, superclassExpr, properties, methods) ->
+        | ClassStmt(name, superclassExpr, mixinExprs, properties, methods, usedTraits) ->
             let superclassName =
                 superclassExpr
                 |> Option.map (function
                     | Variable superName -> superName.Lexeme
                     | other -> failwith $"unreachable: superclass is always a bare Variable, got %A{other}")
-            let methodNames = methods |> List.map (fun m -> m.Name.Lexeme) |> Set.ofList
-            let mutable propMap = Map.empty
-            for p in properties do
-                if propMap.ContainsKey p.Name.Lexeme then
-                    errors.Add
-                        { Message = $"Property '{p.Name.Lexeme}' already declared in class '{name.Lexeme}'."
-                          Token = p.Name }
-                elif methodNames.Contains p.Name.Lexeme then
-                    errors.Add
-                        { Message =
-                            $"'{p.Name.Lexeme}' is declared as both a property and a method in class '{name.Lexeme}'."
-                          Token = p.Name }
+            let mixinNames =
+                mixinExprs
+                |> List.map (function
+                    | Variable mixinName -> mixinName.Lexeme
+                    | other -> failwith $"unreachable: a mixin is always a bare Variable, got %A{other}")
+
+            let ownLiteral = buildOwnMemberSet errors $"class '{name.Lexeme}'" properties methods
+
+            // No `use` at all is by far the common case (every class
+            // before this phase existed) -- skip the `Map`-keyed merge
+            // entirely then, so a plain class's property/method order in
+            // the emitted bytecode is *exactly* its own declaration
+            // order, unchanged from before `use`/`with` existed. Only a
+            // class that actually composes traits pays for (and needs)
+            // the conflict-checked merge below, whose result is ordered
+            // by name (`Map.toList`) rather than by declaration site --
+            // a reasonable, deterministic tradeoff for genuinely new
+            // functionality with no prior ordering to preserve.
+            let traitContributed, inlinedProperties, inlinedMethods =
+                if usedTraits.IsEmpty then
+                    emptyMemberSet, properties, methods
                 else
-                    propMap <- propMap.Add(p.Name.Lexeme, p)
-            classes.[name.Lexeme] <- { SuperclassName = superclassName; Properties = propMap; MethodNames = methodNames }
+                    let usedTraitSets =
+                        usedTraits
+                        |> List.map (fun t -> t.Lexeme, flattenTrait traits errors traitCache Set.empty t t.Lexeme)
+                    checkNoConflicts errors name $"class '{name.Lexeme}'" usedTraitSets
+                    let traitContributed = usedTraitSets |> List.map snd |> mergeAll
+                    let effective = overrideWith ownLiteral traitContributed
+                    traitContributed,
+                    (effective.Properties |> Map.toList |> List.map snd),
+                    (effective.Methods |> Map.toList |> List.map snd)
+
+            classes.[name.Lexeme] <-
+                { Name = name
+                  SuperclassName = superclassName
+                  MixinNames = mixinNames
+                  OwnLiteral = ownLiteral
+                  TraitContributed = traitContributed
+                  InlinedProperties = inlinedProperties
+                  InlinedMethods = inlinedMethods }
         | _ -> ()
 
-    // Second pass: a property redeclared somewhere up its own ancestor
-    // chain (not just within its own class, already caught above) --
-    // needs the full table built first, since an ancestor can be
-    // declared later in the same file (mirroring preRegisterGlobals's own
-    // order-independence).
-    for stmt in stmts do
-        match stmt with
-        | ClassStmt(name, _, properties, _) ->
-            let info = classes.[name.Lexeme]
-            for p in properties do
-                match info.SuperclassName with
-                | Some superName when (findDeclaredProperty classes superName p.Name.Lexeme).IsSome ->
+/// Recursively computes class `className`'s full effective member set --
+/// its own body plus its used traits (already flattened into
+/// `InlinedProperties`/`InlinedMethods`), plus its superclass's and every
+/// `with`-mixin's own effective sets (each resolved the same way,
+/// transitively). `checkNoConflicts` applies to the superclass and every
+/// mixin as siblings -- decision 12's "closer to real multiple
+/// inheritance" without full C3 (docs/PLAN-0.2.md open question 2,
+/// deferred) still needs *some* answer for "what if two mixins (or a
+/// mixin and the superclass) disagree," and the repository owner's Q1
+/// answer (compile error on any trait conflict) is applied symmetrically
+/// here rather than picking a silent copy-order winner for mixins alone.
+/// The class's own body (already folded into `InlinedProperties`/
+/// `InlinedMethods`) always overrides any of this, same as `use`.
+let rec private effectiveClassMembers
+    (classes: Dictionary<string, ClassInfo>)
+    (errors: ResizeArray<ResolveError>)
+    (cache: Dictionary<string, MemberSet>)
+    (visiting: Set<string>)
+    (usageToken: Token)
+    (className: string)
+    : MemberSet =
+    match cache.TryGetValue className with
+    | true, cached -> cached
+    | false, _ ->
+        if visiting.Contains className then
+            errors.Add { Message = $"Circular class hierarchy involving '{className}'."; Token = usageToken }
+            emptyMemberSet
+        else
+            match classes.TryGetValue className with
+            | false, _ -> emptyMemberSet // an undeclared name here is caught elsewhere (Inherit/Mixin's own runtime "must be a class" check)
+            | true, info ->
+                let visiting = visiting.Add className
+                let superSet =
+                    info.SuperclassName
+                    |> Option.map (fun s -> s, effectiveClassMembers classes errors cache visiting info.Name s)
+                let mixinSets =
+                    info.MixinNames |> List.map (fun m -> m, effectiveClassMembers classes errors cache visiting info.Name m)
+                let composedSources = (superSet |> Option.toList) @ mixinSets
+                checkNoConflicts errors info.Name $"class '{className}'" composedSources
+                let composedMerged = composedSources |> List.map snd |> mergeAll
+
+                // `TraitContributed` is checked against the composed
+                // (superclass/mixin) set exactly like any other pair of
+                // composed sources conflicting -- open question 1 names
+                // "a trait and the class's own superclass" as one of its
+                // own conflict scenarios, so a trait-provided member is
+                // never allowed to silently win over (or lose to) an
+                // ancestor/mixin, unlike the class's own literal body.
+                checkNoConflicts errors info.Name $"class '{className}'" [ $"class '{className}' (used traits)", info.TraitContributed; "its ancestors/mixins", composedMerged ]
+
+                // The class's own *literal* declarations always win --
+                // silently for methods (ordinary polymorphism, unchanged
+                // since 0.1), but a redeclared *property* still has no
+                // override semantics to speak of (decision 8/9's
+                // write-once model has no notion of "which declaration
+                // wins"), so it stays the compile-time error
+                // `docs/PLAN-0.2.md` Phase 7 originally established for
+                // the superclass-only case, now applied to mixins too for
+                // the same reason.
+                let inheritedMerged = overrideWith info.TraitContributed composedMerged
+                for propName in Set.intersect (info.OwnLiteral.Properties |> Map.toSeq |> Seq.map fst |> Set.ofSeq) (memberNames inheritedMerged) do
                     errors.Add
-                        { Message =
-                            $"Property '{p.Name.Lexeme}' already declared by an ancestor of class '{name.Lexeme}'."
-                          Token = p.Name }
-                | _ -> ()
-        | _ -> ()
+                        { Message = $"Property '{propName}' already declared by an ancestor/mixin of class '{className}'."
+                          Token = info.Name }
+                let result = overrideWith info.OwnLiteral inheritedMerged
+                cache.[className] <- result
+                result
 
-type private Resolver(globals: Dictionary<string, bool>, classes: Dictionary<string, ClassInfo>) =
+/// Runs `effectiveClassMembers` for every registered class once, so every
+/// conflict is reported exactly once (subsequent lookups from
+/// `findDeclaredProperty`/`findDeclaredMethod` during the main resolve
+/// pass just hit this cache, never re-triggering `checkNoConflicts`).
+let private computeAllEffectiveClassMembers
+    (classes: Dictionary<string, ClassInfo>)
+    (errors: ResizeArray<ResolveError>)
+    : Dictionary<string, MemberSet> =
+    let cache = Dictionary<string, MemberSet>()
+    for KeyValue(className, info) in classes do
+        effectiveClassMembers classes errors cache Set.empty info.Name className |> ignore
+    cache
+
+/// Looks `propName` up in `className`'s full effective member set (own
+/// body, used traits, superclass, and mixins, all already flattened by
+/// `computeAllEffectiveClassMembers`) -- mirrors decision 10's internal-
+/// access rule ("self.x" resolves against whichever source in the
+/// composition actually declared `x`), per the now-resolved §2.3
+/// protected-like reading extended to mixins/traits the same way.
+let private findDeclaredProperty
+    (effectiveMembers: Dictionary<string, MemberSet>)
+    (className: string)
+    (propName: string)
+    : PropertyDecl option =
+    match effectiveMembers.TryGetValue className with
+    | true, m -> m.Properties.TryFind propName
+    | false, _ -> None
+
+/// Same lookup, for method names -- used only to give a more specific
+/// "that's a method, not a property" diagnostic when a `self.x = value`
+/// targets a declared method instead of an undeclared name entirely
+/// (decision 8's addendum doesn't cover this case explicitly; a
+/// dedicated message is just better engineering, not a new design axis).
+let private findDeclaredMethod (effectiveMembers: Dictionary<string, MemberSet>) (className: string) (methodName: string) : bool =
+    match effectiveMembers.TryGetValue className with
+    | true, m -> m.Methods.ContainsKey methodName
+    | false, _ -> false
+
+type private Resolver(globals: Dictionary<string, bool>, classes: Dictionary<string, ClassInfo>, effectiveMembers: Dictionary<string, MemberSet>) =
     let errors = ResizeArray<ResolveError>()
     let mutable context = FunctionContext(None)
     // The name of the class whose method body is currently being resolved
@@ -270,7 +533,7 @@ type private Resolver(globals: Dictionary<string, bool>, classes: Dictionary<str
             let binding = declareVariable decl.Name false
             BFunctionStmt(binding, this.ResolveFunction(decl, isMethod = false))
         | ReturnStmt(keyword, value) -> BReturnStmt(keyword, value |> Option.map this.ResolveExpr)
-        | ClassStmt(name, superclassExpr, properties, methods) ->
+        | ClassStmt(name, superclassExpr, mixinExprs, properties, methods, _) ->
             let binding = declareVariable name false
 
             let boundSuperclass =
@@ -280,6 +543,14 @@ type private Resolver(globals: Dictionary<string, bool>, classes: Dictionary<str
                         let refBinding, _ = resolveReference superName.Lexeme
                         refBinding, superName
                     | other -> failwith $"unreachable: superclass is always a bare Variable, got %A{other}")
+
+            let boundMixins: (VariableBinding * Token) list =
+                mixinExprs
+                |> List.map (function
+                    | Variable mixinName ->
+                        let refBinding, _ = resolveReference mixinName.Lexeme
+                        refBinding, mixinName
+                    | other -> failwith $"unreachable: a mixin is always a bare Variable, got %A{other}")
 
             if boundSuperclass.IsSome then
                 beginScope ()
@@ -292,19 +563,49 @@ type private Resolver(globals: Dictionary<string, bool>, classes: Dictionary<str
                       IsMutable = false
                       Depth = context.ScopeDepth }
 
+            // `classes.[name.Lexeme]`'s Inlined*/* already has this
+            // class's own body merged with every `use`d trait's members
+            // (`preRegisterClasses`/`flattenTrait`) -- resolved here
+            // exactly as if the user had written them directly, so a
+            // trait method's `self`/`super` naturally resolve relative to
+            // *this* class, matching PHP's own trait semantics (a trait
+            // has no inheritance identity of its own). `preRegisterClasses`
+            // only walks *top-level* statements (mirroring
+            // `preRegisterGlobals`'s own pre-existing scoping limit), so a
+            // nested class -- already an edge case nothing exercises --
+            // falls back to its own raw, un-inlined `properties`/`methods`
+            // instead of crashing; it simply doesn't get `use`/`with`
+            // composition, exactly like it didn't get decision 8's
+            // declared-property checking before this phase either.
+            let inlinedProperties, inlinedMethods =
+                match classes.TryGetValue name.Lexeme with
+                | true, info -> info.InlinedProperties, info.InlinedMethods
+                | false, _ -> properties, methods
             let enclosingClassName = currentClassName
             currentClassName <- Some name.Lexeme
-            let boundMethods = methods |> List.map (fun m -> this.ResolveFunction(m, isMethod = true))
+            let boundMethods = inlinedMethods |> List.map (fun m -> this.ResolveFunction(m, isMethod = true))
             currentClassName <- enclosingClassName
 
             if boundSuperclass.IsSome then
                 endScope ()
 
             let boundProperties: BoundPropertyDecl list =
-                properties
+                inlinedProperties
                 |> List.map (fun p -> ({ Name = p.Name; IsPub = p.IsPub; IsMutable = p.IsMutable }: BoundPropertyDecl))
 
-            BClassStmt(binding, name, boundSuperclass, boundProperties, boundMethods)
+            BClassStmt(binding, name, boundSuperclass, boundMixins, boundProperties, boundMethods)
+        | TraitStmt(name, _, _, _) ->
+            // `resolve` filters every top-level `TraitStmt` out before
+            // this ever runs (traits are pre-consumed entirely at compile
+            // time -- see the module doc comment on `Ast.TraitStmt`). A
+            // *nested* trait declaration (inside a function/block) isn't
+            // pre-registered at all, mirroring the same top-level-only
+            // scoping limit `preRegisterClasses`/`preRegisterGlobals`
+            // already have for nested classes/globals -- reported as a
+            // clear compile error here rather than silently doing nothing
+            // or crashing.
+            error name "Trait declarations are only supported at the top level."
+            BBlock []
 
     member private this.ResolveBlock(statements: Stmt list) : BoundStmt list =
         beginScope ()
@@ -378,11 +679,11 @@ type private Resolver(globals: Dictionary<string, bool>, classes: Dictionary<str
             // external `instance.x = value`, whose `instance` expression
             // has no statically-known class to check against).
             match obj, currentClassName with
-            | SelfExpr _, Some className when (findDeclaredProperty classes className name.Lexeme).IsNone ->
-                if findDeclaredMethod classes className name.Lexeme then
+            | SelfExpr _, Some className when (findDeclaredProperty effectiveMembers className name.Lexeme).IsNone ->
+                if findDeclaredMethod effectiveMembers className name.Lexeme then
                     error name $"'{name.Lexeme}' is a method, not a property -- it can't be assigned to."
                 else
-                    error name $"Property '{name.Lexeme}' is not declared in class '{className}' or any of its superclasses."
+                    error name $"Property '{name.Lexeme}' is not declared in class '{className}' or any of its superclasses/mixins/traits."
             | _ -> ()
             BSet(this.ResolveExpr obj, name, this.ResolveExpr value)
         | Index(obj, index, bracket) -> BIndex(this.ResolveExpr obj, this.ResolveExpr index, bracket)
@@ -541,10 +842,23 @@ let resolve (stmts: Stmt list) : BoundStmt list * ResolveError list =
     let preErrors = ResizeArray<ResolveError>()
     preRegisterGlobals globals preErrors stmts
 
-    let classes = Dictionary<string, ClassInfo>()
-    preRegisterClasses classes preErrors stmts
+    let traits = Dictionary<string, TraitInfo>()
+    preRegisterTraits traits preErrors stmts
+    let traitCache = Dictionary<string, MemberSet>()
 
-    let resolver = Resolver(globals, classes)
-    let bound = stmts |> List.map resolver.ResolveStmt
+    let classes = Dictionary<string, ClassInfo>()
+    preRegisterClasses classes traits traitCache preErrors stmts
+    let effectiveMembers = computeAllEffectiveClassMembers classes preErrors
+
+    // Every `TraitStmt` is fully consumed above (`preRegisterTraits`/
+    // `flattenTrait`, inlined into whichever class(es) `use` it) and
+    // never given a `BoundStmt` of its own -- filtered out here rather
+    // than in `ResolveStmt`, which only exists to catch a *nested* trait
+    // declaration (not pre-registered, see its own case) as a clean
+    // error instead of silently vanishing.
+    let nonTraitStmts = stmts |> List.filter (function TraitStmt _ -> false | _ -> true)
+
+    let resolver = Resolver(globals, classes, effectiveMembers)
+    let bound = nonTraitStmts |> List.map resolver.ResolveStmt
 
     bound, (List.ofSeq preErrors) @ resolver.Errors
