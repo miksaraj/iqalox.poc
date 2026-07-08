@@ -120,5 +120,15 @@ and BoundStmt =
         binding: DeclaredBinding *
         name: Token *
         superclass: (VariableBinding * Token) option *
+        /// `docs/PLAN-0.2.md` decision 12's `with M1, M2` list, each
+        /// resolved exactly like `superclass` -- an ordinary variable
+        /// reference to a real, independently-instantiable class,
+        /// composed at runtime (`Codegen.fs` emits one `Mixin` opcode
+        /// per entry). `usedTraits` (PHP-style `use`) needs no field
+        /// here at all: `Resolver.fs` fully consumes it at compile time,
+        /// inlining a used trait's members directly into `properties`/
+        /// `methods` below, so by the time a `BClassStmt` exists there's
+        /// nothing left of `use` to represent.
+        mixins: (VariableBinding * Token) list *
         properties: BoundPropertyDecl list *
         methods: BoundFunctionDecl list

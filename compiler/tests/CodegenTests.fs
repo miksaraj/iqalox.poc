@@ -298,6 +298,31 @@ let ``external property get/set compile to GetProperty/SetProperty, never the *S
     )
 
 [<Fact>]
+let ``a with-mixin pushes the mixin class then emits Mixin, right after the temp re-fetch`` () =
+    let source = "class Named {\n    pub greet() { return 1; }\n}\nclass Robot with Named {\n    pub beep() { return 2; }\n}"
+    let chunk = compileSource source
+
+    Assert.Equal<Instruction[]>(
+        [| Class 0 // "Named"
+           DefineGlobal 0
+           GetGlobal 0 // temp re-fetch
+           Closure(1, []) // greet
+           MethodPub 2 // "greet"
+           Pop
+           Class 3 // "Robot"
+           DefineGlobal 3
+           GetGlobal 3 // temp re-fetch
+           GetGlobal 0 // Named (the mixin)
+           Mixin
+           Closure(4, []) // beep
+           MethodPub 5 // "beep"
+           Pop
+           Nil
+           Return |],
+        chunk.Code
+    )
+
+[<Fact>]
 let ``the disassembler prints every top-level instruction and recurses into nested function chunks`` () =
     let chunk = compileSource "fun f() { return 1; }"
     let output = disassembleChunk "script" chunk

@@ -103,6 +103,19 @@ type Instruction =
     | Closure of functionIndex: int * upvalues: UpvalueDescriptor list
     | Return
     | Class of nameIndex: int
+    /// `docs/PLAN-0.2.md` decision 12's `with M1, M2` composition -- one
+    /// per mixin, emitted right after `Inherit` (if any) and before the
+    /// class's own `Property*`/`Method*` opcodes. Mirrors `Inherit`'s
+    /// "peek the class, copy members in" mechanics, but pops its operand
+    /// (the mixin value) rather than leaving it on the stack: unlike the
+    /// superclass value, which must persist as the synthetic `super`
+    /// local's backing slot for the rest of the class declaration, a
+    /// mixin's value is never needed again once its members are copied
+    /// in -- `super` does not chain through `with`-mixins under this
+    /// version's simplified (non-C3) approximation of decision 12, open
+    /// question 2. No operand of its own: like `Inherit`, it operates
+    /// purely on the two values already on the stack.
+    | Mixin
     /// A private (no `pub`) method declaration -- `docs/PLAN-0.2.md`
     /// decision 11. Only reachable internally (`self.method()`, or via
     /// `super`) once bound; `MethodPub` below is the externally-callable
@@ -255,6 +268,7 @@ let private opcodeOf =
     | PropertyPrivateMut _ -> 0x33uy
     | PropertyPub _ -> 0x34uy
     | PropertyPubMut _ -> 0x35uy
+    | Mixin -> 0x36uy
 
 /// Serialized byte length of one instruction -- see the module doc
 /// comment's "Instruction encoding" table.
@@ -281,6 +295,7 @@ let instructionByteLength (instruction: Instruction) : int =
     | LessEqual
     | Return
     | Inherit
+    | Mixin
     | GetIndex
     | SetIndex
     | VectorLength
@@ -360,6 +375,7 @@ let rec private writeChunk (writer: BinaryWriter) (chunk: Chunk) : unit =
         | LessEqual
         | Return
         | Inherit
+        | Mixin
         | GetIndex
         | SetIndex
         | VectorLength

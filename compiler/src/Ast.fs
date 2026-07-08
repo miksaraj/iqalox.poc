@@ -89,4 +89,28 @@ and Stmt =
     | ForStmt of initializer: Stmt option * condition: Expr option * increment: Expr option * body: Stmt
     | FunctionStmt of FunctionDecl
     | ReturnStmt of keyword: Token * value: Expr option
-    | ClassStmt of name: Token * superclass: Expr option * properties: PropertyDecl list * methods: FunctionDecl list
+    /// `docs/PLAN-0.2.md` decision 12: `mixins` is the `with M1, M2`
+    /// header list (Scala-style, resolved/composed at runtime -- each
+    /// entry is an ordinary `Variable` reference, mirroring `superclass`,
+    /// since a mixin is a real, independently-instantiable class);
+    /// `usedTraits` is every `use A, B` found anywhere in the class body
+    /// (PHP-style, flattened across possibly-multiple `use` clauses,
+    /// composed entirely at compile time -- see `Resolver.fs`, which
+    /// inlines a used trait's own members directly into `properties`/
+    /// `methods` and never lets a `TraitStmt` reach `Bound.fs` at all).
+    | ClassStmt of
+        name: Token *
+        superclass: Expr option *
+        mixins: Expr list *
+        properties: PropertyDecl list *
+        methods: FunctionDecl list *
+        usedTraits: Token list
+    /// `trait T { ... }` (decision 12) -- grammared identically to a class
+    /// body (`langspec/SYNTAX_GRAMMAR.md`: properties, nested `use`, and
+    /// methods), but never instantiable and never given a runtime
+    /// representation at all: `Resolver.fs` consumes every `TraitStmt`
+    /// entirely at compile time (inlining its members into whichever
+    /// class(es) `use` it) and filters it out before `Bound.fs` ever sees
+    /// the statement list, so there's no `BTraitStmt`/opcode/runtime
+    /// object anywhere below this.
+    | TraitStmt of name: Token * properties: PropertyDecl list * methods: FunctionDecl list * usedTraits: Token list

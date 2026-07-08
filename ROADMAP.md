@@ -253,6 +253,21 @@ committed to a specific version yet:
   stated design ("a call's arity is fixed by the callee's declaration, not
   inferred from how many arguments happen to be written"). That tension
   needs its own resolution before either lands, not just a version slot.
+- **Full C3 linearization for `with`-mixins** (real Scala-style multiple
+  inheritance: a computed per-class Method Resolution Order, live
+  MRO-walking dispatch instead of a flat copied method table, and `super`
+  resolving relative to the runtime receiver's actual MRO position rather
+  than a single value captured once at class-declaration time, enabling
+  genuine `super`-chaining across a mixin graph). `0.2` Phase 8 ships a
+  simplified, non-C3 approximation instead (`with` composes exactly like
+  `use`'s flat copy, just from a real class's runtime table; `super` never
+  chains through a mixin) — raised as an option during Phase 8 and
+  explicitly deferred after a dedicated scope-check found the real
+  implementation cost far larger than open question 2's own framing
+  suggested: it's a foundational redesign of dispatch/`super` for every
+  `with`-using class, not an incremental addition on top of what Phase 8
+  already ships. See `docs/PLAN-0.2.md` §2 item 2 and Phase 8's own entry
+  in §5 for the full reasoning.
 
 ## Compiler optimization concepts under consideration
 

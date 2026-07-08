@@ -84,6 +84,14 @@ enum class OpCode : uint8_t {
     PropertyPrivateMut = 0x33,
     PropertyPub = 0x34,
     PropertyPubMut = 0x35,
+    // docs/PLAN-0.2.md Phase 8: `with M1, M2` mixin composition (decision
+    // 12, this version's simplified/non-C3 approximation of open question
+    // 2). Mirrors Inherit's "peek the class, copy members in" mechanics,
+    // but pops its mixin operand instead of leaving it on the stack --
+    // unlike a superclass, a mixin's value is never needed again once its
+    // members are copied in (super does not chain through with-mixins
+    // this version).
+    Mixin = 0x36,
 };
 
 // Loads `path` as a format-v1 bytecode file and returns its top-level

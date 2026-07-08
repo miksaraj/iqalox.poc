@@ -126,7 +126,7 @@ let ``a class can reference its own name from inside its own methods`` () =
     let bound, errors = resolveSource "class Duck {\n    quack() { return Duck; }\n}"
     Assert.Empty errors
     match bound with
-    | [ BClassStmt(DeclaredGlobal "Duck", _, _, _, [ quackDecl ]) ] ->
+    | [ BClassStmt(DeclaredGlobal "Duck", _, _, _, _, [ quackDecl ]) ] ->
         match quackDecl.Body with
         | [ BReturnStmt(_, Some(BVariable(GlobalBinding "Duck", _))) ] -> ()
         | body -> failwith $"unexpected method body: %A{body}"
@@ -137,7 +137,7 @@ let ``self resolves inside a method`` () =
     let bound, errors = resolveSource "class Duck {\n    quack() { return self; }\n}"
     Assert.Empty errors
     match bound with
-    | [ BClassStmt(_, _, _, _, [ quackDecl ]) ] ->
+    | [ BClassStmt(_, _, _, _, _, [ quackDecl ]) ] ->
         match quackDecl.Body with
         | [ BReturnStmt(_, Some(BSelf(LocalBinding 0, _))) ] -> ()
         | body -> failwith $"unexpected method body: %A{body}"
@@ -155,7 +155,7 @@ let ``super resolves inside a method of a class with a superclass`` () =
     let bound, errors = resolveSource source
     Assert.Empty errors
     match bound with
-    | [ _; BClassStmt(_, _, Some(GlobalBinding "A", _), _, [ greetDecl ]) ] ->
+    | [ _; BClassStmt(_, _, Some(GlobalBinding "A", _), _, _, [ greetDecl ]) ] ->
         match greetDecl.Body with
         | [ BReturnStmt(_, Some(BCall(BSuper(LocalBinding 0, UpvalueBinding 0, _, methodName), []))) ] ->
             Assert.Equal("greet", methodName.Lexeme)
@@ -211,7 +211,7 @@ let ``LocalCount includes self plus every declared local`` () =
     let bound, errors = resolveSource "class Duck {\n    quack(a) { var b = 1\nreturn a; }\n}"
     Assert.Empty errors
     match bound with
-    | [ BClassStmt(_, _, _, _, [ quackDecl ]) ] -> Assert.Equal(3, quackDecl.LocalCount) // self, a, b
+    | [ BClassStmt(_, _, _, _, _, [ quackDecl ]) ] -> Assert.Equal(3, quackDecl.LocalCount) // self, a, b
     | _ -> failwith $"unexpected shape: %A{bound}"
 
 // docs/PLAN-0.2.md Phase 7: property/method visibility (`pub`/`mut`).
@@ -221,7 +221,7 @@ let ``property declarations resolve with their pub/mut flags carried through`` (
     let bound, errors = resolveSource "class Duck {\n    var name\n    var energy mut\n    var species pub\n    var quacking pub mut\n}"
     Assert.Empty errors
     match bound with
-    | [ BClassStmt(_, _, _, [ name; energy; species; quacking ], []) ] ->
+    | [ BClassStmt(_, _, _, _, [ name; energy; species; quacking ], []) ] ->
         Assert.Equal("name", name.Name.Lexeme)
         Assert.False(name.IsPub)
         Assert.False(name.IsMutable)
@@ -238,7 +238,7 @@ let ``a pub method's IsPub flag is carried into the bound method`` () =
     let bound, errors = resolveSource "class Duck {\n    pub quack() { return 1; }\n}"
     Assert.Empty errors
     match bound with
-    | [ BClassStmt(_, _, _, _, [ quackDecl ]) ] -> Assert.True(quackDecl.IsPub)
+    | [ BClassStmt(_, _, _, _, _, [ quackDecl ]) ] -> Assert.True(quackDecl.IsPub)
     | _ -> failwith $"unexpected shape: %A{bound}"
 
 [<Fact>]
@@ -434,3 +434,92 @@ let ``vector length and append are internal-only primitives usable directly`` ()
                 | _ -> false)
         Assert.True(containsInternalOps decl.Body)
     | _ -> failwith $"unexpected shape: %A{bound}"
+
+// docs/PLAN-0.2.md Phase 8: mixins (`with`) and traits (`trait`/`use`).
+
+[<Fact>]
+let ``a used trait's method is inlined and resolves self relative to the using class`` () =
+    let source = "trait Flyable {\n    pub fly() { return self; }\n}\nclass Duck {\n    use Flyable\n}"
+    let bound, errors = resolveSource source
+    Assert.Empty errors
+    match bound with
+    | [ BClassStmt(_, _, _, _, _, [ flyDecl ]) ] ->
+        Assert.Equal("fly", flyDecl.Name.Lexeme)
+        Assert.True(flyDecl.IsPub)
+        match flyDecl.Body with
+        | [ BReturnStmt(_, Some(BSelf(LocalBinding 0, _))) ] -> ()
+        | body -> failwith $"unexpected inlined method body: %A{body}"
+    | _ -> failwith $"unexpected shape: %A{bound}"
+
+[<Fact>]
+let ``a trait declaration produces no BoundStmt of its own`` () =
+    let bound, errors = resolveSource "trait Flyable {\n    pub fly() { return 1; }\n}\nvar x = 1"
+    Assert.Empty errors
+    match bound with
+    | [ BVarStmt(DeclaredGlobal "x", _, _) ] -> ()
+    | _ -> failwith $"expected the trait to vanish entirely, got %A{bound}"
+
+[<Fact>]
+let ``two used traits declaring the same method name is a compile-time error`` () =
+    let source =
+        "trait A {\n    pub go() { return 1; }\n}\ntrait B {\n    pub go() { return 2; }\n}\nclass C {\n    use A, B\n}"
+    let _, errors = resolveSource source
+    Assert.Single errors |> ignore
+    Assert.Contains("declared by both", errors.[0].Message)
+
+[<Fact>]
+let ``a used trait conflicting with the class's own superclass is a compile-time error`` () =
+    let source =
+        "class Base {\n    pub go() { return 1; }\n}\ntrait Helper {\n    pub go() { return 2; }\n}\nclass C extends Base {\n    use Helper\n}"
+    let _, errors = resolveSource source
+    Assert.Single errors |> ignore
+    Assert.Contains("declared by both", errors.[0].Message)
+
+[<Fact>]
+let ``the class's own method overriding a used trait's is not a conflict`` () =
+    let source = "trait Flyable {\n    pub fly() { return 1; }\n}\nclass Duck {\n    use Flyable\n    pub fly() { return 2; }\n}"
+    let bound, errors = resolveSource source
+    Assert.Empty errors
+    match bound with
+    | [ BClassStmt(_, _, _, _, _, [ flyDecl ]) ] ->
+        match flyDecl.Body with
+        | [ BReturnStmt(_, Some(BLiteral(NumberValue 2.0))) ] -> ()
+        | body -> failwith $"expected the class's own override to win, got %A{body}"
+    | _ -> failwith $"unexpected shape: %A{bound}"
+
+[<Fact>]
+let ``a circular trait use is a compile-time error, not an infinite loop`` () =
+    let source = "trait A {\n    use B\n}\ntrait B {\n    use A\n}\nclass C {\n    use A\n}"
+    let _, errors = resolveSource source
+    Assert.NotEmpty errors
+    Assert.Contains(errors, fun e -> e.Message.Contains "Circular trait composition")
+
+[<Fact>]
+let ``using an undefined trait is a compile-time error`` () =
+    let _, errors = resolveSource "class Duck {\n    use Ghost\n}"
+    Assert.Single errors |> ignore
+    Assert.Contains("Undefined trait", errors.[0].Message)
+
+[<Fact>]
+let ``two with-mixins declaring the same member is a compile-time error`` () =
+    let source =
+        "class A {\n    pub go() { return 1; }\n}\nclass B {\n    pub go() { return 2; }\n}\nclass C with A, B {}"
+    let _, errors = resolveSource source
+    Assert.Single errors |> ignore
+    Assert.Contains("declared by both", errors.[0].Message)
+
+[<Fact>]
+let ``a with-mixin resolves as an ordinary variable reference for the Mixin opcode`` () =
+    let source = "class Named {\n    pub greet() { return 1; }\n}\nclass Robot with Named {}"
+    let bound, errors = resolveSource source
+    Assert.Empty errors
+    match bound with
+    | [ _; BClassStmt(_, _, None, [ (GlobalBinding "Named", mixinToken) ], [], []) ] -> Assert.Equal("Named", mixinToken.Lexeme)
+    | _ -> failwith $"unexpected shape: %A{bound}"
+
+[<Fact>]
+let ``self.x = value targeting a property declared only by a with-mixin is not an error`` () =
+    let source =
+        "class Named {\n    var label\n    init(l) { self.label = l; }\n}\nclass Robot with Named {\n    rename(l) { self.label = l; }\n}"
+    let _, errors = resolveSource source
+    Assert.Empty errors

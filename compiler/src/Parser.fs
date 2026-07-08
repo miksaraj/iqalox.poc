@@ -158,6 +158,7 @@ type private ParserState(tokens: Token[]) =
     member this.Declaration() : Stmt option =
         try
             if matchAny [ Class ] then Some(this.ClassDeclaration())
+            elif matchAny [ Trait ] then Some(this.TraitDeclaration())
             elif matchAny [ Fun ] then Some(FunctionStmt(this.FunctionDeclaration("function", isPub = false)))
             elif matchAny [ Var ] then Some(this.VarDeclaration())
             else this.Statement()
@@ -175,21 +176,55 @@ type private ParserState(tokens: Token[]) =
             else
                 None
 
-        consume LeftBrace "Expect '{' before class body." |> ignore
+        let mixins = ResizeArray<Expr>()
+        if matchAny [ With ] then
+            let mutable more = true
+            while more do
+                mixins.Add(Variable(consume Identifier "Expect mixin class name."))
+                more <- matchAny [ Comma ]
+
+        let properties, methods, usedTraits = this.ClassBody "class"
+        ClassStmt(name, superclass, List.ofSeq mixins, properties, methods, usedTraits)
+
+    /// `trait T { ... }` (`docs/PLAN-0.2.md` decision 12) -- grammared
+    /// identically to a class body (properties, nested `use`, methods),
+    /// but with no `extends`/`with` of its own: a trait has no
+    /// inheritance identity, only members to be copied elsewhere.
+    member this.TraitDeclaration() : Stmt =
+        let name = consume Identifier "Expect trait name."
+        let properties, methods, usedTraits = this.ClassBody "trait"
+        TraitStmt(name, properties, methods, usedTraits)
+
+    /// Shared `classMember*` body parser (`langspec/SYNTAX_GRAMMAR.md`):
+    /// `var` starts a property declaration, `use` a trait-use clause
+    /// (`docs/PLAN-0.2.md` decision 12 -- collected across however many
+    /// separate `use` clauses appear, in encounter order), anything else
+    /// a method. Used by both `ClassDeclaration` and `TraitDeclaration`,
+    /// which differ only in what comes *before* the body (`extends`/
+    /// `with` vs. nothing).
+    member this.ClassBody(kind: string) : PropertyDecl list * FunctionDecl list * Token list =
+        consume LeftBrace $"Expect '{{' before {kind} body." |> ignore
 
         let properties = ResizeArray<PropertyDecl>()
         let methods = ResizeArray<FunctionDecl>()
+        let usedTraits = ResizeArray<Token>()
         while not (check RightBrace) && not (isAtEnd ()) do
             if matchAny [ Semicolon ] then
                 ()
             elif matchAny [ Var ] then
                 properties.Add(this.PropertyDeclaration())
+            elif matchAny [ Use ] then
+                let mutable more = true
+                while more do
+                    usedTraits.Add(consume Identifier "Expect trait name.")
+                    more <- matchAny [ Comma ]
+                consume Semicolon "Expect line break or ';' after trait use." |> ignore
             else
                 let isPub = matchAny [ Pub ]
                 methods.Add(this.FunctionDeclaration("method", isPub))
 
-        consume RightBrace "Expect '}' after class body." |> ignore
-        ClassStmt(name, superclass, List.ofSeq properties, List.ofSeq methods)
+        consume RightBrace $"Expect '}}' after {kind} body." |> ignore
+        List.ofSeq properties, List.ofSeq methods, List.ofSeq usedTraits
 
     /// `var name [pub] [mut]` (`docs/PLAN-0.2.md` decision 8) -- modifiers
     /// are optional and, when both present, always written `pub` before
