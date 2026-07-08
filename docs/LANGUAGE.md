@@ -23,9 +23,14 @@ original `0.1-poc` design decisions this version inherits.
 Every code sample below is valid Iqalox and, unless marked otherwise,
 compiles and runs successfully via `compiler/src/Iqaloxc.fsproj` (or
 `iqaloxc`, once built) piped into `vm/build/iqaloxvm`. Longer, complete
-programs live under `langspec/examples/*.iqx` — the same fixtures run
-against `poc/` and checked byte-for-byte identical via
-`scripts/conformance-test.sh` (`docs/PLAN-0.1.md` Phase 9).
+programs live under `langspec/examples/*.iqx`. `scripts/conformance-test.sh`
+(`docs/PLAN-0.1.md` Phase 9), which diffed these fixtures' output against
+`poc/` byte-for-byte, was retired during `0.2` Phase 7 (`docs/PLAN-0.2.md`):
+decisions 8-11's breaking changes to the object model mean `compiler/`+`vm/`
+can no longer run `poc/`-era class fixtures at all, and the repository
+owner's explicit call was to drop cross-implementation conformance testing
+entirely rather than maintain it — pre-`1.0`, backward compatibility with
+an earlier version isn't a goal.
 
 ## Table of contents
 

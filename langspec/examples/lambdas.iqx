@@ -8,8 +8,8 @@
 var square = (n) -> n * n
 print square 3
 
-var add = (a, b) -> a + b
-print add 2, 3
+var sum = (a, b) -> a + b
+print sum 2, 3
 
 fun applyTwice(f, x) {
     return f (f x)
@@ -22,5 +22,5 @@ fun makeAdder(n) {
     return (x) -> x + n
 }
 
-var add5 = makeAdder 5
-print add5 10
+var addFive = makeAdder 5
+print addFive 10

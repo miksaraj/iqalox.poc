@@ -109,6 +109,11 @@ void Vm::checkNotUndef(const Value& value, const std::string& globalName) {
     }
 }
 
+void Vm::checkPropertyNotUndef(const Value& value, const std::string& propName) {
+    if (!isUndef(value)) return;
+    runtimeError("Property '" + propName + "' accessed before being assigned a value.");
+}
+
 void Vm::checkNumberOperand(const Value& value, const char* message) {
     if (!isNumber(value)) throw RuntimeError(message);
 }
@@ -238,6 +243,14 @@ void Vm::callMethod(ObjClosure* method, int argCount, bool isInitializer) {
 void Vm::callClass(ObjClass* klass, int argCount) {
     size_t calleeIndex = stack.size() - static_cast<size_t>(argCount) - 1;
     auto* instance = allocate<ObjInstance>(klass);
+    // Every declared property (own class's plus every ancestor's, already
+    // flattened into `klass->properties` by `Inherit`) gets a field slot
+    // up front, starting `Undef` -- docs/PLAN-0.2.md decision 8's
+    // addendum retires the old "springs into existence on assignment"
+    // model (see `ObjInstance`'s doc comment).
+    for (const auto& entry : klass->properties) {
+        instance->fields[entry.first] = UndefValue;
+    }
     // Overwrites the class value's own slot -- mirrors `poc`'s
     // `IqaloxClass.call`, which always returns the freshly created
     // instance regardless of what (if anything) `init` itself returns.
@@ -277,9 +290,16 @@ ObjUpvalue* Vm::captureUpvalue(size_t stackIndex) {
     return created;
 }
 
-Value Vm::bindMethod(ObjClass* klass, const Value& receiver, const std::string& name) {
+Value Vm::bindMethod(ObjClass* klass, const Value& receiver, const std::string& name, bool internal) {
     auto it = klass->methods.find(name);
     if (it == klass->methods.end()) {
+        runtimeError("Undefined property '" + name + "'.");
+    }
+    // decision 11: `init` is always externally callable regardless of any
+    // `pub` annotation; every other non-`pub` method reads as genuinely
+    // undefined from outside, exactly like a nonexistent property does --
+    // matching decision 10's "invisible" framing for properties.
+    if (!internal && name != "init" && !klass->publicMethods.contains(name)) {
         runtimeError("Undefined property '" + name + "'.");
     }
     return objValue(allocate<ObjBoundMethod>(receiver, it->second));
@@ -536,7 +556,20 @@ void Vm::run() {
             case OpCode::Method: {
                 ObjString* name = stringConstantAt(frame, readU16(frame));
                 auto* closure = static_cast<ObjClosure*>(asObj(pop()));
-                static_cast<ObjClass*>(asObj(peek(0)))->methods[name->value] = closure;
+                auto* klass = static_cast<ObjClass*>(asObj(peek(0)));
+                klass->methods[name->value] = closure;
+                // An override (own or inherited name) is private unless
+                // *this* declaration says otherwise -- clears any
+                // publicMethods entry Inherit may have copied in.
+                klass->publicMethods.erase(name->value);
+                break;
+            }
+            case OpCode::MethodPub: {
+                ObjString* name = stringConstantAt(frame, readU16(frame));
+                auto* closure = static_cast<ObjClosure*>(asObj(pop()));
+                auto* klass = static_cast<ObjClass*>(asObj(peek(0)));
+                klass->methods[name->value] = closure;
+                klass->publicMethods.insert(name->value);
                 break;
             }
             case OpCode::Inherit: {
@@ -546,12 +579,39 @@ void Vm::run() {
                 }
                 auto* superclass = static_cast<ObjClass*>(asObj(superclassValue));
                 auto* subclass = static_cast<ObjClass*>(asObj(peek(0)));
-                // Copies the superclass's methods in *now*, before any of
-                // the subclass's own `Method` opcodes run -- so a
-                // same-named subclass method naturally overrides the
-                // inherited entry, and `find`-by-name never has to walk a
-                // superclass chain at all (see `ObjClass`'s doc comment).
+                // Copies the superclass's methods/properties in *now*,
+                // before any of the subclass's own Method*/Property*
+                // opcodes run -- so a same-named subclass method
+                // naturally overrides the inherited entry, and `find`-by-
+                // name never has to walk a superclass chain at all (see
+                // `ObjClass`'s doc comment). `Resolver.fs`'s
+                // `preRegisterClasses` already rejects a property
+                // redeclared anywhere up a class's own ancestor chain at
+                // compile time, so `properties` is never overwritten here
+                // the way `methods` intentionally can be.
                 subclass->methods = superclass->methods;
+                subclass->publicMethods = superclass->publicMethods;
+                subclass->properties = superclass->properties;
+                break;
+            }
+            case OpCode::PropertyPrivate: {
+                ObjString* name = stringConstantAt(frame, readU16(frame));
+                static_cast<ObjClass*>(asObj(peek(0)))->properties[name->value] = PropertyMeta{false, false};
+                break;
+            }
+            case OpCode::PropertyPrivateMut: {
+                ObjString* name = stringConstantAt(frame, readU16(frame));
+                static_cast<ObjClass*>(asObj(peek(0)))->properties[name->value] = PropertyMeta{false, true};
+                break;
+            }
+            case OpCode::PropertyPub: {
+                ObjString* name = stringConstantAt(frame, readU16(frame));
+                static_cast<ObjClass*>(asObj(peek(0)))->properties[name->value] = PropertyMeta{true, false};
+                break;
+            }
+            case OpCode::PropertyPubMut: {
+                ObjString* name = stringConstantAt(frame, readU16(frame));
+                static_cast<ObjClass*>(asObj(peek(0)))->properties[name->value] = PropertyMeta{true, true};
                 break;
             }
             case OpCode::GetProperty: {
@@ -563,9 +623,37 @@ void Vm::run() {
                 auto* instance = static_cast<ObjInstance*>(asObj(receiver));
                 auto fieldIt = instance->fields.find(name->value);
                 if (fieldIt != instance->fields.end()) {
+                    // Every `fields` entry was pre-populated straight from
+                    // `klass->properties` (`Vm::callClass`), so a
+                    // corresponding metadata entry always exists here.
+                    const PropertyMeta& meta = instance->klass->properties.at(name->value);
+                    if (!meta.isPub) {
+                        // Reads as genuinely undefined from outside,
+                        // matching decision 10's "invisible" framing --
+                        // the same wording a nonexistent property/method
+                        // gets, not a distinct "it's private" message.
+                        runtimeError("Undefined property '" + name->value + "'.");
+                    }
+                    checkPropertyNotUndef(fieldIt->second, name->value);
                     push(fieldIt->second);
                 } else {
-                    push(bindMethod(instance->klass, receiver, name->value));
+                    push(bindMethod(instance->klass, receiver, name->value, /*internal=*/false));
+                }
+                break;
+            }
+            case OpCode::GetPropertySelf: {
+                ObjString* name = stringConstantAt(frame, readU16(frame));
+                Value receiver = pop();
+                if (!isObj(receiver) || asObj(receiver)->type != ObjType::Instance) {
+                    runtimeError("Only instances have properties.");
+                }
+                auto* instance = static_cast<ObjInstance*>(asObj(receiver));
+                auto fieldIt = instance->fields.find(name->value);
+                if (fieldIt != instance->fields.end()) {
+                    checkPropertyNotUndef(fieldIt->second, name->value);
+                    push(fieldIt->second);
+                } else {
+                    push(bindMethod(instance->klass, receiver, name->value, /*internal=*/true));
                 }
                 break;
             }
@@ -576,7 +664,43 @@ void Vm::run() {
                 if (!isObj(receiver) || asObj(receiver)->type != ObjType::Instance) {
                     runtimeError("Only instances have fields.");
                 }
-                static_cast<ObjInstance*>(asObj(receiver))->fields[name->value] = value;
+                auto* instance = static_cast<ObjInstance*>(asObj(receiver));
+                auto propIt = instance->klass->properties.find(name->value);
+                if (propIt == instance->klass->properties.end() || !propIt->second.isPub) {
+                    runtimeError("Undefined property '" + name->value + "'.");
+                }
+                if (!propIt->second.isMut) {
+                    runtimeError("Property '" + name->value + "' is not externally mutable.");
+                }
+                instance->fields[name->value] = value;
+                push(value);
+                break;
+            }
+            case OpCode::SetPropertySelf: {
+                ObjString* name = stringConstantAt(frame, readU16(frame));
+                Value value = pop();
+                Value receiver = pop();
+                if (!isObj(receiver) || asObj(receiver)->type != ObjType::Instance) {
+                    runtimeError("Only instances have fields.");
+                }
+                auto* instance = static_cast<ObjInstance*>(asObj(receiver));
+                auto propIt = instance->klass->properties.find(name->value);
+                if (propIt == instance->klass->properties.end()) {
+                    // Unreachable for a genuinely-compiled `self.x = value`
+                    // -- Resolver.fs's decision-8-addendum check already
+                    // rejects an undeclared property at compile time.
+                    // Kept as a defensive runtime error rather than an
+                    // assumption.
+                    runtimeError("Undefined property '" + name->value + "'.");
+                }
+                if (!propIt->second.isMut) {
+                    Value& field = instance->fields[name->value];
+                    if (!isUndef(field)) {
+                        runtimeError("Property '" + name->value +
+                                     "' already assigned; immutable properties can only be set once.");
+                    }
+                }
+                instance->fields[name->value] = value;
                 push(value);
                 break;
             }
@@ -584,7 +708,7 @@ void Vm::run() {
                 ObjString* name = stringConstantAt(frame, readU16(frame));
                 auto* superclass = static_cast<ObjClass*>(asObj(pop()));
                 Value self = pop();
-                push(bindMethod(superclass, self, name->value));
+                push(bindMethod(superclass, self, name->value, /*internal=*/true));
                 break;
             }
             case OpCode::GetIndex: {

@@ -103,11 +103,46 @@ type Instruction =
     | Closure of functionIndex: int * upvalues: UpvalueDescriptor list
     | Return
     | Class of nameIndex: int
+    /// A private (no `pub`) method declaration -- `docs/PLAN-0.2.md`
+    /// decision 11. Only reachable internally (`self.method()`, or via
+    /// `super`) once bound; `MethodPub` below is the externally-callable
+    /// counterpart. Both just insert into `ObjClass.methods`, same as
+    /// before this phase; `MethodPub` additionally records the name in
+    /// `ObjClass.publicMethods`, which `GetProperty`'s external variant
+    /// checks.
     | Method of nameIndex: int
+    | MethodPub of nameIndex: int
     | Inherit
+    /// External property/method access (`instance.x`) -- gated by the
+    /// declared `pub` (and, for `SetProperty`, `mut`) modifiers.
+    /// `GetPropertySelf`/`SetPropertySelf` below are `self.x`'s own
+    /// variants, which skip that gating entirely (decision 10: any method
+    /// of the class -- or, per the now-resolved open question 3, a
+    /// subclass -- can always read/write `self.x` regardless of
+    /// `pub`/`mut`). `Codegen.fs` picks the `*Self` opcode whenever the
+    /// `Get`/`Set`'s own object expression is exactly `BSelf` -- purely a
+    /// compile-time, syntactic choice, needing no new `Resolver.fs`
+    /// bookkeeping.
     | GetProperty of nameIndex: int
+    | GetPropertySelf of nameIndex: int
     | SetProperty of nameIndex: int
+    | SetPropertySelf of nameIndex: int
     | GetSuper of nameIndex: int
+    /// One of decision 8's four `var name [pub] [mut]` property
+    /// declaration forms -- emitted once per `BoundPropertyDecl` inside
+    /// `CompileClass`, exactly like `Method`/`MethodPub` are emitted once
+    /// per method, and reusing the exact same "class value already on top
+    /// of the stack" convention: pops nothing, pushes nothing, just
+    /// records `nameIndex`'s `pub`/`mut` metadata into the peeked class's
+    /// own `properties` map. Four separate opcodes (matching each of
+    /// decision 8's four bullets one-for-one) rather than one opcode with
+    /// boolean operands, so no new operand-width class is needed -- every
+    /// one of these is still a plain "one u16 operand" instruction, same
+    /// bucket as `Class`/`Method`/`GetProperty`.
+    | PropertyPrivate of nameIndex: int
+    | PropertyPrivateMut of nameIndex: int
+    | PropertyPub of nameIndex: int
+    | PropertyPubMut of nameIndex: int
     /// Indexed vector read/write (`v[i]`, `v[i] = x` -- `docs/PLAN-0.2.md`
     /// Phase 1). Unlike `GetProperty`/`SetProperty`, the "name" (here, the
     /// index) is a runtime value already on the stack, not a compile-time
@@ -213,6 +248,13 @@ let private opcodeOf =
     | VectorLength -> 0x2Cuy
     | VectorAppend -> 0x2Duy
     | VectorExtend -> 0x2Euy
+    | MethodPub _ -> 0x2Fuy
+    | GetPropertySelf _ -> 0x30uy
+    | SetPropertySelf _ -> 0x31uy
+    | PropertyPrivate _ -> 0x32uy
+    | PropertyPrivateMut _ -> 0x33uy
+    | PropertyPub _ -> 0x34uy
+    | PropertyPubMut _ -> 0x35uy
 
 /// Serialized byte length of one instruction -- see the module doc
 /// comment's "Instruction encoding" table.
@@ -336,9 +378,16 @@ let rec private writeChunk (writer: BinaryWriter) (chunk: Chunk) : unit =
         | Call i
         | Class i
         | Method i
+        | MethodPub i
         | GetProperty i
+        | GetPropertySelf i
         | SetProperty i
-        | GetSuper i -> codeWriter.Write(uint16 i)
+        | SetPropertySelf i
+        | GetSuper i
+        | PropertyPrivate i
+        | PropertyPrivateMut i
+        | PropertyPub i
+        | PropertyPubMut i -> codeWriter.Write(uint16 i)
         | Jump target
         | JumpIfFalse target
         | JumpIfNotNil target -> codeWriter.Write(uint16 (targetOffset target))

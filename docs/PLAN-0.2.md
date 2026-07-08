@@ -9,8 +9,9 @@ checklist as work lands.
 
 `0.1-poc` (`poc/`) is **not** getting a `0.2`. It stays frozen at its own
 feature set as a historical reference implementation (`CLAUDE.md`); every
-feature below targets `compiler/`+`vm/` only. See §2 for what that implies
-for `langspec/examples/` and the Phase 9 conformance suite.
+feature below targets `compiler/`+`vm/` only. See §2 item 6 for what that
+implied for `langspec/examples/` and the (since-retired, Phase 7) Phase 9
+conformance suite.
 
 ## 0. Scope: what "0.2" means here
 
@@ -240,17 +241,21 @@ resolving, the same convention `docs/PLAN-0.1-POC.md` and
    and `super`-style chaining among mixed-in traits. Does `0.2` need the
    full algorithm, or a simpler ordered-fallback approximation for a first
    pass? Blocks Phase 8.
-3. **Does privacy (properties *and* methods) extend to subclasses, or stop
-   at exactly the declaring class?** Decision 10/11's internal/external
-   line is clear for "inside this class" vs. "outside entirely," but
-   doesn't say whether a subclass's own methods count as internal to the
-   superclass's private members (a `protected`-like reading) or whether
-   privacy is stricter than that (a subclass is just another external
-   caller as far as the superclass's private state is concerned). Also
-   determines whether a private method even participates in dynamic
-   dispatch/overriding at all, or is effectively non-virtual since no
-   external caller can ever reach it polymorphically. Blocks Phase 7
-   (properties) and its methods-privacy extension alike.
+3. ~~Does privacy (properties *and* methods) extend to subclasses, or stop
+   at exactly the declaring class?~~ **Resolved by the repository owner
+   when Phase 7 began: protected-like.** A subclass's own methods count as
+   internal access to a superclass's private/non-`pub` members, the same
+   as C++/Java/C#'s `protected` — not stricter (a subclass is not treated
+   as just another external caller). Concretely: `self.x`/`self.method()`
+   from inside *any* method, in the declaring class or any descendant, is
+   internal access, full stop — `Codegen.fs` implements this as a purely
+   syntactic check (is the `Get`/`Set`'s object expression exactly `self`)
+   with no new class-hierarchy bookkeeping needed at all, since "internal"
+   never depended on *which* class in the hierarchy actually declared the
+   member. A private method fully participates in dynamic dispatch/
+   overriding, exactly like a `pub` one — it's simply unreachable via an
+   *external* reference, never non-virtual. See Phase 7's own entry in §5
+   for the implementation.
 4. ~~Exact array-manipulation stdlib surface.~~ **Resolved during Phase 5**
    (see its own entry in §5): `length`, `push`, `pop`, `reverse`, `map`,
    `filter`, `reduce`, `sort` — all plain global functions, not methods
@@ -261,16 +266,24 @@ resolving, the same convention `docs/PLAN-0.1-POC.md` and
    `elementwise fn, a, b` — matrix-only (exactly 2D), no operator
    overloading, dedicated named functions matching Phase 5's array
    stdlib precedent.
-6. **What happens to the Phase 9 conformance suite once `langspec/
-   examples/` moves to `0.2` syntax.** `poc/` is frozen and can't parse
-   `0.2`'s new syntax at all — once the *current*, top-level
-   `langspec/examples/*.iqx` stops being `0.1-poc`-compatible,
-   `scripts/conformance-test.sh` can no longer diff `poc/` output against
-   the live top-level examples the way it does today. It would need to
-   point specifically at `langspec/versions/0.1/` (decision 13) for the
-   `poc/`-vs-`compiler/`+`vm/` comparison, while the *current* top-level
-   examples become a `compiler/`+`vm/`-only smoke test with no `poc/`
-   counterpart at all. Blocks Phase 9.
+6. ~~What happens to the Phase 9 conformance suite once `langspec/
+   examples/` moves to `0.2` syntax.~~ **Resolved during Phase 7, and more
+   drastically than this question's own framing anticipated**: it doesn't
+   just need re-pointing at `langspec/versions/0.1/` (decision 13) — Phase
+   7's decisions 8-11 are a big enough breaking change to the object model
+   that `compiler/`+`vm/` can no longer run `poc/`-era *class* fixtures at
+   all (confirmed concretely: `langspec/versions/0.1/examples/classes.iqx`
+   stopped compiling the moment decision 8's addendum landed, since it
+   assigns to an undeclared `self.name` with no `pub` anywhere). Given
+   that, the repository owner's explicit call was to **retire
+   cross-implementation conformance testing entirely** rather than chase a
+   moving target release after release — `scripts/conformance-test.sh` and
+   `scripts/phase7-run-smoke-test.sh` (0.1's Phase 9) are both deleted, and
+   their two `.github/workflows/ci.yml` jobs removed. Pre-`1.0`, an earlier
+   version's fixtures are historical artifacts, not something new work is
+   expected to stay compatible with. See `CLAUDE.md`'s `compiler/`/`vm/`
+   testing bullet for where this is now documented going forward. No
+   longer blocks anything — Phase 9 has one less item on its plate.
 
 ## 3. Grammar and architecture additions (overview)
 
@@ -334,10 +347,11 @@ composition extends `Vm::run`'s existing `Inherit` handling.
 ## 4. Feature checklist (parity target)
 
 Every row starts "not started" — ticked off as `compiler/`+`vm/` land each
-one, verified via new tests (§6) and, where a `poc/`-parity fixture still
-applies, the existing conformance suite. **Learned from `0.1`'s own Phase
-10 audit: keep this table current as work actually lands, don't let it go
-stale for nine phases and then need a special pass to fix it.**
+one, verified via new tests (§6) and, through Phase 6, the cross-
+implementation conformance suite (retired during Phase 7 — see §2 item 6).
+**Learned from `0.1`'s own Phase 10 audit: keep this table current as work
+actually lands, don't let it go stale for nine phases and then need a
+special pass to fix it.**
 
 | Feature | Design decision(s) | Status |
 |---|---|---|
@@ -348,8 +362,8 @@ stale for nine phases and then need a special pass to fix it.**
 | Vector-literal spread (`[...a, ...b]`) | §1.7 | Done |
 | Array-manipulation stdlib | §2.4 | Done |
 | Matrices (nested vectors + stdlib) | §1.5, §2.5 | Done |
-| Property `pub`/`mut` modifiers | §1.8-10, §2.3 | Not started |
-| Method `pub`/private | §1.11, §2.3 | Not started |
+| Property `pub`/`mut` modifiers | §1.8-10, §2.3 | Done |
+| Method `pub`/private | §1.11, §2.3 | Done |
 | Mixins (`with`, dynamic linearization) | §1.12, §2.2 | Not started |
 | Traits (`trait`/`use`, static copy) | §1.12, §2.1 | Not started |
 
@@ -385,7 +399,11 @@ Phases 1-8, `scripts/conformance-test.sh`, `scripts/phase7-run-smoke-test.sh`,
 the CI `poc` job, and `.github/workflows/release.yml`'s example-bundling
 step all point at `langspec/versions/0.1/examples/` for now (verified:
 both scripts still pass against it) — flipping back to the top-level
-`langspec/examples/` once `0.2` fully lands remains Phase 9's job. One
+`langspec/examples/` once `0.2` fully lands was meant to remain Phase 9's
+job, but didn't get the chance to: both scripts were retired outright
+during Phase 7 instead, once decisions 8-11 broke `compiler/`+`vm/`'s
+ability to run these very `langspec/versions/0.1/examples/` fixtures at
+all — see Phase 7's own entry below and §2 item 6's resolution. One
 necessary-but-unstated consequence surfaced while writing property
 examples: decision 8's addendum (§1) now spells out that undeclared,
 implicitly-created fields (`0.1`'s model) can't coexist with the
@@ -764,13 +782,137 @@ errors). `langspec/examples/matrices.iqx` extended and verified end to
 end through the real `iqaloxc`+`iqaloxvm` toolchain, exercising all five
 functions.
 
-**Phase 7 — Property and method visibility (`pub`/`mut`).** The biggest
-single change to the object model this version — property declarations,
-the internal-vs-external access split (decisions 10-11), and needs §2.3
-(subclass privacy scope) resolved first. Also the phase that determines
-how existing `langspec/examples/classes.iqx`/`inheritance.iqx` are
-affected (§2.6) — every external method call in every existing example
-needs an explicit `pub`, found and fixed here, not discovered later.
+**Phase 7 — Property and method visibility (`pub`/`mut`) — done.** The
+biggest single change to the object model this version, per §7's own risk
+assessment — not additive, a real breaking change to `0.1`'s "fields
+spring into existence on assignment" model and its unrestricted external
+method calls.
+
+Front end: `Token.fs`/`Scanner.fs` gain a `pub` keyword; `Ast.fs`'s
+`FunctionDecl` gains `IsPub: bool` (methods only — `Parser.fs` always sets
+it `false` for a top-level `fun`, which has no visibility concept), and a
+new `PropertyDecl = { Name: Token; IsPub: bool; IsMutable: bool }`;
+`ClassStmt` gains a `properties: PropertyDecl list` field alongside
+`methods`. `Parser.fs`'s `ClassDeclaration()` now dispatches each class-
+body member on `var` (a property) vs. everything else (a method, capturing
+a leading `pub` first); a new `PropertyDeclaration()` parses `var name
+[pub] [mut]`. `Bound.fs` mirrors this (`BoundFunctionDecl.IsPub`, a new
+`BoundPropertyDecl`, `BClassStmt` gaining a `properties` field) — purely
+plumbing, no new resolution logic needed for the flags themselves.
+
+The one genuinely new `Resolver.fs` responsibility (decision 8's
+addendum): a `self.x = value` targeting a property never declared
+anywhere in the current class's own hierarchy is now a *compile-time*
+error, the same category as assigning to an undeclared local. This needs
+a small class-hierarchy table `Resolver.fs` didn't have before —
+`preRegisterClasses` walks every top-level `ClassStmt` (mirroring
+`preRegisterGlobals`'s own forward-reference-safe pre-pass) building a
+`className -> { SuperclassName; Properties; MethodNames }` map, and a
+`currentClassName` field tracks which class's method body is currently
+being resolved. Two more compile-time checks fall out of having this
+table at all, neither explicitly asked for but both direct, obvious
+consequences of decision 8 splitting properties and methods into what are
+now effectively two separate declared-name spaces sharing one class body:
+a property and a method sharing the same name within one class is an
+error, and a property redeclared anywhere up its own ancestor chain
+(distinct from redeclaring it *within* the same class, already caught) is
+too. An *external* `instance.x = value` gets no such compile-time check —
+its `instance` expression has no statically-known class to check against,
+so an undeclared external write is deferred to a runtime error instead
+(matching how an external call to a nonexistent method already worked).
+
+Runtime model (`vm/src/object.hpp`, `vm/src/vm.cpp`): `ObjClass` gains a
+`publicMethods` set (which of `methods`' entries were declared `pub`) and
+a `properties` map (`name -> {isPub, isMut}`) — both copied into a
+subclass by `Inherit` exactly like `methods` already is, so a subclass
+automatically has every ancestor's property/method-visibility metadata
+available with no redeclaration needed (the mechanical form the
+now-resolved open question 3 takes: inheriting *access*, not just the
+name). `ObjInstance.fields` is no longer a springs-into-existence map:
+`Vm::callClass` pre-populates one `Undef`-valued entry per declared
+property (own + inherited, already flattened by `Inherit`) the moment an
+instance is allocated, before `init` ever runs — reusing the exact same
+`Undef` sentinel `0.1`'s `var mut` locals already use for "not yet
+assigned," including its "accessed before being assigned" runtime error
+(`Vm::checkPropertyNotUndef`, the property-flavored sibling of
+`checkNotUndef`).
+
+New/changed opcodes, all still plain "one `u16` operand" instructions (no
+new operand-width class needed): four `Property*` opcodes
+(`PropertyPrivate`/`PropertyPrivateMut`/`PropertyPub`/`PropertyPubMut`,
+one per decision 8 bullet, each just recording metadata into the class
+value already sitting on top of the stack — chosen over one opcode with
+boolean operands specifically to avoid a new operand-width bucket);
+`MethodPub` alongside the existing (now implicitly "private") `Method`;
+and `GetPropertySelf`/`SetPropertySelf` alongside the existing (now
+"external") `GetProperty`/`SetProperty`. `Codegen.fs` picks the `*Self`
+variant whenever a `Get`/`Set`'s object expression is exactly `BSelf` —
+a purely syntactic, compile-time choice needing no new `Resolver.fs`
+bookkeeping, since (per the resolved open question 3) internal access
+never depended on *which* class in the hierarchy declared the member,
+only on whether the access is spelled `self.x` at all. `super.method()`
+(`GetSuper`) needed no changes at all — it was already unconditionally
+internal, which is exactly what the protected-like resolution asks for.
+
+Runtime enforcement, all in `vm.cpp`: external `GetProperty` checks the
+accessed property's own `isPub` (or, falling through to a method, checks
+`publicMethods`/`init`) and reports the exact same "Undefined property"
+wording on failure a nonexistent name would — genuinely *invisible* from
+outside, per decision 10's own word for it, not a distinct "it's private"
+error. External `SetProperty` additionally requires `isMut`, with a
+dedicated "not externally mutable" error when a property is visible but
+read-only. Both `*Self` variants skip every `pub`/`mut` gate entirely.
+Immutability (decision 9) is enforced by both `SetProperty` and
+`SetPropertySelf` for a non-`mut` property: the first write (transitioning
+away from the `Undef` sentinel) succeeds, any later one is a runtime
+error — `mut` properties have no such limit, matching `0.1`'s existing
+`var`/`var mut` split reused for exactly this purpose.
+
+A concrete, previously-hypothetical consequence of decisions 8-11 turned
+out to be a real compiler/+vm/ regression the moment this phase landed,
+not just a documentation risk: `langspec/versions/0.1/examples/classes.iqx`
+(frozen `0.1`-era syntax, undeclared `self.name = name`, no `pub` on
+`quack()`/`square()`) stopped compiling outright. This is exactly §2 item
+6's "conformance-suite fallout," but concretely worse than that question's
+own framing assumed (not just a re-pointing exercise — `compiler/`+`vm/`
+provably can no longer run `poc/`-era *class* fixtures at all). The
+repository owner's call, once this was surfaced: retire cross-
+implementation conformance testing entirely rather than keep chasing it
+release over release — see item 6's own resolution above and
+`CLAUDE.md`'s `compiler/`/`vm/` testing bullet for what that means going
+forward (`scripts/conformance-test.sh`/`scripts/phase7-run-smoke-test.sh`
+and their CI jobs are gone).
+
+`langspec/examples/classes.iqx`/`inheritance.iqx`/`properties.iqx`/
+`visibility.iqx` all already had `pub`/`var`-declared properties from
+Phase 0's spec-first pass (written ahead of any implementation existing to
+run them) — no editing needed here, just end-to-end verification through
+the real toolchain, plus one addition: `visibility.iqx` gained a
+`LoggingVault extends Vault` subclass whose own `pub` method calls the
+superclass's private `checkPin`, the first fixture anywhere in the repo
+that actually exercises the protected-like resolution rather than just
+documenting it in a comment. 9 new xUnit tests (property/method `pub`
+parsing and all four modifier combinations, the three new compile-time
+errors, and two full Codegen instruction-sequence assertions covering
+every new opcode) and 9 new Catch2 tests (private-property invisibility,
+pub-read/no-external-write, write-once enforcement for both an immutable
+and a `mut` property, reading-before-assignment, private-method-call
+rejection, `init`'s unconditional external callability, and the
+protected-like subclass-reaches-ancestor's-private-members case) — plus 5
+existing Catch2 tests updated for the new opcodes (they emit raw bytecode
+directly via `ChunkBuilder`, so they needed `Property*`/`MethodPub`/
+`*Self` opcodes added by hand, not a compiler-side fix).
+
+Verifying every top-level `langspec/examples/*.iqx` fixture end to end
+(not just the four class-related ones) — the closest thing left to the
+retired smoke test, now a manual per-phase step per §5's Phase 9 entry —
+found one unrelated, pre-existing bug: `lambdas.iqx` (Phase 2) declared
+its own `var add`/`add5`, which silently collided with Phase 6's later
+`add` native global the moment that landed, an "already declared" compile
+error nobody had actually triggered since nothing had run this fixture
+since Phase 6 shipped. Renamed to `sum`/`addFive` — an example-authoring
+fix, not a language or compiler bug, and not logged in `docs/LANGUAGE.md`
+§13 for that reason.
 
 **Phase 8 — Mixins and traits.** `with`-dynamic and `trait`/`use`-static
 composition, extending `Inherit`'s existing method-table-copy mechanism.
@@ -778,10 +920,12 @@ Needs §2.1 (static conflict resolution) and §2.2 (dynamic linearization
 algorithm) resolved first. Builds on Phase 7's (by-then-updated)
 class/property model.
 
-**Phase 9 — Conformance and docs.** Resolve §2.6's conformance-suite split
-in practice (`scripts/conformance-test.sh` pointed at `langspec/versions/0.1/`,
-for the `poc/` comparison; the current, `0.2`-syntax top-level examples
-become a `compiler/`+`vm/`-only check);
+**Phase 9 — Docs.** No conformance-suite split left to resolve — §2 item 6
+was resolved (and the underlying scripts/CI jobs retired outright) during
+Phase 7, once decisions 8-11 broke `compiler/`+`vm/`'s ability to run
+`poc/`-era class fixtures at all. What remains: verify the top-level
+`langspec/examples/*.iqx` all still run correctly through `compiler/`+`vm/`
+now that every `0.2` feature has landed (a manual check, not a CI job);
 fork `docs/LANGUAGE.md` into `docs/LANGUAGE-0.1.md` (frozen) plus a new,
 current `docs/LANGUAGE.md` for `0.2` — the same fork-not-addendum pattern
 `docs/PLAN-0.1.md`'s own Phase 10 used; `ROADMAP.md` marks `0.2` delivered
@@ -790,20 +934,24 @@ and moves the active-target goalposts to `0.3`.
 ## 6. Testing strategy
 
 Same split `0.1` already established (`docs/PLAN-0.1.md` §7): xUnit for
-`compiler/`, Catch2 for `vm/`, plus whatever `langspec/examples/`
-strategy §2.6 lands on in practice. No new testing *infrastructure*
-needed — this version is entirely new language surface on an
+`compiler/`, Catch2 for `vm/`. No cross-implementation conformance layer
+anymore (§2 item 6, retired Phase 7) and no new testing *infrastructure*
+needed otherwise — this version is entirely new language surface on an
 already-proven pipeline, not a new implementation to stand up.
 
 ## 7. Risks
 
-- **Decisions 8-11 (private-by-default properties *and* methods) are a
-  real breaking change to `0.1`'s object model**, not an additive
-  feature — every existing class-using script needs auditing for any
-  property or method ever accessed from outside its own class, which
-  would newly require an explicit `pub`. See §2.6 for the concrete
-  conformance-suite fallout, and decision 13 for the `langspec/`
-  reorganization this forces.
+- ~~Decisions 8-11 (private-by-default properties *and* methods) are a
+  real breaking change to `0.1`'s object model, not an additive
+  feature~~ **— materialized during Phase 7, exactly as predicted, only
+  more severely**: `compiler/`+`vm/` provably can no longer run
+  `poc/`-era class fixtures at all (§2 item 6's resolution), not just
+  "needs an audited `pub` added here and there." Resolved by retiring
+  cross-implementation conformance testing entirely rather than treating
+  it as an ongoing constraint — see item 6 and `CLAUDE.md`'s
+  `compiler/`/`vm/` testing bullet. Decision 13's `langspec/`
+  reorganization still stands on its own merits (versioned spec
+  snapshots), independent of this.
 - **Four new keyword/token additions in one version** (`->`, `<-`, `...`
   finally given meaning, plus the new `pub` keyword) grows the
   scanner/parser's surface area meaningfully in a single pass — keep test

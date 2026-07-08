@@ -100,12 +100,111 @@ let private preRegisterGlobals (globals: Dictionary<string, bool>) (errors: Resi
         match stmt with
         | VarStmt(name, _, isMutable) -> register name isMutable
         | FunctionStmt decl -> register decl.Name false
-        | ClassStmt(name, _, _) -> register name false
+        | ClassStmt(name, _, _, _) -> register name false
         | _ -> ()
 
-type private Resolver(globals: Dictionary<string, bool>) =
+/// One top-level class's own declared members, keyed by name -- built by
+/// `preRegisterClasses` before any method body is resolved, exactly like
+/// `preRegisterGlobals` above, so forward/mutual references between
+/// classes (and looking up an ancestor's declared properties while
+/// resolving a *subclass*'s methods) don't depend on file order.
+/// `docs/PLAN-0.2.md` decision 8's addendum: every property a class uses
+/// must be declared somewhere in its own body or an ancestor's -- this is
+/// the compile-time table that check is answered against.
+type private ClassInfo =
+    { SuperclassName: string option
+      Properties: Map<string, PropertyDecl>
+      MethodNames: Set<string> }
+
+/// Walks `className`'s own declared properties, then its ancestors',
+/// stopping at the first match -- mirrors decision 10's internal-access
+/// rule ("self.x" resolves against whichever class in the hierarchy
+/// actually declared `x`, own class or ancestor, per the now-resolved
+/// §2.3 protected-like reading).
+let rec private findDeclaredProperty
+    (classes: Dictionary<string, ClassInfo>)
+    (className: string)
+    (propName: string)
+    : PropertyDecl option =
+    match classes.TryGetValue className with
+    | false, _ -> None
+    | true, info ->
+        match info.Properties.TryFind propName with
+        | Some p -> Some p
+        | None -> info.SuperclassName |> Option.bind (fun superName -> findDeclaredProperty classes superName propName)
+
+/// Same ancestor walk, for method names -- used only to give a more
+/// specific "that's a method, not a property" diagnostic when a
+/// `self.x = value` targets a declared method instead of an undeclared
+/// name entirely (§8's addendum doesn't cover this case explicitly; a
+/// dedicated message is just better engineering, not a new design axis).
+let rec private findDeclaredMethod
+    (classes: Dictionary<string, ClassInfo>)
+    (className: string)
+    (methodName: string)
+    : bool =
+    match classes.TryGetValue className with
+    | false, _ -> false
+    | true, info ->
+        info.MethodNames.Contains methodName
+        || (info.SuperclassName |> Option.exists (fun superName -> findDeclaredMethod classes superName methodName))
+
+let private preRegisterClasses (classes: Dictionary<string, ClassInfo>) (errors: ResizeArray<ResolveError>) (stmts: Stmt list) =
+    for stmt in stmts do
+        match stmt with
+        | ClassStmt(name, superclassExpr, properties, methods) ->
+            let superclassName =
+                superclassExpr
+                |> Option.map (function
+                    | Variable superName -> superName.Lexeme
+                    | other -> failwith $"unreachable: superclass is always a bare Variable, got %A{other}")
+            let methodNames = methods |> List.map (fun m -> m.Name.Lexeme) |> Set.ofList
+            let mutable propMap = Map.empty
+            for p in properties do
+                if propMap.ContainsKey p.Name.Lexeme then
+                    errors.Add
+                        { Message = $"Property '{p.Name.Lexeme}' already declared in class '{name.Lexeme}'."
+                          Token = p.Name }
+                elif methodNames.Contains p.Name.Lexeme then
+                    errors.Add
+                        { Message =
+                            $"'{p.Name.Lexeme}' is declared as both a property and a method in class '{name.Lexeme}'."
+                          Token = p.Name }
+                else
+                    propMap <- propMap.Add(p.Name.Lexeme, p)
+            classes.[name.Lexeme] <- { SuperclassName = superclassName; Properties = propMap; MethodNames = methodNames }
+        | _ -> ()
+
+    // Second pass: a property redeclared somewhere up its own ancestor
+    // chain (not just within its own class, already caught above) --
+    // needs the full table built first, since an ancestor can be
+    // declared later in the same file (mirroring preRegisterGlobals's own
+    // order-independence).
+    for stmt in stmts do
+        match stmt with
+        | ClassStmt(name, _, properties, _) ->
+            let info = classes.[name.Lexeme]
+            for p in properties do
+                match info.SuperclassName with
+                | Some superName when (findDeclaredProperty classes superName p.Name.Lexeme).IsSome ->
+                    errors.Add
+                        { Message =
+                            $"Property '{p.Name.Lexeme}' already declared by an ancestor of class '{name.Lexeme}'."
+                          Token = p.Name }
+                | _ -> ()
+        | _ -> ()
+
+type private Resolver(globals: Dictionary<string, bool>, classes: Dictionary<string, ClassInfo>) =
     let errors = ResizeArray<ResolveError>()
     let mutable context = FunctionContext(None)
+    // The name of the class whose method body is currently being resolved
+    // -- `None` outside any method. Used only by `Set(SelfExpr, ...)`'s
+    // decision-8-addendum check (`self.x = value` must target a property
+    // declared somewhere in this class's own hierarchy); reading `self.x`
+    // needs no such check (`Get` is ambiguous between a property read and
+    // a bound-method fetch, so it's left to the existing runtime
+    // "Undefined property" fallback, same as before this phase).
+    let mutable currentClassName: string option = None
 
     let error (token: Token) (message: string) = errors.Add { Message = message; Token = token }
 
@@ -171,7 +270,7 @@ type private Resolver(globals: Dictionary<string, bool>) =
             let binding = declareVariable decl.Name false
             BFunctionStmt(binding, this.ResolveFunction(decl, isMethod = false))
         | ReturnStmt(keyword, value) -> BReturnStmt(keyword, value |> Option.map this.ResolveExpr)
-        | ClassStmt(name, superclassExpr, methods) ->
+        | ClassStmt(name, superclassExpr, properties, methods) ->
             let binding = declareVariable name false
 
             let boundSuperclass =
@@ -193,12 +292,19 @@ type private Resolver(globals: Dictionary<string, bool>) =
                       IsMutable = false
                       Depth = context.ScopeDepth }
 
+            let enclosingClassName = currentClassName
+            currentClassName <- Some name.Lexeme
             let boundMethods = methods |> List.map (fun m -> this.ResolveFunction(m, isMethod = true))
+            currentClassName <- enclosingClassName
 
             if boundSuperclass.IsSome then
                 endScope ()
 
-            BClassStmt(binding, name, boundSuperclass, boundMethods)
+            let boundProperties: BoundPropertyDecl list =
+                properties
+                |> List.map (fun p -> ({ Name = p.Name; IsPub = p.IsPub; IsMutable = p.IsMutable }: BoundPropertyDecl))
+
+            BClassStmt(binding, name, boundSuperclass, boundProperties, boundMethods)
 
     member private this.ResolveBlock(statements: Stmt list) : BoundStmt list =
         beginScope ()
@@ -230,7 +336,8 @@ type private Resolver(globals: Dictionary<string, bool>) =
               Parameters = decl.Parameters
               Body = boundBody
               LocalCount = context.Locals.Count
-              Upvalues = context.Upvalues |> Seq.map (fun u -> u.Descriptor) |> List.ofSeq }
+              Upvalues = context.Upvalues |> Seq.map (fun u -> u.Descriptor) |> List.ofSeq
+              IsPub = decl.IsPub }
 
         context <- enclosing
         result
@@ -262,7 +369,22 @@ type private Resolver(globals: Dictionary<string, bool>) =
         | Ignore -> BIgnore
         | Call(callee, arguments) -> BCall(this.ResolveExpr callee, arguments |> List.map this.ResolveExpr)
         | Get(obj, name) -> BGet(this.ResolveExpr obj, name)
-        | Set(obj, name, value) -> BSet(this.ResolveExpr obj, name, this.ResolveExpr value)
+        | Set(obj, name, value) ->
+            // `docs/PLAN-0.2.md` decision 8's addendum: a bare
+            // `self.x = value` with no matching property declaration
+            // anywhere in the current class's own hierarchy is a
+            // compile-time error, the same category as assigning to an
+            // undeclared local -- only checkable here (not for an
+            // external `instance.x = value`, whose `instance` expression
+            // has no statically-known class to check against).
+            match obj, currentClassName with
+            | SelfExpr _, Some className when (findDeclaredProperty classes className name.Lexeme).IsNone ->
+                if findDeclaredMethod classes className name.Lexeme then
+                    error name $"'{name.Lexeme}' is a method, not a property -- it can't be assigned to."
+                else
+                    error name $"Property '{name.Lexeme}' is not declared in class '{className}' or any of its superclasses."
+            | _ -> ()
+            BSet(this.ResolveExpr obj, name, this.ResolveExpr value)
         | Index(obj, index, bracket) -> BIndex(this.ResolveExpr obj, this.ResolveExpr index, bracket)
         | IndexSet(obj, index, value, bracket) ->
             BIndexSet(this.ResolveExpr obj, this.ResolveExpr index, this.ResolveExpr value, bracket)
@@ -277,7 +399,8 @@ type private Resolver(globals: Dictionary<string, bool>) =
             let syntheticDecl: FunctionDecl =
                 { Name = { arrow with Type = Identifier; Lexeme = "lambda" }
                   Parameters = parameters
-                  Body = [ ReturnStmt(arrow, Some body) ] }
+                  Body = [ ReturnStmt(arrow, Some body) ]
+                  IsPub = false }
             BLambda(this.ResolveFunction(syntheticDecl, isMethod = false))
         | Cons(item, list, bracket) ->
             // `[item | list]` (docs/PLAN-0.2.md decision 2) needs a real
@@ -322,7 +445,8 @@ type private Resolver(globals: Dictionary<string, bool>) =
                               InternalVectorAppend(Variable resultName, Index(Variable listParam, Variable indexName, bracket))
                           )
                       )
-                      ReturnStmt(bracket, Some(Variable resultName)) ] }
+                      ReturnStmt(bracket, Some(Variable resultName)) ]
+                  IsPub = false }
             let boundDecl = this.ResolveFunction(syntheticDecl, isMethod = false)
             let boundItem = this.ResolveExpr item
             let boundList = this.ResolveExpr list
@@ -359,7 +483,8 @@ type private Resolver(globals: Dictionary<string, bool>) =
                               ExpressionStmt(InternalVectorAppend(Variable resultName, body))
                           ]
                       )
-                      ReturnStmt(bracket, Some(Variable resultName)) ] }
+                      ReturnStmt(bracket, Some(Variable resultName)) ]
+                  IsPub = false }
             let boundDecl = this.ResolveFunction(syntheticDecl, isMethod = false)
             let boundSource = this.ResolveExpr source
             BCall(BLambda boundDecl, [ boundSource ])
@@ -416,7 +541,10 @@ let resolve (stmts: Stmt list) : BoundStmt list * ResolveError list =
     let preErrors = ResizeArray<ResolveError>()
     preRegisterGlobals globals preErrors stmts
 
-    let resolver = Resolver(globals)
+    let classes = Dictionary<string, ClassInfo>()
+    preRegisterClasses classes preErrors stmts
+
+    let resolver = Resolver(globals, classes)
     let bound = stmts |> List.map resolver.ResolveStmt
 
     bound, (List.ofSeq preErrors) @ resolver.Errors

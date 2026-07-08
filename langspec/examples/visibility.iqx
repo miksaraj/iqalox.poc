@@ -1,9 +1,12 @@
 <#
     Method visibility (0.2): the same `pub` modifier used for
     properties, applied to methods. A method without `pub` is only
-    callable from inside its own class (or, pending docs/PLAN-0.2.md
-    open question 3, a subclass); `init` is always externally callable
-    regardless of any `pub` annotation. See docs/PLAN-0.2.md decision 11.
+    callable from inside its own class or a subclass -- resolved
+    protected-like (docs/PLAN-0.2.md open question 3, decided): a
+    subclass's own methods count as internal access to a superclass's
+    private members, the same as C++/Java/C#'s `protected`, not stricter.
+    `init` is always externally callable regardless of any `pub`
+    annotation. See docs/PLAN-0.2.md decision 11.
 #>
 
 class Vault {
@@ -33,3 +36,18 @@ print vault.balance()
 # The following would be a runtime error if uncommented -- checkPin has
 # no pub, so it isn't callable from outside the class:
 # vault.checkPin 1234
+
+# Protected-like access: a subclass's own method calling self.checkPin(...)
+# reaches Vault's private method just fine, since it's internal access
+# relative to the class hierarchy -- not external the way vault.checkPin(...)
+# above would be.
+class LoggingVault extends Vault {
+    pub depositLogged(amount, pin) {
+        self.checkPin pin ? print "PIN accepted, depositing." : print "PIN rejected."
+        self.deposit amount, pin
+    }
+}
+
+var logging = LoggingVault()
+logging.depositLogged 50, 1234
+print logging.balance()

@@ -31,6 +31,12 @@ TEST_CASE("a class with no init constructs a bare instance, and fields get/set",
 
     b.emitU16(OpCode::Class, pointName);
     b.emitU16(OpCode::DefineGlobal, pointName);
+    b.emitU16(OpCode::GetGlobal, pointName);  // temp re-fetch
+    // `pub mut`, so the external get/set below (docs/PLAN-0.2.md Phase 7)
+    // is actually allowed -- an undeclared/private/read-only property
+    // would each be a runtime error instead.
+    b.emitU16(OpCode::PropertyPubMut, xName);
+    b.emit(OpCode::Pop);  // discard temp re-fetch
 
     b.emitU16(OpCode::GetGlobal, pointName);
     b.emitU16(OpCode::Call, 0);
@@ -60,11 +66,11 @@ TEST_CASE("init runs with self bound and its own return value is discarded for t
     uint16_t yName1 = initBuilder.addStringConstant("y");
     initBuilder.emitU16(OpCode::GetLocal, 0);  // self
     initBuilder.emitU16(OpCode::GetLocal, 1);  // x
-    initBuilder.emitU16(OpCode::SetProperty, xName1);
+    initBuilder.emitU16(OpCode::SetPropertySelf, xName1);
     initBuilder.emit(OpCode::Pop);
     initBuilder.emitU16(OpCode::GetLocal, 0);  // self
     initBuilder.emitU16(OpCode::GetLocal, 2);  // y
-    initBuilder.emitU16(OpCode::SetProperty, yName1);
+    initBuilder.emitU16(OpCode::SetPropertySelf, yName1);
     initBuilder.emit(OpCode::Pop);
     ObjFunction* initFn = initBuilder.build(2, "init");
 
@@ -72,9 +78,9 @@ TEST_CASE("init runs with self bound and its own return value is discarded for t
     uint16_t xName2 = sumBuilder.addStringConstant("x");
     uint16_t yName2 = sumBuilder.addStringConstant("y");
     sumBuilder.emitU16(OpCode::GetLocal, 0);
-    sumBuilder.emitU16(OpCode::GetProperty, xName2);
+    sumBuilder.emitU16(OpCode::GetPropertySelf, xName2);
     sumBuilder.emitU16(OpCode::GetLocal, 0);
-    sumBuilder.emitU16(OpCode::GetProperty, yName2);
+    sumBuilder.emitU16(OpCode::GetPropertySelf, yName2);
     sumBuilder.emit(OpCode::Add);
     sumBuilder.emit(OpCode::Return);
     ObjFunction* sumFn = sumBuilder.build(0, "sum");
@@ -85,6 +91,8 @@ TEST_CASE("init runs with self bound and its own return value is discarded for t
     uint16_t sumIndex = b.addFunctionConstant(sumFn);
     uint16_t initName = b.addStringConstant("init");
     uint16_t sumName = b.addStringConstant("sum");
+    uint16_t xDeclName = b.addStringConstant("x");
+    uint16_t yDeclName = b.addStringConstant("y");
     uint16_t three = b.addNumberConstant(3);
     uint16_t four = b.addNumberConstant(4);
     uint16_t pName = b.addStringConstant("p");
@@ -93,10 +101,17 @@ TEST_CASE("init runs with self bound and its own return value is discarded for t
     b.emitU16(OpCode::Class, pointName);
     b.emitU16(OpCode::DefineGlobal, pointName);
     b.emitU16(OpCode::GetGlobal, pointName);  // temp re-fetch
+    // Private (no external access needed by this test) but `mut`, so
+    // `init` can freely set both on every fresh instance.
+    b.emitU16(OpCode::PropertyPrivateMut, xDeclName);
+    b.emitU16(OpCode::PropertyPrivateMut, yDeclName);
     b.emitClosure(initIndex, {});
     b.emitU16(OpCode::Method, initName);
     b.emitClosure(sumIndex, {});
-    b.emitU16(OpCode::Method, sumName);
+    // `sum` is called externally (`p.sum()` below), so it needs `pub`
+    // (docs/PLAN-0.2.md decision 11) -- `init` doesn't, since it's always
+    // externally callable regardless of any `pub` annotation.
+    b.emitU16(OpCode::MethodPub, sumName);
     b.emit(OpCode::Pop);  // discard temp re-fetch
 
     b.emitU16(OpCode::GetGlobal, pointName);
@@ -254,7 +269,7 @@ TEST_CASE("inheritance: overriding, dynamic dispatch through self, and an explic
     ChunkBuilder describeBuilder(vm);
     uint16_t speakName1 = describeBuilder.addStringConstant("speak");
     describeBuilder.emitU16(OpCode::GetLocal, 0);  // self
-    describeBuilder.emitU16(OpCode::GetProperty, speakName1);
+    describeBuilder.emitU16(OpCode::GetPropertySelf, speakName1);
     describeBuilder.emitU16(OpCode::Call, 0);
     describeBuilder.emit(OpCode::Return);
     ObjFunction* describeFn = describeBuilder.build(0, "describe");
@@ -293,13 +308,17 @@ TEST_CASE("inheritance: overriding, dynamic dispatch through self, and an explic
     uint16_t r3Name = b.addStringConstant("r3");
 
     // class Animal { speak() {...} describe() {...} }
+    // `speak` is only ever called internally (via `self.speak()` inside
+    // `describe`, and via `super.speak()` bypassing dispatch entirely --
+    // neither needs `pub`); `describe` is called externally below (and
+    // inherited by Dog, which never overrides it), so it needs `pub`.
     b.emitU16(OpCode::Class, animalName);
     b.emitU16(OpCode::DefineGlobal, animalName);
     b.emitU16(OpCode::GetGlobal, animalName);
     b.emitClosure(animalSpeakIndex, {});
     b.emitU16(OpCode::Method, speakName);
     b.emitClosure(describeIndex, {});
-    b.emitU16(OpCode::Method, describeName);
+    b.emitU16(OpCode::MethodPub, describeName);
     b.emit(OpCode::Pop);
 
     // class Dog extends Animal { speak() {...} describeSuper() {...} }
@@ -307,15 +326,21 @@ TEST_CASE("inheritance: overriding, dynamic dispatch through self, and an explic
     // top-level script's own frame (slot 0, since nothing else has taken
     // a local slot there yet) -- describeSuperFn captures it as upvalue 0
     // via FromEnclosingLocal=true, index=0.
+    //
+    // Both of Dog's own methods are called externally below, so both need
+    // their own `pub` -- an override always starts private regardless of
+    // what the superclass declared (`Vm`'s `Method` handler clears any
+    // inherited `publicMethods` entry), so Dog's `speak` override can't
+    // just inherit Animal's (private) visibility here either way.
     b.emitU16(OpCode::Class, dogName);
     b.emitU16(OpCode::DefineGlobal, dogName);
     b.emitU16(OpCode::GetGlobal, animalName);  // superclass
     b.emitU16(OpCode::GetGlobal, dogName);     // temp re-fetch
     b.emit(OpCode::Inherit);
     b.emitClosure(dogSpeakIndex, {});
-    b.emitU16(OpCode::Method, speakName);
+    b.emitU16(OpCode::MethodPub, speakName);
     b.emitClosure(describeSuperIndex, {{true, 0}});
-    b.emitU16(OpCode::Method, describeSuperName);
+    b.emitU16(OpCode::MethodPub, describeSuperName);
     b.emit(OpCode::Pop);
 
     b.emitU16(OpCode::GetGlobal, dogName);
@@ -370,7 +395,11 @@ TEST_CASE("super.method() with an undefined method name is a runtime error", "[v
     b.emitU16(OpCode::GetGlobal, dogName);
     b.emit(OpCode::Inherit);
     b.emitClosure(callSuperIndex, {{true, 0}});
-    b.emitU16(OpCode::Method, callSuperName);
+    // `pub`, since it's called externally below -- otherwise the runtime
+    // error this test expects would come from the (also correct, but not
+    // what this test is meant to exercise) "callSuper is private" check
+    // instead of the intended "missing" super-lookup failure.
+    b.emitU16(OpCode::MethodPub, callSuperName);
     b.emit(OpCode::Pop);
 
     b.emitU16(OpCode::GetGlobal, dogName);
@@ -390,7 +419,7 @@ TEST_CASE("aggressive stress-mode collection doesn't corrupt classes, instances,
     ChunkBuilder getXBuilder(vm);
     uint16_t xName = getXBuilder.addStringConstant("x");
     getXBuilder.emitU16(OpCode::GetLocal, 0);
-    getXBuilder.emitU16(OpCode::GetProperty, xName);
+    getXBuilder.emitU16(OpCode::GetPropertySelf, xName);
     getXBuilder.emit(OpCode::Return);
     ObjFunction* getXFn = getXBuilder.build(0, "getX");
 
@@ -398,7 +427,7 @@ TEST_CASE("aggressive stress-mode collection doesn't corrupt classes, instances,
     uint16_t xName2 = initBuilder.addStringConstant("x");
     initBuilder.emitU16(OpCode::GetLocal, 0);
     initBuilder.emitU16(OpCode::GetLocal, 1);
-    initBuilder.emitU16(OpCode::SetProperty, xName2);
+    initBuilder.emitU16(OpCode::SetPropertySelf, xName2);
     initBuilder.emit(OpCode::Pop);
     ObjFunction* initFn = initBuilder.build(1, "init");
 
@@ -408,6 +437,7 @@ TEST_CASE("aggressive stress-mode collection doesn't corrupt classes, instances,
     uint16_t getXIndex = b.addFunctionConstant(getXFn);
     uint16_t initName = b.addStringConstant("init");
     uint16_t getXName = b.addStringConstant("getX");
+    uint16_t xDeclName = b.addStringConstant("x");
     uint16_t fortyTwo = b.addNumberConstant(42);
     uint16_t pName = b.addStringConstant("p");
     uint16_t resultName = b.addStringConstant("result");
@@ -415,10 +445,12 @@ TEST_CASE("aggressive stress-mode collection doesn't corrupt classes, instances,
     b.emitU16(OpCode::Class, pointName);
     b.emitU16(OpCode::DefineGlobal, pointName);
     b.emitU16(OpCode::GetGlobal, pointName);
+    b.emitU16(OpCode::PropertyPrivateMut, xDeclName);
     b.emitClosure(initIndex, {});
     b.emitU16(OpCode::Method, initName);
     b.emitClosure(getXIndex, {});
-    b.emitU16(OpCode::Method, getXName);
+    // Called externally (`p.getX()` below), so `pub`.
+    b.emitU16(OpCode::MethodPub, getXName);
     b.emit(OpCode::Pop);
 
     b.emitU16(OpCode::GetGlobal, pointName);
@@ -434,4 +466,321 @@ TEST_CASE("aggressive stress-mode collection doesn't corrupt classes, instances,
     vm.interpret(b.build());
 
     REQUIRE(asNumber(*vm.getGlobal("result")) == 42.0);
+}
+
+// docs/PLAN-0.2.md Phase 7: property/method visibility (`pub`/`mut`,
+// decisions 8-11) and the now-resolved open question 3 (subclass access
+// to a superclass's private members is protected-like, not stricter).
+
+TEST_CASE("a private (no pub) property is invisible to external access", "[vm][classes][visibility]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t pointName = b.addStringConstant("Point");
+    uint16_t xName = b.addStringConstant("x");
+    uint16_t pName = b.addStringConstant("p");
+
+    b.emitU16(OpCode::Class, pointName);
+    b.emitU16(OpCode::DefineGlobal, pointName);
+    b.emitU16(OpCode::GetGlobal, pointName);
+    b.emitU16(OpCode::PropertyPrivateMut, xName);
+    b.emit(OpCode::Pop);
+
+    b.emitU16(OpCode::GetGlobal, pointName);
+    b.emitU16(OpCode::Call, 0);
+    b.emitU16(OpCode::DefineGlobal, pName);
+
+    b.emitU16(OpCode::GetGlobal, pName);
+    b.emitU16(OpCode::GetProperty, xName);
+
+    REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
+}
+
+TEST_CASE("a pub (non-mut) property is externally readable but not writable", "[vm][classes][visibility]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t pointName = b.addStringConstant("Point");
+    uint16_t xName = b.addStringConstant("x");
+    uint16_t pName = b.addStringConstant("p");
+    uint16_t nine = b.addNumberConstant(9);
+
+    b.emitU16(OpCode::Class, pointName);
+    b.emitU16(OpCode::DefineGlobal, pointName);
+    b.emitU16(OpCode::GetGlobal, pointName);
+    b.emitU16(OpCode::PropertyPub, xName);
+    b.emit(OpCode::Pop);
+
+    b.emitU16(OpCode::GetGlobal, pointName);
+    b.emitU16(OpCode::Call, 0);
+    b.emitU16(OpCode::DefineGlobal, pName);
+
+    b.emitU16(OpCode::GetGlobal, pName);
+    b.emitU16(OpCode::Constant, nine);
+    b.emitU16(OpCode::SetProperty, xName);
+
+    REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
+}
+
+TEST_CASE("an immutable property can be set internally exactly once, from anywhere", "[vm][classes][visibility]") {
+    // class Point { var x; init(v) { self.x = v; self.x = v; } }
+    Vm vm;
+    ChunkBuilder initBuilder(vm);
+    uint16_t xName1 = initBuilder.addStringConstant("x");
+    initBuilder.emitU16(OpCode::GetLocal, 0);
+    initBuilder.emitU16(OpCode::GetLocal, 1);
+    initBuilder.emitU16(OpCode::SetPropertySelf, xName1);
+    initBuilder.emit(OpCode::Pop);
+    initBuilder.emitU16(OpCode::GetLocal, 0);
+    initBuilder.emitU16(OpCode::GetLocal, 1);
+    initBuilder.emitU16(OpCode::SetPropertySelf, xName1);  // second assignment -- must fail
+    initBuilder.emit(OpCode::Pop);
+    ObjFunction* initFn = initBuilder.build(1, "init");
+
+    ChunkBuilder b(vm);
+    uint16_t pointName = b.addStringConstant("Point");
+    uint16_t initIndex = b.addFunctionConstant(initFn);
+    uint16_t initName = b.addStringConstant("init");
+    uint16_t xDeclName = b.addStringConstant("x");
+    uint16_t one = b.addNumberConstant(1);
+
+    b.emitU16(OpCode::Class, pointName);
+    b.emitU16(OpCode::DefineGlobal, pointName);
+    b.emitU16(OpCode::GetGlobal, pointName);
+    b.emitU16(OpCode::PropertyPrivate, xDeclName);  // immutable
+    b.emitClosure(initIndex, {});
+    b.emitU16(OpCode::Method, initName);
+    b.emit(OpCode::Pop);
+
+    b.emitU16(OpCode::GetGlobal, pointName);
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::Call, 1);
+
+    REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
+}
+
+TEST_CASE("a mut property allows unlimited internal writes", "[vm][classes][visibility]") {
+    // class Counter { var n mut; init() { self.n = 1; self.n = 2; self.n = 3; } getN() { return self.n; } }
+    Vm vm;
+    ChunkBuilder initBuilder(vm);
+    uint16_t nName1 = initBuilder.addStringConstant("n");
+    for (double v : {1.0, 2.0, 3.0}) {
+        initBuilder.emitU16(OpCode::GetLocal, 0);
+        uint16_t constIdx = initBuilder.addNumberConstant(v);
+        initBuilder.emitU16(OpCode::Constant, constIdx);
+        initBuilder.emitU16(OpCode::SetPropertySelf, nName1);
+        initBuilder.emit(OpCode::Pop);
+    }
+    ObjFunction* initFn = initBuilder.build(0, "init");
+
+    ChunkBuilder getNBuilder(vm);
+    uint16_t nName2 = getNBuilder.addStringConstant("n");
+    getNBuilder.emitU16(OpCode::GetLocal, 0);
+    getNBuilder.emitU16(OpCode::GetPropertySelf, nName2);
+    getNBuilder.emit(OpCode::Return);
+    ObjFunction* getNFn = getNBuilder.build(0, "getN");
+
+    ChunkBuilder b(vm);
+    uint16_t counterName = b.addStringConstant("Counter");
+    uint16_t initIndex = b.addFunctionConstant(initFn);
+    uint16_t getNIndex = b.addFunctionConstant(getNFn);
+    uint16_t initName = b.addStringConstant("init");
+    uint16_t getNName = b.addStringConstant("getN");
+    uint16_t nDeclName = b.addStringConstant("n");
+    uint16_t cName = b.addStringConstant("c");
+    uint16_t resultName = b.addStringConstant("result");
+
+    b.emitU16(OpCode::Class, counterName);
+    b.emitU16(OpCode::DefineGlobal, counterName);
+    b.emitU16(OpCode::GetGlobal, counterName);
+    b.emitU16(OpCode::PropertyPrivateMut, nDeclName);
+    b.emitClosure(initIndex, {});
+    b.emitU16(OpCode::Method, initName);
+    b.emitClosure(getNIndex, {});
+    b.emitU16(OpCode::MethodPub, getNName);
+    b.emit(OpCode::Pop);
+
+    b.emitU16(OpCode::GetGlobal, counterName);
+    b.emitU16(OpCode::Call, 0);
+    b.emitU16(OpCode::DefineGlobal, cName);
+
+    b.emitU16(OpCode::GetGlobal, cName);
+    b.emitU16(OpCode::GetProperty, getNName);
+    b.emitU16(OpCode::Call, 0);
+    b.emitU16(OpCode::DefineGlobal, resultName);
+
+    vm.interpret(b.build());
+
+    REQUIRE(asNumber(*vm.getGlobal("result")) == 3.0);
+}
+
+TEST_CASE("reading an immutable property before it's ever been assigned is a runtime error", "[vm][classes][visibility]") {
+    // class Point { var x; getX() { return self.x; } } -- init never runs (no args given a no-init class).
+    Vm vm;
+    ChunkBuilder getXBuilder(vm);
+    uint16_t xName1 = getXBuilder.addStringConstant("x");
+    getXBuilder.emitU16(OpCode::GetLocal, 0);
+    getXBuilder.emitU16(OpCode::GetPropertySelf, xName1);
+    getXBuilder.emit(OpCode::Return);
+    ObjFunction* getXFn = getXBuilder.build(0, "getX");
+
+    ChunkBuilder b(vm);
+    uint16_t pointName = b.addStringConstant("Point");
+    uint16_t getXIndex = b.addFunctionConstant(getXFn);
+    uint16_t getXName = b.addStringConstant("getX");
+    uint16_t xDeclName = b.addStringConstant("x");
+    uint16_t pName = b.addStringConstant("p");
+
+    b.emitU16(OpCode::Class, pointName);
+    b.emitU16(OpCode::DefineGlobal, pointName);
+    b.emitU16(OpCode::GetGlobal, pointName);
+    b.emitU16(OpCode::PropertyPrivate, xDeclName);
+    b.emitClosure(getXIndex, {});
+    b.emitU16(OpCode::MethodPub, getXName);
+    b.emit(OpCode::Pop);
+
+    b.emitU16(OpCode::GetGlobal, pointName);
+    b.emitU16(OpCode::Call, 0);
+    b.emitU16(OpCode::DefineGlobal, pName);
+
+    b.emitU16(OpCode::GetGlobal, pName);
+    b.emitU16(OpCode::GetProperty, getXName);
+    b.emitU16(OpCode::Call, 0);
+
+    REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
+}
+
+TEST_CASE("calling a private (no pub) method from outside its class is a runtime error", "[vm][classes][visibility]") {
+    Vm vm;
+    ChunkBuilder secretBuilder(vm);
+    ObjFunction* secretFn = secretBuilder.build(0, "secret");
+
+    ChunkBuilder b(vm);
+    uint16_t vaultName = b.addStringConstant("Vault");
+    uint16_t secretIndex = b.addFunctionConstant(secretFn);
+    uint16_t secretName = b.addStringConstant("secret");
+    uint16_t vName = b.addStringConstant("v");
+
+    b.emitU16(OpCode::Class, vaultName);
+    b.emitU16(OpCode::DefineGlobal, vaultName);
+    b.emitU16(OpCode::GetGlobal, vaultName);
+    b.emitClosure(secretIndex, {});
+    b.emitU16(OpCode::Method, secretName);  // private
+    b.emit(OpCode::Pop);
+
+    b.emitU16(OpCode::GetGlobal, vaultName);
+    b.emitU16(OpCode::Call, 0);
+    b.emitU16(OpCode::DefineGlobal, vName);
+
+    b.emitU16(OpCode::GetGlobal, vName);
+    b.emitU16(OpCode::GetProperty, secretName);
+
+    REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
+}
+
+TEST_CASE("init is always externally callable regardless of any pub annotation", "[vm][classes][visibility]") {
+    Vm vm;
+    ChunkBuilder initBuilder(vm);
+    ObjFunction* initFn = initBuilder.build(0, "init");  // no pub -- construction must still work
+
+    ChunkBuilder b(vm);
+    uint16_t pointName = b.addStringConstant("Point");
+    uint16_t initIndex = b.addFunctionConstant(initFn);
+    uint16_t initName = b.addStringConstant("init");
+    uint16_t pName = b.addStringConstant("p");
+
+    b.emitU16(OpCode::Class, pointName);
+    b.emitU16(OpCode::DefineGlobal, pointName);
+    b.emitU16(OpCode::GetGlobal, pointName);
+    b.emitClosure(initIndex, {});
+    b.emitU16(OpCode::Method, initName);
+    b.emit(OpCode::Pop);
+
+    b.emitU16(OpCode::GetGlobal, pointName);
+    b.emitU16(OpCode::Call, 0);
+    b.emitU16(OpCode::DefineGlobal, pName);
+
+    vm.interpret(b.build());
+
+    REQUIRE(isObj(*vm.getGlobal("p")));
+}
+
+TEST_CASE("a subclass method can internally reach a superclass's private property and method (protected-like)",
+          "[vm][classes][visibility]") {
+    // class Animal { var name; init(n) { self.name = n; } secret() { return "shh"; } }
+    // class Dog extends Animal { pub reveal() { return concat [self.name, self.secret()]; } }
+    Vm vm;
+
+    ChunkBuilder animalInitBuilder(vm);
+    uint16_t nameName1 = animalInitBuilder.addStringConstant("name");
+    animalInitBuilder.emitU16(OpCode::GetLocal, 0);
+    animalInitBuilder.emitU16(OpCode::GetLocal, 1);
+    animalInitBuilder.emitU16(OpCode::SetPropertySelf, nameName1);
+    animalInitBuilder.emit(OpCode::Pop);
+    ObjFunction* animalInitFn = animalInitBuilder.build(1, "init");
+
+    ChunkBuilder secretBuilder(vm);
+    uint16_t shh = secretBuilder.addStringConstant("shh");
+    secretBuilder.emitU16(OpCode::Constant, shh);
+    secretBuilder.emit(OpCode::Return);
+    ObjFunction* secretFn = secretBuilder.build(0, "secret");  // private
+
+    // Dog.reveal(): self.name (inherited private property) + self.secret()
+    // (inherited private method) -- both reached via `self`, so both are
+    // internal access regardless of where up the hierarchy they were
+    // declared (the now-resolved open question 3's protected-like
+    // reading).
+    ChunkBuilder revealBuilder(vm);
+    uint16_t nameName2 = revealBuilder.addStringConstant("name");
+    uint16_t secretName2 = revealBuilder.addStringConstant("secret");
+    revealBuilder.emitU16(OpCode::GetLocal, 0);
+    revealBuilder.emitU16(OpCode::GetPropertySelf, nameName2);
+    revealBuilder.emitU16(OpCode::GetLocal, 0);
+    revealBuilder.emitU16(OpCode::GetPropertySelf, secretName2);
+    revealBuilder.emitU16(OpCode::Call, 0);
+    revealBuilder.emit(OpCode::Return);
+    ObjFunction* revealFn = revealBuilder.build(0, "reveal");
+
+    ChunkBuilder b(vm);
+    uint16_t animalName = b.addStringConstant("Animal");
+    uint16_t dogName = b.addStringConstant("Dog");
+    uint16_t nameDeclName = b.addStringConstant("name");
+    uint16_t initName = b.addStringConstant("init");
+    uint16_t secretName = b.addStringConstant("secret");
+    uint16_t revealName = b.addStringConstant("reveal");
+    uint16_t animalInitIndex = b.addFunctionConstant(animalInitFn);
+    uint16_t secretIndex = b.addFunctionConstant(secretFn);
+    uint16_t revealIndex = b.addFunctionConstant(revealFn);
+    uint16_t rex = b.addStringConstant("Rex");
+    uint16_t dName = b.addStringConstant("d");
+
+    b.emitU16(OpCode::Class, animalName);
+    b.emitU16(OpCode::DefineGlobal, animalName);
+    b.emitU16(OpCode::GetGlobal, animalName);
+    b.emitU16(OpCode::PropertyPrivate, nameDeclName);
+    b.emitClosure(animalInitIndex, {});
+    b.emitU16(OpCode::Method, initName);
+    b.emitClosure(secretIndex, {});
+    b.emitU16(OpCode::Method, secretName);  // private
+    b.emit(OpCode::Pop);
+
+    b.emitU16(OpCode::Class, dogName);
+    b.emitU16(OpCode::DefineGlobal, dogName);
+    b.emitU16(OpCode::GetGlobal, animalName);
+    b.emitU16(OpCode::GetGlobal, dogName);
+    b.emit(OpCode::Inherit);
+    b.emitClosure(revealIndex, {});
+    b.emitU16(OpCode::MethodPub, revealName);
+    b.emit(OpCode::Pop);
+
+    b.emitU16(OpCode::GetGlobal, dogName);
+    b.emitU16(OpCode::Constant, rex);
+    b.emitU16(OpCode::Call, 1);
+    b.emitU16(OpCode::DefineGlobal, dName);
+
+    b.emitU16(OpCode::GetGlobal, dName);
+    b.emitU16(OpCode::GetProperty, revealName);
+    b.emitU16(OpCode::Call, 0);
+
+    // Doesn't need concat -- just confirms both internal reaches succeeded
+    // without throwing (RuntimeError would propagate out of interpret()).
+    REQUIRE_NOTHROW(vm.interpret(b.build()));
 }

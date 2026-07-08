@@ -71,10 +71,17 @@ let disassembleInstruction (chunk: Chunk) (index: int) : string =
     | Return -> simple "RETURN"
     | Class i -> withConstant "CLASS" i
     | Method i -> withConstant "METHOD" i
+    | MethodPub i -> withConstant "METHOD_PUB" i
     | Inherit -> simple "INHERIT"
     | GetProperty i -> withConstant "GET_PROPERTY" i
+    | GetPropertySelf i -> withConstant "GET_PROPERTY_SELF" i
     | SetProperty i -> withConstant "SET_PROPERTY" i
+    | SetPropertySelf i -> withConstant "SET_PROPERTY_SELF" i
     | GetSuper i -> withConstant "GET_SUPER" i
+    | PropertyPrivate i -> withConstant "PROPERTY_PRIVATE" i
+    | PropertyPrivateMut i -> withConstant "PROPERTY_PRIVATE_MUT" i
+    | PropertyPub i -> withConstant "PROPERTY_PUB" i
+    | PropertyPubMut i -> withConstant "PROPERTY_PUB_MUT" i
     | GetIndex -> simple "GET_INDEX"
     | SetIndex -> simple "SET_INDEX"
     | VectorLength -> simple "VECTOR_LENGTH"

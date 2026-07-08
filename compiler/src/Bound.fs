@@ -92,13 +92,22 @@ type BoundExpr =
 /// `LocalCount` is how many stack slots the VM must reserve for this
 /// function's frame (including its own implicit `self` slot for methods);
 /// `Upvalues` tells the VM how to populate each captured variable when a
-/// closure over this function is created.
+/// closure over this function is created. `IsPub` (`docs/PLAN-0.2.md`
+/// decision 11) only matters for a method; carried through unchanged from
+/// `Ast.FunctionDecl` for every other case (always `false`).
 and BoundFunctionDecl =
     { Name: Token
       Parameters: Token list
       Body: BoundStmt list
       LocalCount: int
-      Upvalues: UpvalueDescriptor list }
+      Upvalues: UpvalueDescriptor list
+      IsPub: bool }
+
+/// Carries `Ast.PropertyDecl`'s `pub`/`mut` flags through resolution
+/// unchanged -- a property declaration needs no scope/slot/upvalue
+/// resolution of its own (`Codegen.fs`'s `CompileClass` just needs the
+/// flags to pick which `Property*` opcode to emit).
+and BoundPropertyDecl = { Name: Token; IsPub: bool; IsMutable: bool }
 
 and BoundStmt =
     | BBlock of statements: BoundStmt list
@@ -111,4 +120,5 @@ and BoundStmt =
         binding: DeclaredBinding *
         name: Token *
         superclass: (VariableBinding * Token) option *
+        properties: BoundPropertyDecl list *
         methods: BoundFunctionDecl list

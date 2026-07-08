@@ -126,7 +126,7 @@ let ``a class can reference its own name from inside its own methods`` () =
     let bound, errors = resolveSource "class Duck {\n    quack() { return Duck; }\n}"
     Assert.Empty errors
     match bound with
-    | [ BClassStmt(DeclaredGlobal "Duck", _, _, [ quackDecl ]) ] ->
+    | [ BClassStmt(DeclaredGlobal "Duck", _, _, _, [ quackDecl ]) ] ->
         match quackDecl.Body with
         | [ BReturnStmt(_, Some(BVariable(GlobalBinding "Duck", _))) ] -> ()
         | body -> failwith $"unexpected method body: %A{body}"
@@ -137,7 +137,7 @@ let ``self resolves inside a method`` () =
     let bound, errors = resolveSource "class Duck {\n    quack() { return self; }\n}"
     Assert.Empty errors
     match bound with
-    | [ BClassStmt(_, _, _, [ quackDecl ]) ] ->
+    | [ BClassStmt(_, _, _, _, [ quackDecl ]) ] ->
         match quackDecl.Body with
         | [ BReturnStmt(_, Some(BSelf(LocalBinding 0, _))) ] -> ()
         | body -> failwith $"unexpected method body: %A{body}"
@@ -155,7 +155,7 @@ let ``super resolves inside a method of a class with a superclass`` () =
     let bound, errors = resolveSource source
     Assert.Empty errors
     match bound with
-    | [ _; BClassStmt(_, _, Some(GlobalBinding "A", _), [ greetDecl ]) ] ->
+    | [ _; BClassStmt(_, _, Some(GlobalBinding "A", _), _, [ greetDecl ]) ] ->
         match greetDecl.Body with
         | [ BReturnStmt(_, Some(BCall(BSuper(LocalBinding 0, UpvalueBinding 0, _, methodName), []))) ] ->
             Assert.Equal("greet", methodName.Lexeme)
@@ -211,8 +211,82 @@ let ``LocalCount includes self plus every declared local`` () =
     let bound, errors = resolveSource "class Duck {\n    quack(a) { var b = 1\nreturn a; }\n}"
     Assert.Empty errors
     match bound with
-    | [ BClassStmt(_, _, _, [ quackDecl ]) ] -> Assert.Equal(3, quackDecl.LocalCount) // self, a, b
+    | [ BClassStmt(_, _, _, _, [ quackDecl ]) ] -> Assert.Equal(3, quackDecl.LocalCount) // self, a, b
     | _ -> failwith $"unexpected shape: %A{bound}"
+
+// docs/PLAN-0.2.md Phase 7: property/method visibility (`pub`/`mut`).
+
+[<Fact>]
+let ``property declarations resolve with their pub/mut flags carried through`` () =
+    let bound, errors = resolveSource "class Duck {\n    var name\n    var energy mut\n    var species pub\n    var quacking pub mut\n}"
+    Assert.Empty errors
+    match bound with
+    | [ BClassStmt(_, _, _, [ name; energy; species; quacking ], []) ] ->
+        Assert.Equal("name", name.Name.Lexeme)
+        Assert.False(name.IsPub)
+        Assert.False(name.IsMutable)
+        Assert.False(energy.IsPub)
+        Assert.True(energy.IsMutable)
+        Assert.True(species.IsPub)
+        Assert.False(species.IsMutable)
+        Assert.True(quacking.IsPub)
+        Assert.True(quacking.IsMutable)
+    | _ -> failwith $"unexpected shape: %A{bound}"
+
+[<Fact>]
+let ``a pub method's IsPub flag is carried into the bound method`` () =
+    let bound, errors = resolveSource "class Duck {\n    pub quack() { return 1; }\n}"
+    Assert.Empty errors
+    match bound with
+    | [ BClassStmt(_, _, _, _, [ quackDecl ]) ] -> Assert.True(quackDecl.IsPub)
+    | _ -> failwith $"unexpected shape: %A{bound}"
+
+[<Fact>]
+let ``self.x = value targeting an undeclared property is a compile-time error`` () =
+    let _, errors = resolveSource "class Duck {\n    init() { self.name = \"x\"; }\n}"
+    Assert.Single errors |> ignore
+    Assert.Contains("not declared", errors.[0].Message)
+
+[<Fact>]
+let ``self.x = value targeting a property declared by an ancestor is not an error (protected-like)`` () =
+    let source =
+        "class Animal {\n    var name\n    init(n) { self.name = n; }\n}\nclass Dog extends Animal {\n    rename(n) { self.name = n; }\n}"
+    let _, errors = resolveSource source
+    Assert.Empty errors
+
+[<Fact>]
+let ``self.x = value targeting a method name is a distinct compile-time error`` () =
+    let _, errors = resolveSource "class Duck {\n    quack() { return 1; }\n    init() { self.quack = 1; }\n}"
+    Assert.Single errors |> ignore
+    Assert.Contains("method, not a property", errors.[0].Message)
+
+[<Fact>]
+let ``a property and a method sharing the same name in one class is a compile-time error`` () =
+    let _, errors = resolveSource "class Duck {\n    var quack\n    quack() { return 1; }\n}"
+    Assert.Single errors |> ignore
+    Assert.Contains("both a property and a method", errors.[0].Message)
+
+[<Fact>]
+let ``redeclaring the same property twice in one class is a compile-time error`` () =
+    let _, errors = resolveSource "class Duck {\n    var name\n    var name mut\n}"
+    Assert.Single errors |> ignore
+    Assert.Contains("already declared", errors.[0].Message)
+
+[<Fact>]
+let ``redeclaring a property already declared by an ancestor is a compile-time error`` () =
+    let source = "class Animal {\n    var name\n}\nclass Dog extends Animal {\n    var name mut\n}"
+    let _, errors = resolveSource source
+    Assert.Single errors |> ignore
+    Assert.Contains("already declared by an ancestor", errors.[0].Message)
+
+[<Fact>]
+let ``external instance.x = value has no compile-time declared-property check`` () =
+    // Unlike `self.x = value`, an external `instance.x = value` has no
+    // statically-known class to check against -- deferred to a runtime
+    // check instead (`vm/src/vm.cpp`'s SetProperty).
+    let source = "class Duck {}\nvar d = Duck()\nd.name = 1"
+    let _, errors = resolveSource source
+    Assert.Empty errors
 
 [<Fact>]
 let ``indexing resolves the object and index sub-expressions`` () =

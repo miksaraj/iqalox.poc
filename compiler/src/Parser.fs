@@ -158,7 +158,7 @@ type private ParserState(tokens: Token[]) =
     member this.Declaration() : Stmt option =
         try
             if matchAny [ Class ] then Some(this.ClassDeclaration())
-            elif matchAny [ Fun ] then Some(FunctionStmt(this.FunctionDeclaration "function"))
+            elif matchAny [ Fun ] then Some(FunctionStmt(this.FunctionDeclaration("function", isPub = false)))
             elif matchAny [ Var ] then Some(this.VarDeclaration())
             else this.Statement()
         with ParseFailure _ ->
@@ -177,17 +177,32 @@ type private ParserState(tokens: Token[]) =
 
         consume LeftBrace "Expect '{' before class body." |> ignore
 
+        let properties = ResizeArray<PropertyDecl>()
         let methods = ResizeArray<FunctionDecl>()
         while not (check RightBrace) && not (isAtEnd ()) do
             if matchAny [ Semicolon ] then
                 ()
+            elif matchAny [ Var ] then
+                properties.Add(this.PropertyDeclaration())
             else
-                methods.Add(this.FunctionDeclaration "method")
+                let isPub = matchAny [ Pub ]
+                methods.Add(this.FunctionDeclaration("method", isPub))
 
         consume RightBrace "Expect '}' after class body." |> ignore
-        ClassStmt(name, superclass, List.ofSeq methods)
+        ClassStmt(name, superclass, List.ofSeq properties, List.ofSeq methods)
 
-    member this.FunctionDeclaration(kind: string) : FunctionDecl =
+    /// `var name [pub] [mut]` (`docs/PLAN-0.2.md` decision 8) -- modifiers
+    /// are optional and, when both present, always written `pub` before
+    /// `mut` (matching every example script); no initializer, unlike
+    /// `VarDeclaration`'s ordinary local/global `var`.
+    member this.PropertyDeclaration() : PropertyDecl =
+        let name = consume Identifier "Expect property name."
+        let isPub = matchAny [ Pub ]
+        let isMutable = matchAny [ Mutable ]
+        consume Semicolon "Expect line break or ';' after property declaration." |> ignore
+        { Name = name; IsPub = isPub; IsMutable = isMutable }
+
+    member this.FunctionDeclaration(kind: string, isPub: bool) : FunctionDecl =
         let name = consume Identifier $"Expect {kind} name."
         consume LeftParen $"Expect '(' after {kind} name." |> ignore
 
@@ -202,7 +217,7 @@ type private ParserState(tokens: Token[]) =
         consume LeftBrace $"Expect '{{' before {kind} body." |> ignore
         let body = this.Block()
 
-        { Name = name; Parameters = List.ofSeq parameters; Body = body }
+        { Name = name; Parameters = List.ofSeq parameters; Body = body; IsPub = isPub }
 
     member this.Statement() : Stmt option =
         if matchAny [ Semicolon ] then None

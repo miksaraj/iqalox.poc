@@ -302,23 +302,53 @@ let ``the ignore operator is usable as a ternary branch`` () =
 [<Fact>]
 let ``class declaration parses methods`` () =
     match parseSource "class Duck { quack() { return 1; } }" with
-    | [ ClassStmt(name, superclass, [ method_ ]) ] ->
+    | [ ClassStmt(name, superclass, [], [ method_ ]) ] ->
         Assert.Equal("Duck", name.Lexeme)
         Assert.True(superclass.IsNone)
         Assert.Equal("quack", method_.Name.Lexeme)
+        Assert.False(method_.IsPub)
     | stmts -> failwith $"expected one ClassStmt with one method, got %A{stmts}"
 
 [<Fact>]
 let ``class declaration parses a superclass`` () =
     match parseSource "class B extends A {}" with
-    | [ ClassStmt(_, Some(Variable superName), _) ] -> Assert.Equal("A", superName.Lexeme)
+    | [ ClassStmt(_, Some(Variable superName), [], []) ] -> Assert.Equal("A", superName.Lexeme)
     | stmts -> failwith $"expected one ClassStmt with a Variable superclass, got %A{stmts}"
 
 [<Fact>]
 let ``class body tolerates blank lines`` () =
     match parseSource "class Duck {\n\n    quack() { return 1; }\n\n}" with
-    | [ ClassStmt(_, _, [ _ ]) ] -> ()
+    | [ ClassStmt(_, _, [], [ _ ]) ] -> ()
     | stmts -> failwith $"expected one ClassStmt with one method, got %A{stmts}"
+
+[<Fact>]
+let ``pub method is parsed with IsPub true`` () =
+    match parseSource "class Duck { pub quack() { return 1; } }" with
+    | [ ClassStmt(_, _, [], [ method_ ]) ] ->
+        Assert.Equal("quack", method_.Name.Lexeme)
+        Assert.True(method_.IsPub)
+    | stmts -> failwith $"expected one ClassStmt with one pub method, got %A{stmts}"
+
+[<Fact>]
+let ``property declaration parses all four pub/mut combinations`` () =
+    match
+        parseSource
+            "class Duck { var a; var b mut; var c pub; var d pub mut; init() { self.a = 1; self.b = 1; self.c = 1; self.d = 1; } }"
+    with
+    | [ ClassStmt(_, _, [ a; b; c; d ], [ _ ]) ] ->
+        Assert.Equal("a", a.Name.Lexeme)
+        Assert.False(a.IsPub)
+        Assert.False(a.IsMutable)
+        Assert.Equal("b", b.Name.Lexeme)
+        Assert.False(b.IsPub)
+        Assert.True(b.IsMutable)
+        Assert.Equal("c", c.Name.Lexeme)
+        Assert.True(c.IsPub)
+        Assert.False(c.IsMutable)
+        Assert.Equal("d", d.Name.Lexeme)
+        Assert.True(d.IsPub)
+        Assert.True(d.IsMutable)
+    | stmts -> failwith $"expected one ClassStmt with four properties, got %A{stmts}"
 
 [<Fact>]
 let ``property access is a Get expression`` () =

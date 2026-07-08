@@ -162,6 +162,13 @@ private:
 
     [[noreturn]] void runtimeError(const std::string& message);
     void checkNotUndef(const Value& value, const std::string& contextForGlobals);
+    // A property's own "accessed before being assigned a value" check
+    // (docs/PLAN-0.2.md decision 9) -- the same `Undef`-sentinel trick as
+    // `checkNotUndef`, just worded for a property instead of a
+    // local/upvalue/global, and applying regardless of internal vs.
+    // external access (unlike the `pub`/`mut` gate, which only external
+    // access needs at all).
+    void checkPropertyNotUndef(const Value& value, const std::string& propName);
     static void checkNumberOperand(const Value& value, const char* message);
     static void checkNumberOperands(const Value& a, const Value& b, const char* message);
     // Shared by GetIndex/SetIndex (docs/PLAN-0.2.md Phase 1): validates
@@ -190,12 +197,18 @@ private:
     void callMethod(ObjClosure* method, int argCount, bool isInitializer);
     void callClass(ObjClass* klass, int argCount);
     // Looks `name` up in `klass->methods` and returns it wrapped in a
-    // fresh `ObjBoundMethod` bound to `receiver` -- shared by `GetProperty`
-    // (looks up on the instance's own class) and `GetSuper` (looks up on
-    // a specific superclass value instead). Throws `RuntimeError`
-    // ("Undefined property '<name>'.") if `name` isn't found, matching
-    // both of poc's identically-worded lookup-miss errors.
-    Value bindMethod(ObjClass* klass, const Value& receiver, const std::string& name);
+    // fresh `ObjBoundMethod` bound to `receiver` -- shared by `GetProperty`/
+    // `GetPropertySelf` (look up on the instance's own class) and
+    // `GetSuper` (looks up on a specific superclass value instead).
+    // Throws `RuntimeError` ("Undefined property '<name>'.") if `name`
+    // isn't found, matching both of poc's identically-worded lookup-miss
+    // errors -- and, when `internal` is false (an external `GetProperty`,
+    // never `GetPropertySelf`/`GetSuper`), also if `name` names a real but
+    // non-`pub`, non-`init` method (docs/PLAN-0.2.md decision 11):
+    // reported with the exact same "Undefined property" wording, so a
+    // private method reads as genuinely nonexistent from outside, per
+    // decision 10's "invisible" framing.
+    Value bindMethod(ObjClass* klass, const Value& receiver, const std::string& name, bool internal);
     ObjUpvalue* captureUpvalue(size_t stackIndex);
     Value readUpvalue(ObjUpvalue* upvalue) const { return upvalue->open ? stack[upvalue->stackIndex] : upvalue->closed; }
     void writeUpvalue(ObjUpvalue* upvalue, const Value& value);

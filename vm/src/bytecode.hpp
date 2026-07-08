@@ -70,6 +70,20 @@ enum class OpCode : uint8_t {
     VectorLength = 0x2C,
     VectorAppend = 0x2D,
     VectorExtend = 0x2E,
+    // docs/PLAN-0.2.md Phase 7: property/method visibility (`pub`/`mut`).
+    // MethodPub = the externally-callable counterpart of Method (private);
+    // GetPropertySelf/SetPropertySelf = self.x's internal-access variants
+    // of GetProperty/SetProperty, skipping the pub/mut gate entirely.
+    MethodPub = 0x2F,
+    GetPropertySelf = 0x30,
+    SetPropertySelf = 0x31,
+    // One opcode per `var name [pub] [mut]` form (compiler/src/Bytecode.fs's
+    // doc comment on PropertyPrivate explains why four opcodes rather than
+    // one with boolean operands).
+    PropertyPrivate = 0x32,
+    PropertyPrivateMut = 0x33,
+    PropertyPub = 0x34,
+    PropertyPubMut = 0x35,
 };
 
 // Loads `path` as a format-v1 bytecode file and returns its top-level
