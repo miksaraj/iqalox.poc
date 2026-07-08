@@ -1058,16 +1058,53 @@ Codegen instruction-sequence test (`Mixin`'s exact placement relative to
 property copying end-to-end, a non-class `with` target as a runtime
 error, and `extends`+`with` composing together on one class).
 
-**Phase 9 — Docs.** No conformance-suite split left to resolve — §2 item 6
-was resolved (and the underlying scripts/CI jobs retired outright) during
-Phase 7, once decisions 8-11 broke `compiler/`+`vm/`'s ability to run
-`poc/`-era class fixtures at all. What remains: verify the top-level
-`langspec/examples/*.iqx` all still run correctly through `compiler/`+`vm/`
-now that every `0.2` feature has landed (a manual check, not a CI job);
-fork `docs/LANGUAGE.md` into `docs/LANGUAGE-0.1.md` (frozen) plus a new,
-current `docs/LANGUAGE.md` for `0.2` — the same fork-not-addendum pattern
-`docs/PLAN-0.1.md`'s own Phase 10 used; `ROADMAP.md` marks `0.2` delivered
-and moves the active-target goalposts to `0.3`.
+**Phase 9 — Docs — done.** No conformance-suite split left to resolve —
+§2 item 6 was resolved (and the underlying scripts/CI jobs retired
+outright) during Phase 7, once decisions 8-11 broke `compiler/`+`vm/`'s
+ability to run `poc/`-era class fixtures at all.
+
+All top-level `langspec/examples/*.iqx` fixtures (15 total) were
+recompiled and re-run end to end through a freshly-built `compiler/`+`vm/`
+— all pass, alongside the full 209-test xUnit suite and 99-assertion
+Catch2 suite (both clean, no regressions). `docs/LANGUAGE.md` was forked:
+the pre-Phase-9 file (whose own header still said `0.1`, though its known-
+limitations list had already accumulated a few `0.2`-era entries from
+Phases 5-6 opportunistically noting scanner/parser gaps as they were
+found) became `docs/LANGUAGE-0.1.md`, with its header/intro rewritten to
+describe `0.1` accurately and one item removed from its own §13 (the
+`map`/`filter`/`reduce`/`sort` prelude line-number limitation, since those
+functions are `0.2`-only and don't exist in `0.1` — moved to the new
+`docs/LANGUAGE.md` instead, where it's actually accurate) — the body
+otherwise kept as a verbatim, frozen snapshot per the established
+fork-not-rewrite pattern. A new `docs/LANGUAGE.md` was written from
+scratch for `0.2`, covering all eight feature phases (indexing, lambdas,
+cons/comprehensions, spread, array stdlib, matrix stdlib, property/method
+visibility, mixins/traits) across a reorganized 16-section structure (up
+from `0.1`'s 14) with a refreshed §13 known-limitations list — most items
+9-12 of the old numbering carried forward unchanged (real scanner/parser
+gaps, version-independent) plus three new `0.2`-specific limitations
+(single-generator comprehensions, simplified non-C3 `with`, no trait
+conflict disambiguation syntax).
+
+Cross-references were swept across the repo: root `README.md` (found
+stale — its precedence table predated `0.2`'s indexing/lambda/cons/spread
+syntax, though on inspection that syntax turns out to belong to the
+postfix/literal category the table already excludes `.` member access
+from, same as `0.1`'s table did, so a clarifying footnote was added rather
+than new rows; its intro text and getting-started example did need
+updating from `0.1` to `0.2`), `CLAUDE.md` (the `poc/`/`compiler/`/`vm/`
+bullets and `docs/` bullet updated for `0.2`; a new "Architecture
+(`compiler/` + `vm/`, 0.2)" section added summarizing all eight phases,
+mirroring the existing `0.1` section's style, per-phase, without editing
+that section's own historical narrative), `langspec/README.md` and
+`langspec/versions/0.1/README.md`/`SYNTAX_GRAMMAR.md` (repointed to
+`docs/LANGUAGE-0.1.md` where they meant `0.1`-specific facts, following
+the precedent `docs/PLAN-0.1-POC.md` already set when `0.1-poc` was
+forked), and one `docs/PLAN-0.1.md` item-number reference (§13 item 7 in
+the old numbering, now item 8 in `docs/LANGUAGE-0.1.md`, annotated rather
+than left dangling). `ROADMAP.md`'s `0.2` entry is marked *done* (with a
+pointer to `docs/LANGUAGE.md`/`docs/LANGUAGE-0.1.md`) and `0.3` is now the
+active target.
 
 ## 6. Testing strategy
 

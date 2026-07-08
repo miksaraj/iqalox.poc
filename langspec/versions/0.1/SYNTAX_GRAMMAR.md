@@ -3,7 +3,7 @@ This grammar is unchanged from `0.1-poc` — the four things `0.1` added over
 `0.1-poc` (`undef`/must-assign-before-read, string escape sequences,
 compile-time immutability enforcement, self-referencing classes) are all
 semantic/runtime behavior, not new syntax, so nothing below needed to
-change. See `docs/LANGUAGE.md` for the full prose reference including
+change. See `docs/LANGUAGE-0.1.md` for the full prose reference including
 those additions.
 * Missing at least array and hash map specific syntax and the new
     standard library statements — that's `0.2` (see the current top-level

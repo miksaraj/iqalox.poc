@@ -56,12 +56,14 @@ langspec/
 ## Finding what you're looking for
 
 - **"What does Iqalox actually do today, as shipped?"** → `../docs/LANGUAGE.md` (the
-  full prose reference for `0.1`, the current primary implementation) — or, for the
-  terser grammar-level equivalent, `versions/0.1/SYNTAX_GRAMMAR.md` and
-  `versions/0.1/examples/`.
-- **"What's being planned/built for the next version?"** → this directory's top-level
-  `SYNTAX_GRAMMAR.md` and `examples/`, alongside `../docs/PLAN-0.2.md` for the design
-  decisions, open questions, and implementation status behind them.
+  full prose reference for `0.2`, the current primary implementation) — or, for the
+  terser grammar-level equivalent, this directory's own top-level `SYNTAX_GRAMMAR.md`
+  and `examples/`. For `0.1` specifically, see `../docs/LANGUAGE-0.1.md` and
+  `versions/0.1/SYNTAX_GRAMMAR.md`/`versions/0.1/examples/`.
+- **"What's being planned/built for the next version?"** → `../docs/PLAN-0.2.md` for
+  the design decisions, open questions, and implementation status behind `0.2` (now
+  delivered); `0.3` planning hasn't started yet, so there's no `docs/PLAN-0.3.md` or
+  next-version top-level `langspec/` snapshot to point to.
 - **"What did an early planning draft look like, before versions got renumbered?"** →
   `archived/<version>/` — but read `../ROADMAP.md`'s renumbering note first so the
   version number there isn't mistaken for today's version of the same name.
