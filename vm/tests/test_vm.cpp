@@ -757,6 +757,252 @@ TEST_CASE("reverse on a non-vector is a runtime error", "[vm][natives]") {
     REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
 }
 
+TEST_CASE("transpose/multiply/add/subtract are present as globals without any user declaration", "[vm][natives]") {
+    // docs/PLAN-0.2.md Phase 6: none of these four call back into user
+    // code, so (unlike elementwise, compiler/src/Prelude.fs) they're
+    // true natives too, matching push/pop/length/reverse's pattern.
+    Vm vm;
+    REQUIRE(vm.getGlobal("transpose") != nullptr);
+    REQUIRE(vm.getGlobal("multiply") != nullptr);
+    REQUIRE(vm.getGlobal("add") != nullptr);
+    REQUIRE(vm.getGlobal("subtract") != nullptr);
+}
+
+TEST_CASE("transpose swaps rows and columns, returning a new matrix", "[vm][natives]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t transposeName = b.addStringConstant("transpose");
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t two = b.addNumberConstant(2);
+    uint16_t three = b.addNumberConstant(3);
+    uint16_t four = b.addNumberConstant(4);
+    uint16_t five = b.addNumberConstant(5);
+    uint16_t six = b.addNumberConstant(6);
+    uint16_t result = b.addStringConstant("result");
+
+    b.emitU16(OpCode::GetGlobal, transposeName);
+    // m = [[1, 2, 3], [4, 5, 6]], built directly as the call's own argument.
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::Constant, two);
+    b.emitU16(OpCode::Constant, three);
+    b.emitU16(OpCode::BuildVector, 3);
+    b.emitU16(OpCode::Constant, four);
+    b.emitU16(OpCode::Constant, five);
+    b.emitU16(OpCode::Constant, six);
+    b.emitU16(OpCode::BuildVector, 3);
+    b.emitU16(OpCode::BuildVector, 2);
+    b.emitU16(OpCode::Call, 1);
+    b.emitU16(OpCode::DefineGlobal, result);
+
+    vm.interpret(b.build());
+
+    const Value* resultVal = vm.getGlobal("result");
+    REQUIRE(isObj(*resultVal));
+    auto& rows = static_cast<ObjVector*>(asObj(*resultVal))->elements;
+    REQUIRE(rows.size() == 3);  // 2x3 transposed is 3x2
+    auto& row0 = static_cast<ObjVector*>(asObj(rows[0]))->elements;
+    REQUIRE(row0.size() == 2);
+    REQUIRE(asNumber(row0[0]) == 1.0);
+    REQUIRE(asNumber(row0[1]) == 4.0);
+    auto& row2 = static_cast<ObjVector*>(asObj(rows[2]))->elements;
+    REQUIRE(asNumber(row2[0]) == 3.0);
+    REQUIRE(asNumber(row2[1]) == 6.0);
+}
+
+TEST_CASE("transpose on a non-vector is a runtime error", "[vm][natives]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t transposeName = b.addStringConstant("transpose");
+    uint16_t one = b.addNumberConstant(1);
+
+    b.emitU16(OpCode::GetGlobal, transposeName);
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::Call, 1);
+
+    REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
+}
+
+TEST_CASE("transpose on a ragged (non-rectangular) matrix is a runtime error", "[vm][natives]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t transposeName = b.addStringConstant("transpose");
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t two = b.addNumberConstant(2);
+
+    b.emitU16(OpCode::GetGlobal, transposeName);
+    // [[1, 2], [1]] -- rows of different lengths
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::Constant, two);
+    b.emitU16(OpCode::BuildVector, 2);
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::BuildVector, 1);
+    b.emitU16(OpCode::BuildVector, 2);
+    b.emitU16(OpCode::Call, 1);
+
+    REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
+}
+
+TEST_CASE("multiply computes the true matrix product, not an elementwise one", "[vm][natives]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t multiplyName = b.addStringConstant("multiply");
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t two = b.addNumberConstant(2);
+    uint16_t three = b.addNumberConstant(3);
+    uint16_t four = b.addNumberConstant(4);
+    uint16_t five = b.addNumberConstant(5);
+    uint16_t six = b.addNumberConstant(6);
+    uint16_t seven = b.addNumberConstant(7);
+    uint16_t eight = b.addNumberConstant(8);
+    uint16_t result = b.addStringConstant("result");
+
+    b.emitU16(OpCode::GetGlobal, multiplyName);
+    // a = [[1, 2], [3, 4]]
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::Constant, two);
+    b.emitU16(OpCode::BuildVector, 2);
+    b.emitU16(OpCode::Constant, three);
+    b.emitU16(OpCode::Constant, four);
+    b.emitU16(OpCode::BuildVector, 2);
+    b.emitU16(OpCode::BuildVector, 2);
+    // b = [[5, 6], [7, 8]]
+    b.emitU16(OpCode::Constant, five);
+    b.emitU16(OpCode::Constant, six);
+    b.emitU16(OpCode::BuildVector, 2);
+    b.emitU16(OpCode::Constant, seven);
+    b.emitU16(OpCode::Constant, eight);
+    b.emitU16(OpCode::BuildVector, 2);
+    b.emitU16(OpCode::BuildVector, 2);
+    b.emitU16(OpCode::Call, 2);
+    b.emitU16(OpCode::DefineGlobal, result);
+
+    vm.interpret(b.build());
+
+    // [[1,2],[3,4]] * [[5,6],[7,8]] = [[1*5+2*7, 1*6+2*8], [3*5+4*7, 3*6+4*8]] = [[19,22],[43,50]]
+    const Value* resultVal = vm.getGlobal("result");
+    REQUIRE(isObj(*resultVal));
+    auto& rows = static_cast<ObjVector*>(asObj(*resultVal))->elements;
+    REQUIRE(rows.size() == 2);
+    auto& row0 = static_cast<ObjVector*>(asObj(rows[0]))->elements;
+    REQUIRE(asNumber(row0[0]) == 19.0);
+    REQUIRE(asNumber(row0[1]) == 22.0);
+    auto& row1 = static_cast<ObjVector*>(asObj(rows[1]))->elements;
+    REQUIRE(asNumber(row1[0]) == 43.0);
+    REQUIRE(asNumber(row1[1]) == 50.0);
+}
+
+TEST_CASE("add computes the elementwise sum and doesn't mutate either argument", "[vm][natives]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t addName = b.addStringConstant("add");
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t two = b.addNumberConstant(2);
+    uint16_t three = b.addNumberConstant(3);
+    uint16_t four = b.addNumberConstant(4);
+    uint16_t aName = b.addStringConstant("a");
+    uint16_t bName = b.addStringConstant("b");
+    uint16_t result = b.addStringConstant("result");
+
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::Constant, two);
+    b.emitU16(OpCode::BuildVector, 2);
+    b.emitU16(OpCode::BuildVector, 1);
+    b.emitU16(OpCode::DefineGlobal, aName);  // a = [[1, 2]]
+
+    b.emitU16(OpCode::Constant, three);
+    b.emitU16(OpCode::Constant, four);
+    b.emitU16(OpCode::BuildVector, 2);
+    b.emitU16(OpCode::BuildVector, 1);
+    b.emitU16(OpCode::DefineGlobal, bName);  // b = [[3, 4]]
+
+    b.emitU16(OpCode::GetGlobal, addName);
+    b.emitU16(OpCode::GetGlobal, aName);
+    b.emitU16(OpCode::GetGlobal, bName);
+    b.emitU16(OpCode::Call, 2);
+    b.emitU16(OpCode::DefineGlobal, result);
+
+    vm.interpret(b.build());
+
+    const Value* resultVal = vm.getGlobal("result");
+    auto& resultRow = static_cast<ObjVector*>(asObj(static_cast<ObjVector*>(asObj(*resultVal))->elements[0]))->elements;
+    REQUIRE(asNumber(resultRow[0]) == 4.0);
+    REQUIRE(asNumber(resultRow[1]) == 6.0);
+
+    // Neither original argument was mutated.
+    const Value* aVal = vm.getGlobal("a");
+    auto& aRow = static_cast<ObjVector*>(asObj(static_cast<ObjVector*>(asObj(*aVal))->elements[0]))->elements;
+    REQUIRE(asNumber(aRow[0]) == 1.0);
+    REQUIRE(asNumber(aRow[1]) == 2.0);
+}
+
+TEST_CASE("add with mismatched shapes is a runtime error", "[vm][natives]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t addName = b.addStringConstant("add");
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t two = b.addNumberConstant(2);
+
+    b.emitU16(OpCode::GetGlobal, addName);
+    // a = [[1, 2]] (1x2), b = [[1]] (1x1)
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::Constant, two);
+    b.emitU16(OpCode::BuildVector, 2);
+    b.emitU16(OpCode::BuildVector, 1);
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::BuildVector, 1);
+    b.emitU16(OpCode::BuildVector, 1);
+    b.emitU16(OpCode::Call, 2);
+
+    REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
+}
+
+TEST_CASE("subtract computes the elementwise difference, a minus b", "[vm][natives]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t subtractName = b.addStringConstant("subtract");
+    uint16_t five = b.addNumberConstant(5);
+    uint16_t two = b.addNumberConstant(2);
+    uint16_t result = b.addStringConstant("result");
+
+    b.emitU16(OpCode::GetGlobal, subtractName);
+    // a = [[5]], b = [[2]]
+    b.emitU16(OpCode::Constant, five);
+    b.emitU16(OpCode::BuildVector, 1);
+    b.emitU16(OpCode::BuildVector, 1);
+    b.emitU16(OpCode::Constant, two);
+    b.emitU16(OpCode::BuildVector, 1);
+    b.emitU16(OpCode::BuildVector, 1);
+    b.emitU16(OpCode::Call, 2);
+    b.emitU16(OpCode::DefineGlobal, result);
+
+    vm.interpret(b.build());
+
+    const Value* resultVal = vm.getGlobal("result");
+    auto& row = static_cast<ObjVector*>(asObj(static_cast<ObjVector*>(asObj(*resultVal))->elements[0]))->elements;
+    REQUIRE(asNumber(row[0]) == 3.0);  // 5 - 2
+}
+
+TEST_CASE("multiply with incompatible dimensions is a runtime error", "[vm][natives]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t multiplyName = b.addStringConstant("multiply");
+    uint16_t one = b.addNumberConstant(1);
+
+    b.emitU16(OpCode::GetGlobal, multiplyName);
+    // a = [[1, 1]] (1x2), b = [[1, 1]] (1x2) -- a's cols (2) != b's rows (1)
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::BuildVector, 2);
+    b.emitU16(OpCode::BuildVector, 1);
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::BuildVector, 2);
+    b.emitU16(OpCode::BuildVector, 1);
+    b.emitU16(OpCode::Call, 2);
+
+    REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
+}
+
 TEST_CASE("VectorLength pushes the element count of a vector", "[vm]") {
     // docs/PLAN-0.2.md Phase 3: an internal-only primitive, never emitted
     // by any surface syntax -- only Codegen.fs's desugared Cons/

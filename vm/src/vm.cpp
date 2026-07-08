@@ -40,6 +40,13 @@ void Vm::defineNatives() {
     globals["pop"] = objValue(allocate<ObjNativeFunction>("pop", 1, nativePop));
     globals["length"] = objValue(allocate<ObjNativeFunction>("length", 1, nativeLength));
     globals["reverse"] = objValue(allocate<ObjNativeFunction>("reverse", 1, nativeReverse));
+    // docs/PLAN-0.2.md Phase 6: none of these four call back into user
+    // code, so (unlike elementwise, compiler/src/Prelude.fs) they're
+    // true natives too.
+    globals["transpose"] = objValue(allocate<ObjNativeFunction>("transpose", 1, nativeTranspose));
+    globals["multiply"] = objValue(allocate<ObjNativeFunction>("multiply", 2, nativeMultiply));
+    globals["add"] = objValue(allocate<ObjNativeFunction>("add", 2, nativeAdd));
+    globals["subtract"] = objValue(allocate<ObjNativeFunction>("subtract", 2, nativeSubtract));
 }
 
 Vm::~Vm() {
