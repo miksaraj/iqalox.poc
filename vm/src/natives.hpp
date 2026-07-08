@@ -42,4 +42,27 @@ Value nativeLength(Vm& vm, const std::vector<Value>& args);
 // operation, but reverse reads as a pure transformation). Arity 1.
 Value nativeReverse(Vm& vm, const std::vector<Value>& args);
 
+// docs/PLAN-0.2.md Phase 6: matrices are plain nested vectors (decision
+// 5) with no dedicated runtime type, so these four validate their own
+// shape and raise a clean, dimension-naming RuntimeError on a mismatch
+// (the repository owner's explicit choice) -- none of the four call back
+// into user code, so (unlike map/filter/reduce/sort/elementwise) they
+// can be true natives with no VM-reentrancy concerns at all. All four
+// return a *new* matrix; none mutate their arguments.
+
+// transpose(matrix) -- swap rows and columns. Arity 1.
+Value nativeTranspose(Vm& vm, const std::vector<Value>& args);
+
+// multiply(a, b) -- the true matrix product (row-by-column dot
+// products), not elementwise multiplication -- a's column count must
+// equal b's row count. Arity 2.
+Value nativeMultiply(Vm& vm, const std::vector<Value>& args);
+
+// add(a, b) -- elementwise sum; a and b must be the same shape. Arity 2.
+Value nativeAdd(Vm& vm, const std::vector<Value>& args);
+
+// subtract(a, b) -- elementwise a - b; a and b must be the same shape.
+// Arity 2.
+Value nativeSubtract(Vm& vm, const std::vector<Value>& args);
+
 }  // namespace iqalox

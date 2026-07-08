@@ -29,7 +29,7 @@ let ``the prelude scans and parses to exactly one FunctionStmt per stdlib functi
         |> List.map (function
             | FunctionStmt decl -> decl.Name.Lexeme
             | other -> failwith $"expected only FunctionStmt at the prelude's top level, got %A{other}")
-    Assert.Equal<string list>([ "map"; "filter"; "reduce"; "sort" ], names)
+    Assert.Equal<string list>([ "map"; "filter"; "reduce"; "sort"; "elementwise" ], names)
 
 [<Fact>]
 let ``the prelude resolves standalone with no errors`` () =
@@ -44,13 +44,13 @@ let ``the prelude compiles standalone with no errors`` () =
     Assert.Empty codegenErrors
 
 [<Fact>]
-let ``a user program can call map/filter/reduce/sort as ordinary globals once merged with the prelude`` () =
+let ``a user program can call map/filter/reduce/sort/elementwise as ordinary globals once merged with the prelude`` () =
     // No wrapping parens around a multi-arg call's arguments (`f(a, b)` is
     // a single grouped comma-expression argument, not two arguments --
     // Argument()'s own doc comment) -- matches how the prelude itself
     // calls push/fn throughout.
     let userSource =
-        "print map (x) -> x, [1]\nprint filter (x) -> x, [1]\nprint reduce (a, b) -> a, [1], 0\nprint sort (a, b) -> a, [1]\n"
+        "print map (x) -> x, [1]\nprint filter (x) -> x, [1]\nprint reduce (a, b) -> a, [1], 0\nprint sort (a, b) -> a, [1]\nprint elementwise (a, b) -> a, [[1]], [[1]]\n"
     let userTokens, userScanErrors = scanTokens userSource
     Assert.Empty userScanErrors
     let userStmts, userParseErrors = parse userTokens
@@ -58,7 +58,7 @@ let ``a user program can call map/filter/reduce/sort as ordinary globals once me
 
     let bound, errors = resolve (preludeStmts () @ userStmts)
     Assert.Empty errors
-    // The four prelude declarations resolve as globals, same as any
+    // The five prelude declarations resolve as globals, same as any
     // top-level `fun` -- and the user's own calls to them resolve as
     // ordinary GlobalBinding references, no different from calling
     // `push`/`length`/any other pre-existing global.
@@ -68,11 +68,12 @@ let ``a user program can call map/filter/reduce/sort as ordinary globals once me
             printName.Lexeme = "print" && calleeName = name
         | _ -> false
     match bound with
-    | [ _; _; _; _; mapCall; filterCall; reduceCall; sortCall ] ->
+    | [ _; _; _; _; _; mapCall; filterCall; reduceCall; sortCall; elementwiseCall ] ->
         Assert.True(referencesGlobalCall "map" mapCall)
         Assert.True(referencesGlobalCall "filter" filterCall)
         Assert.True(referencesGlobalCall "reduce" reduceCall)
         Assert.True(referencesGlobalCall "sort" sortCall)
+        Assert.True(referencesGlobalCall "elementwise" elementwiseCall)
     | other -> failwith $"unexpected shape: %A{other}"
 
 [<Fact>]
@@ -85,11 +86,13 @@ let ``redeclaring map (or filter/reduce/sort) after the prelude is a compile-tim
     Assert.Contains("already declared", errors.[0].Message)
 
 [<Fact>]
-let ``push/pop/length/reverse are native globals, not part of the prelude's own FunctionStmt list`` () =
-    // docs/PLAN-0.2.md Phase 5: these four need direct ObjVector access,
-    // so they're true natives (Resolver.fs's nativeGlobals), unlike
-    // map/filter/reduce/sort's prelude-source approach.
-    let source = "push [], 1\npop [1]\nlength [1]\nreverse [1]\n"
+let ``push/pop/length/reverse/transpose/multiply/add/subtract are native globals, not part of the prelude's own FunctionStmt list`` () =
+    // docs/PLAN-0.2.md Phase 5/6: these eight need direct ObjVector access
+    // and never call back into user code, so they're true natives
+    // (Resolver.fs's nativeGlobals), unlike map/filter/reduce/sort/
+    // elementwise's prelude-source approach.
+    let source =
+        "push [], 1\npop [1]\nlength [1]\nreverse [1]\ntranspose [[1]]\nmultiply [[1]], [[1]]\nadd [[1]], [[1]]\nsubtract [[1]], [[1]]\n"
     let tokens, scanErrors = scanTokens source
     Assert.Empty scanErrors
     let stmts, parseErrors = parse tokens

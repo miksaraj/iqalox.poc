@@ -1,10 +1,13 @@
 <#
     Matrices (0.2): nested vectors, no new literal syntax -- a matrix is
     just a vector of vectors, indexed one level at a time. See
-    docs/PLAN-0.2.md decision 5. The dedicated matrix stdlib (multiply,
-    transpose, elementwise ops) isn't pinned down yet
-    (docs/PLAN-0.2.md open question 5), so this only exercises the
-    literal/indexing shape, not any matrix-specific stdlib call.
+    docs/PLAN-0.2.md decision 5 (literal/indexing shape) and Phase 6
+    (the dedicated stdlib below): transpose/multiply/add/subtract are
+    true natives with clean shape-validation errors; elementwise takes a
+    combining function and is ordinary Iqalox source instead (see
+    compiler/src/Prelude.fs), so its own shape-mismatch behavior falls
+    through to the ordinary index-out-of-range error rather than a
+    dedicated one.
 
     One line: every newline scans as an implicit statement-ending
     semicolon with no bracket-depth awareness (0.1's scanner, unchanged
@@ -23,3 +26,12 @@ print matrix[1][1]
 for (var row mut = 0; row < 3; ++row) {
     print matrix[row]
 }
+
+var a = [[1, 2], [3, 4]]
+var b = [[5, 6], [7, 8]]
+
+print transpose a
+print multiply a, b
+print add a, b
+print subtract a, b
+print elementwise (x, y) -> x * y, a, b

@@ -256,9 +256,11 @@ resolving, the same convention `docs/PLAN-0.1-POC.md` and
    `filter`, `reduce`, `sort` — all plain global functions, not methods
    (`0.1`'s object model has no method-dispatch-on-primitives concept at
    all). `push`/`pop` mutate in place; the rest return a new vector.
-5. **Exact matrix stdlib surface.** Multiply, transpose, elementwise
-   arithmetic are the obvious Julia-flavored candidates — full list not
-   yet confirmed. Blocks Phase 6.
+5. ~~Exact matrix stdlib surface.~~ **Resolved during Phase 6** (see its
+   own entry in §5): `transpose`, `multiply`, `add`, `subtract`,
+   `elementwise fn, a, b` — matrix-only (exactly 2D), no operator
+   overloading, dedicated named functions matching Phase 5's array
+   stdlib precedent.
 6. **What happens to the Phase 9 conformance suite once `langspec/
    examples/` moves to `0.2` syntax.** `poc/` is frozen and can't parse
    `0.2`'s new syntax at all — once the *current*, top-level
@@ -345,7 +347,7 @@ stale for nine phases and then need a special pass to fix it.**
 | List comprehensions (single generator) | §1.2-4 | Done |
 | Vector-literal spread (`[...a, ...b]`) | §1.7 | Done |
 | Array-manipulation stdlib | §2.4 | Done |
-| Matrices (nested vectors + stdlib) | §1.5, §2.5 (list not yet final) | Not started |
+| Matrices (nested vectors + stdlib) | §1.5, §2.5 | Done |
 | Property `pub`/`mut` modifiers | §1.8-10, §2.3 | Not started |
 | Method `pub`/private | §1.11, §2.3 | Not started |
 | Mixins (`with`, dynamic linearization) | §1.12, §2.2 | Not started |
@@ -701,9 +703,66 @@ runtime errors for each). `langspec/examples/array_stdlib.iqx` verified
 end to end through the real `iqaloxc`+`iqaloxvm` toolchain, exercising
 all eight functions plus `sort`'s non-mutating contract.
 
-**Phase 6 — Matrices.** Nested-vector convention plus dedicated stdlib
-(multiply, transpose, elementwise ops — §2.5). Mostly a stdlib-layer
-phase once indexing exists; no new literal grammar per decision 5.
+**Phase 6 — Matrices.** *Done.* Nested-vector convention (decision 5, no
+new literal grammar) plus a dedicated stdlib, resolving §2.5's exact
+surface (raised live with the repository owner, same as Phase 5's array
+stdlib): `transpose`, `multiply` (the true matrix product, not
+elementwise), `add`, `subtract`, `elementwise fn, a, b`. Matrix-only for
+this pass (assume exactly one level of nesting, i.e. real 2D) rather than
+generic over any same-shaped nested vectors -- a plain-vector-elementwise
+generalization is possible later but wasn't asked for here. No operator
+overloading: `+`/`-`/`*` stay numbers-only (verified: already
+number-only via `checkNumberOperands`, same constraint `<`/`<=` hit in
+Phase 5) -- `add`/`subtract`/`multiply` are dedicated named functions
+instead, matching Phase 5's array stdlib precedent rather than reopening
+that question.
+
+Same native-vs-prelude split as Phase 5, for the same reason: `transpose`/
+`multiply`/`add`/`subtract` never call back into user code, so they're
+true natives (`vm/src/natives.cpp`), registered in `Resolver.fs`'s
+`nativeGlobals` alongside Phase 5's eight; `elementwise` takes a
+user-supplied combining function, so it's ordinary Iqalox source
+(`compiler/src/Prelude.fs`), like `map`/`filter`/`reduce`/`sort`.
+
+**A second technical constraint discovered mid-implementation, requiring
+its own live decision**: the repository owner's chosen validation
+behavior ("clean runtime error on a shape mismatch") turns out to be
+*unavailable* to `elementwise` specifically. `docs/LANGUAGE.md` §13
+confirms Iqalox has no `throw`/`raise` construct at all -- only native
+C++ code can signal a custom-worded `RuntimeError`. `transpose`/
+`multiply`/`add`/`subtract` can validate cleanly since they're natives
+(dimension-naming messages, e.g. `"multiply: a 2x2 matrix can't be
+multiplied by a 3x3 matrix -- the first matrix's column count must equal
+the second's row count."`); `elementwise`, forced into the prelude by
+needing to call `fn`, has no way to throw a comparably specific message
+from Iqalox source. Resolved by letting `elementwise`'s shape mismatch
+fall through to whatever error happens to fire first from inside its own
+loop (in practice, the ordinary "Vector index N out of range" error a
+step later) rather than adding a new `error(message)`-style primitive to
+the language now -- a real, if generic, non-crashing runtime error
+either way, and inventing a new user-facing error-signaling capability
+mid-stdlib-phase was explicitly declined in favor of leaving it to
+`ROADMAP.md`'s own dedicated `0.6` "error handling standard library"
+entry.
+
+A real bug was also found (and fixed) while manually verifying
+end-to-end, unrelated to the constraint above: `elementwise`'s own first
+draft called its combining function as `fn(a[i][j], b[i][j])` --
+`Argument()`'s own doc comment (Phase 5) already establishes that a
+callee immediately followed by `(...)` with a comma inside is a
+*1-argument* call whose argument is the parenthesized comma-operator
+expression, not 2 arguments. Fixed the same way Phase 5's own prelude
+functions already do it: `fn a[i][j], b[i][j]`, no wrapping parens.
+
+9 new xUnit tests (6 prelude-specific, extending Phase 5's `PreludeTests.fs`:
+the now-5-function prelude compiles cleanly, resolves/calls correctly
+once merged, `transpose`/`multiply`/`add`/`subtract` confirmed as
+`nativeGlobals` alongside Phase 5's eight) and 9 new Catch2 tests (all
+four natives' presence, happy paths -- including confirming `add`
+doesn't mutate either argument -- and shape/type-mismatch runtime
+errors). `langspec/examples/matrices.iqx` extended and verified end to
+end through the real `iqaloxc`+`iqaloxvm` toolchain, exercising all five
+functions.
 
 **Phase 7 — Property and method visibility (`pub`/`mut`).** The biggest
 single change to the object model this version — property declarations,
