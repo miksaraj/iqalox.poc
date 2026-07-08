@@ -893,8 +893,11 @@ deferred, once flagged and confirmed:
   prints the result across two lines, exactly matching `poc`'s own
   `f"{error}\n[line {error.token.line}]"` shape.
 
-Not fixed (recorded as `docs/LANGUAGE.md` §13 item 7, updated to reflect
-what's still open): `0.1-poc`'s offending-token text (`Error at 'x': ...`)
+Not fixed (recorded at the time as `docs/LANGUAGE.md` §13 item 7, updated
+to reflect what's still open; that file is now the frozen
+`docs/LANGUAGE-0.1.md`, §13 item 8, after `0.2`'s own Phase 9 fork —
+`docs/PLAN-0.2.md` §5): `0.1-poc`'s offending-token text (`Error at 'x':
+...`)
 and caret-underlined source excerpt. `0.1`'s compile-time stages could
 plausibly grow these (they already have the original source text and,
 for scan/parse/resolve errors, a real token), but the VM fundamentally

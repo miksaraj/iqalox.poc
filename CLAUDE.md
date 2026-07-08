@@ -12,16 +12,19 @@ across Iqalox's versions**:
   interpreter written in Python. `0.1` reached feature parity with it as of
   `docs/PLAN-0.1.md` Phase 9, so `poc/` is now **frozen/reference** — a
   working reference implementation kept in the repo, not the primary
-  target for new language work, but still a real, runnable implementation
-  worth keeping conformant with `langspec/examples/`.
-- `compiler/` — the **0.1 compiler frontend**, written in F#. Scanner →
-  parser → AST → resolver → bytecode codegen. Feature-complete for `0.1`
-  (`docs/PLAN-0.1.md`, Phases 1-9 done); the current, primary
-  implementation going forward.
-- `vm/` — the **0.1 bytecode VM backend**, written in modern C++ (C++23).
+  target for new language work. `0.2`'s breaking changes to the object
+  model (`docs/PLAN-0.2.md` decisions 8-11) mean `poc/` can no longer stay
+  conformant with `langspec/examples/` at all — see the "Retirement of
+  cross-implementation conformance testing" note under Engineering
+  conventions below.
+- `compiler/` — the **compiler frontend**, written in F#. Scanner → parser
+  → AST → resolver → bytecode codegen. Feature-complete for `0.1`
+  (`docs/PLAN-0.1.md`, Phases 1-9) and `0.2` (`docs/PLAN-0.2.md`, Phases
+  1-9) — the current, primary implementation going forward.
+- `vm/` — the **bytecode VM backend**, written in modern C++ (C++23).
   Loads and executes the bytecode `compiler/` emits. Feature-complete for
-  `0.1` (`docs/PLAN-0.1.md`, Phases 1-9 done); the current, primary
-  implementation going forward.
+  `0.1` (`docs/PLAN-0.1.md`, Phases 1-9) and `0.2` (`docs/PLAN-0.2.md`,
+  Phases 1-9) — the current, primary implementation going forward.
 
 Implementation-agnostic material stays at the repository root:
 
@@ -47,11 +50,12 @@ Implementation-agnostic material stays at the repository root:
   below for what that means while a version's features are still landing).
 - `ROADMAP.md` — the version roadmap (0.1-poc onward).
 - `docs/` — implementation planning docs (`docs/PLAN-0.1-POC.md` for
-  `0.1-poc`, `docs/PLAN-0.1.md` for `0.1`); `docs/LANGUAGE.md` for the
-  current (`0.1`) language reference, `docs/LANGUAGE-POC.md` for the frozen
-  `0.1-poc`-era one — each version gets its own `LANGUAGE-<version>.md`
-  this way as Iqalox evolves, rather than one file being silently rewritten
-  out from under its own history.
+  `0.1-poc`, `docs/PLAN-0.1.md` for `0.1`, `docs/PLAN-0.2.md` for `0.2`);
+  `docs/LANGUAGE.md` for the current (`0.2`) language reference,
+  `docs/LANGUAGE-0.1.md` for the frozen `0.1`-era one, `docs/LANGUAGE-POC.md`
+  for the frozen `0.1-poc`-era one — each version gets its own
+  `LANGUAGE-<version>.md` this way as Iqalox evolves, rather than one file
+  being silently rewritten out from under its own history.
 
 ## Language design authority
 
@@ -241,6 +245,160 @@ script validation (`inheritance.iqx` vs `poc`'s output), not by any unit
 test, and fixed with one added `Pop`. All six `langspec/examples/*.iqx`
 fixtures, including the two class-based ones, now produce byte-for-byte
 identical output to `poc`.
+
+## Architecture (`compiler/` + `vm/`, 0.2)
+
+See `docs/PLAN-0.2.md` for the full plan, decision log, and phase-by-phase
+implementation writeups — this section is a summary, not a replacement.
+`0.2` builds directly on top of `0.1`'s compiler frontend and VM (the
+section above), across eight feature phases plus a ninth, docs-only wrap-up
+phase (this one).
+
+Phase 1 (indexing) added `Ast.fs`'s `Index`/`IndexSet` nodes and
+`Parser.fs`'s postfix `[expr]` parsing, disambiguated from the pre-existing
+paren-free call syntax (`concat [1, 2]`) purely by **whitespace** — a `[`
+with no space before it is always indexing, a `[` with a space is always a
+call whose sole argument is a vector literal. This is the only place
+whitespace is significant anywhere in Iqalox's grammar. `Bound.fs`/
+`Resolver.fs` gained `BIndex`/`BIndexSet`; `Bytecode.fs`/`vm/` gained
+`GetIndex`/`SetIndex` opcodes with runtime bounds-checking (`Vector index N
+out of range.`).
+
+Phase 2 (lambdas) added `Token.fs`'s `Arrow` token and `Ast.fs`/`Parser.fs`'s
+`Lambda` node (`(params) -> expr`, single-expression body only). A
+parenthesized parameter list is only read as a lambda's parameters via
+lookahead **past** the closing `)` — only if the very next token is `->` —
+since `(a, b)` is already a valid grouped comma expression in `0.1`'s
+grammar and the two share the identical opening shape. `Bound.fs`/
+`Resolver.fs`/`Codegen.fs` reuse the existing `BoundFunctionDecl`/
+`CompileFunctionValue` machinery rather than adding a parallel lambda-specific
+path, since a lambda is, after resolution, just an ordinary closure with an
+implicit `return`.
+
+Phase 3 (cons and list comprehensions) added `Token.fs`'s `VerticalBar`/
+`LeftArrow` tokens and `Ast.fs`/`Parser.fs`'s `Cons`/`ListComprehension`
+nodes, both sharing the `[expr | ...]` opening and disambiguated by
+lookahead on the generator marker `<-` immediately after `|`. Both desugar
+entirely at compile time (`Resolver.fs`) into a loop inside a synthetic
+closure — there is no dedicated runtime representation for either — backed
+by two new `vm/` opcodes, `VectorLength`/`VectorAppend`, that the desugared
+loop body compiles down to. `0.2`'s comprehensions support exactly one
+generator clause and no guard/filter clause; a richer form is `ROADMAP.md`
+future scope.
+
+Phase 4 (vector-literal spread) added `Ast.fs`/`Parser.fs`'s `Spread` node
+(`[...a, ...b]`), applying only inside the plain comma-separated item-list
+form of a vector literal (not combined with cons/comprehension syntax).
+`Codegen.fs` compiles a spread-containing literal via stack-only
+flattening; `Bytecode.fs`/`vm/` gained one new opcode, `VectorExtend`.
+
+Phase 5 (array-manipulation standard library) split its eight functions two
+ways. `push`/`pop`/`length`/`reverse` are true natives (`vm/src/natives.cpp`,
+pre-registered in `Resolver.fs`'s `nativeGlobals`) since they need direct
+access to an `ObjVector`'s storage and never call back into user code.
+`map`/`filter`/`reduce`/`sort` do need to call back into a caller-supplied
+lambda, and the VM's native-calling convention (`Vm::callNative`) has no
+"call this closure and synchronously get its result" primitive — rather
+than build one, these four are ordinary Iqalox `fun` declarations
+(`compiler/src/Prelude.fs`), textually prepended to every program's own
+source (`Program.fs`) and resolved/compiled as part of the same program,
+with no special-casing in `Resolver.fs`/`Codegen.fs` at all. A real
+`Parser.fs` bug was found and fixed while writing the prelude's own source
+(a lambda swallowing a sibling call argument, and a grouping-expression
+comma-scope bug) — see `docs/PLAN-0.2.md`'s Phase 5 entry. Two known,
+accepted limitations were logged rather than solved: a one-line function
+body ending in a bare `return x` needs an explicit `;` before `}` (ASI only
+fires on a real newline), and a runtime error raised from inside a prelude
+function's own body reports a `[line N]` relative to `Prelude.fs`'s own
+source text, not the user's file (no multi-file source-position tracking
+exists in this pipeline).
+
+Phase 6 (matrix standard library) added no new literal syntax at all — a
+matrix is simply a vector of vectors, indexed one level at a time via
+Phase 1's indexing. `transpose`/`multiply`/`add`/`subtract` are true
+natives (`vm/src/natives.cpp`) that validate their argument(s) are a
+genuinely rectangular matrix and raise a dedicated, clearly-worded runtime
+error on a shape mismatch. `elementwise` (a combining function applied
+positionally across two matrices) is, like Phase 5's four, ordinary
+Prelude.fs Iqalox source rather than a native, since it needs to call a
+caller-supplied lambda — and, per the repository owner's explicit choice,
+it deliberately does **not** validate that its two arguments are the same
+shape the way the four natives do, since Prelude-level Iqalox code has no
+`throw`/`raise` construct available to signal a dedicated error with; a
+shape mismatch there just falls through to the ordinary out-of-range index
+error a step later.
+
+Phase 7 (property/method `pub`/`mut` visibility) is the largest single
+`Resolver.fs` change of `0.2`. Properties must now be declared in the class
+body (`var name`, `var name mut`, `var name pub`, `var name pub mut`, no
+initializer expression) rather than springing into existence on first
+assignment; a non-`mut` property may be assigned at most once, enforced via
+the same `Undef`-sentinel mechanism `0.1`'s `var mut` locals already use for
+must-assign-before-read. Methods gained a `pub`/private modifier the same
+way. **Internal** access (`self.x`/`self.method()`) always bypasses every
+visibility/mutability gate — a purely syntactic check (is the access
+written as exactly `self.x`) rather than "is this code inside the same
+class," which gives Iqalox a protected-like access model for free: a
+subclass's own method reaching a superclass's private member via `self`
+counts as internal, with zero extra bookkeeping needed. New opcodes:
+`PropertyPrivate`/`PropertyPrivateMut`/`PropertyPub`/`PropertyPubMut` (one
+per modifier combination), `MethodPub` (private is the existing `Method`),
+and `GetPropertySelf`/`SetPropertySelf` (internal, ungated) alongside the
+existing `GetProperty`/`SetProperty` (now external, gated). `vm/`'s
+`ObjClass` gained `properties`/`publicMethods` metadata and `ObjInstance`
+now pre-populates every declared field with `Undef` at construction rather
+than letting fields spring into existence. **A mid-phase discovery**: these
+breaking changes to the object model (an undeclared `self.x = ...` is now a
+compile error) made `compiler/`+`vm/` permanently unable to run `poc/`-era
+class fixtures at all — surfaced by `langspec/versions/0.1/examples/
+classes.iqx` failing to compile. Raised to the repository owner, who chose
+to retire cross-implementation conformance testing entirely rather than
+patch around it (pre-`1.0`, backward compatibility with an earlier version
+isn't a goal): `scripts/conformance-test.sh` and
+`scripts/phase7-run-smoke-test.sh`, plus their `.github/workflows/ci.yml`
+jobs, were deleted outright. See `docs/PLAN-0.2.md`'s Phase 7 entry and
+open question 6's resolution for the full narrative.
+
+Phase 8 (mixins and traits) added two composition mechanisms split by
+keyword. **Traits** (`trait`/`use`) are pure compile-time inlining with
+zero runtime representation — `Resolver.fs` recursively flattens a trait's
+own members (memoized, cycle-detected) and statically merges them into
+whichever class(es) `use` it, PHP-style; a trait-provided method's
+`self`/`super` resolve relative to the *using* class. **Mixins** (`with`)
+compose a real, already-compiled class's methods/properties at *runtime*
+instead, via a new `Mixin` opcode that mirrors `Inherit`'s "peek class,
+copy members" mechanics (but pops its operand, since a mixin's value is
+never needed again — `super` does not chain through a `with`-mixin under
+this deliberately simplified, non-C3-linearized approximation; see
+`ROADMAP.md`'s deferred-ideas list for the full C3 alternative). Any two
+composed sources (two used traits, a trait vs. the superclass, two mixins,
+a mixin vs. the superclass) sharing a member name is a compile-time error
+— no `insteadof`/`as`-style disambiguation exists in the grammar; the
+class's own **literal** body always wins silently for methods (ordinary
+polymorphism), but a property redeclaration is still an error even against
+composed sources (properties have no override semantics under Phase 7's
+write-once model). The underlying `Resolver.fs` machinery is a `MemberSet`
+algebra (`Properties`/`Methods` maps plus `overrideWith`/`mergeAll`/
+`checkNoConflicts`/`buildOwnMemberSet` helpers, shared with Phase 7's own
+collision detection) and a `ClassInfo` split into `OwnLiteral` (the class's
+own body, exempt from trait-conflict checks) vs. `TraitContributed`
+(post-trait-merge, checked against composed superclass/mixin sources for
+*any* conflict) — this split was a genuine architectural correction found
+via test-driven discovery mid-phase, not the original design. This phase
+also involved two rounds of `AskUserQuestion`: the repository owner first
+chose full C3 linearization for `with`, then, after a follow-up question
+laying out C3's real architectural cost (per-class MRO, live
+MRO-walking dispatch, runtime-resolved `super`), reconsidered and chose to
+ship the simplified approximation now with C3 deferred — see
+`docs/PLAN-0.2.md`'s Phase 8 entry for the full writeup.
+
+Phase 9 (this phase) is docs-only: `docs/LANGUAGE.md` forked into a frozen
+`docs/LANGUAGE-0.1.md` plus a new, current `docs/LANGUAGE.md` describing
+`0.2` in full (the same fork-not-addendum pattern `0.1`'s own Phase 10
+used, and this section mirrors for `CLAUDE.md` itself); every top-level
+`langspec/examples/*.iqx` fixture verified end-to-end through the real
+`compiler/`+`vm/` toolchain; `ROADMAP.md` marks `0.2` delivered and moves
+the active-target goalposts to `0.3`.
 
 ## Engineering conventions
 

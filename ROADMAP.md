@@ -111,18 +111,20 @@ hardened, plus:
 - Immutability enforced at compile time, not runtime-only.
 - Classes can reference themselves by name from inside their own methods.
 
-See `docs/LANGUAGE.md` for the full `0.1` language reference, including a
+See `docs/LANGUAGE-0.1.md` for the full `0.1` language reference (frozen
+as of `0.2`'s own Phase 9 fork, `docs/PLAN-0.2.md` §5), including a
 diagnostics-quality regression flagged there (§13) as a candidate for a
 follow-up phase rather than something silently left undocumented.
 
-### 0.2 *(formerly `0.2-poc`)* — *active target*
+### 0.2 *(formerly `0.2-poc`)* — *done*
 
 Everything originally marked "push to `0.2-poc+`" in the source planning
 notes that didn't get pulled forward into 0.1-poc, plus mixin/trait support
 (deferred out of 0.1-poc — see above; bundled here as the natural home for
 "class system completeness" work, alongside the other items below that were
 already headed for this version). See `docs/PLAN-0.2.md` for the full
-plan — design decisions, open questions, and phased sequencing:
+implementation log (all 9 phases done) — design decisions, open questions,
+and phased sequencing:
 
 - Matrix support (alongside existing vector/array support) — as nested
   vectors plus a dedicated stdlib, not new literal syntax
@@ -143,9 +145,16 @@ plan — design decisions, open questions, and phased sequencing:
   (`trait A {...}` / `class B { use A }`) — resolved as a split by which
   keyword is used: `trait`/`use` is **PHP-style static copying** (matching
   PHP's own `trait`/`use` keywords), `with`-only mixins are **Scala-style
-  dynamic linearization** (matching Scala's own `with` keyword)
+  composition** — shipped as a deliberately **simplified, non-C3-linearized**
+  approximation rather than full Scala-style dynamic linearization (see
+  "Language feature ideas under consideration" below for the deferred full
+  version)
 
-### 0.3 *(formerly `0.2`)*
+See `docs/LANGUAGE.md` for the full `0.2` language reference, and
+`docs/LANGUAGE-0.1.md` for `0.1`'s own reference, frozen when this version's
+Phase 9 forked it.
+
+### 0.3 *(formerly `0.2`)* — *active target*
 
 - Disallow unused variables — **compile-time warning**
 - Array-manipulation standard library improvements, including negative

@@ -1,36 +1,43 @@
-# The Iqalox Language (0.1)
+# The Iqalox Language (0.2)
 
-> **For older versions, see:** [`docs/LANGUAGE-POC.md`](LANGUAGE-POC.md) for
-> `0.1-poc` (the Python tree-walk interpreter this version supersedes as
-> the primary reference — `poc/` stays in the repo as a working reference
-> implementation, per `CLAUDE.md`). Each version gets its own
-> `LANGUAGE-<version>.md` this way as Iqalox evolves; this file always
-> describes the current, actively-maintained version.
+> **For older versions, see:** [`docs/LANGUAGE-0.1.md`](LANGUAGE-0.1.md) for
+> `0.1` (the compiler frontend + bytecode VM this version builds directly
+> on top of) and [`docs/LANGUAGE-POC.md`](LANGUAGE-POC.md) for `0.1-poc`
+> (the original Python tree-walk interpreter, still kept in the repo as a
+> working reference implementation — `poc/`, per `CLAUDE.md`). Each
+> version gets its own `LANGUAGE-<version>.md` this way as Iqalox evolves;
+> this file always describes the current, actively-maintained version.
 
-This is the complete reference for Iqalox as implemented by `0.1` — a
+This is the complete reference for Iqalox as implemented by `0.2` — a
 compiler frontend (`compiler/`, F#) that compiles `.iqx` source to a
 bytecode file, executed by a stack-based virtual machine (`vm/`, C++23).
 It documents what the language **actually does today**, with runnable
-examples and an explicit list of known limitations. `0.1` is, by design,
-everything `0.1-poc` had — same syntax, same semantics, same example
-programs — plus four additions (§4, §10, and noted throughout): `undef`/
-must-assign-before-read, string escape sequences, compile-time
-immutability enforcement, and self-referencing classes. See `ROADMAP.md`
-for what's planned beyond this milestone, `docs/PLAN-0.1.md` for the
-day-to-day `0.1` implementation log, and `docs/PLAN-0.1-POC.md` for the
-original `0.1-poc` design decisions this version inherits.
+examples and an explicit list of known limitations. `0.2` is, by design,
+everything `0.1` had — same syntax, same semantics, same core language —
+plus a large batch of additions (§4, §9, §11, §12, §13, and noted
+throughout): vector indexing, lambdas, cons/list-comprehension vector
+forms, vector-literal spread, an array-manipulation standard library, a
+matrix standard library, `pub`/`mut` property visibility and mutability,
+method `pub`/private visibility, and mixin (`with`)/trait (`trait`/`use`)
+class composition. See `ROADMAP.md` for what's planned beyond this
+milestone, `docs/PLAN-0.2.md` for the day-to-day `0.2` implementation
+log, and `docs/PLAN-0.1.md`/`docs/PLAN-0.1-POC.md` for the earlier
+versions' logs.
 
 Every code sample below is valid Iqalox and, unless marked otherwise,
 compiles and runs successfully via `compiler/src/Iqaloxc.fsproj` (or
 `iqaloxc`, once built) piped into `vm/build/iqaloxvm`. Longer, complete
-programs live under `langspec/examples/*.iqx`. `scripts/conformance-test.sh`
-(`docs/PLAN-0.1.md` Phase 9), which diffed these fixtures' output against
-`poc/` byte-for-byte, was retired during `0.2` Phase 7 (`docs/PLAN-0.2.md`):
-decisions 8-11's breaking changes to the object model mean `compiler/`+`vm/`
-can no longer run `poc/`-era class fixtures at all, and the repository
-owner's explicit call was to drop cross-implementation conformance testing
-entirely rather than maintain it — pre-`1.0`, backward compatibility with
-an earlier version isn't a goal.
+programs live under `langspec/examples/*.iqx` — this version's
+active-target fixture set (see `langspec/README.md`); `0.1`'s own frozen
+snapshot lives under `langspec/versions/0.1/examples/*.iqx`.
+`scripts/conformance-test.sh` (`docs/PLAN-0.1.md` Phase 9), which used to
+diff fixture output against `poc/` byte-for-byte, was retired during
+`0.2` Phase 7 (`docs/PLAN-0.2.md`): decisions 8-11's breaking changes to
+the object model mean `compiler/`+`vm/` can no longer run `poc/`-era
+class fixtures at all, and the repository owner's explicit call was to
+drop cross-implementation conformance testing entirely rather than
+maintain it — pre-`1.0`, backward compatibility with an earlier version
+isn't a goal.
 
 ## Table of contents
 
@@ -40,46 +47,48 @@ an earlier version isn't a goal.
 4. [Variables and mutability](#4-variables-and-mutability)
 5. [Operators and precedence](#5-operators-and-precedence)
 6. [Control flow](#6-control-flow)
-7. [Functions and closures](#7-functions-and-closures)
+7. [Functions, closures, and lambdas](#7-functions-closures-and-lambdas)
 8. [The call syntax](#8-the-call-syntax-no-parentheses)
-9. [The pipe operator](#9-the-pipe-operator)
-10. [Classes and objects](#10-classes-and-objects)
-11. [The standard library (so far)](#11-the-standard-library-so-far)
-12. [Errors](#12-errors)
-13. [Known limitations](#13-known-limitations)
-14. [Grammar and precedence reference](#14-grammar-and-precedence-reference)
+9. [Vectors: indexing, cons, comprehensions, and spread](#9-vectors-indexing-cons-comprehensions-and-spread)
+10. [The pipe operator](#10-the-pipe-operator)
+11. [Classes and objects](#11-classes-and-objects)
+12. [Mixins and traits](#12-mixins-and-traits)
+13. [The standard library](#13-the-standard-library)
+14. [Errors](#14-errors)
+15. [Known limitations](#15-known-limitations)
+16. [Grammar and precedence reference](#16-grammar-and-precedence-reference)
 
 ## 1. Introduction and classification
 
 Iqalox is Lox — the small teaching language from Bob Nystrom's *Crafting
 Interpreters* — mutated and extended by the repository owner into a
-personal language project. `0.1` is the first real, non-proof-of-concept
-implementation: a **compiler frontend plus a bytecode virtual machine**,
-superseding `0.1-poc`'s tree-walk interpreter (see `ROADMAP.md`'s
-architecture note).
+personal language project. `0.2` builds directly on `0.1`'s compiler
+frontend plus bytecode virtual machine (see `ROADMAP.md`'s architecture
+note), adding real vector manipulation and a first, deliberately-scoped
+pass at multiple-inheritance-style class composition.
 
-Classifying `0.1` along the axes commonly used to describe programming
+Classifying `0.2` along the axes commonly used to describe programming
 languages — all statements below describe this implementation as it
 exists today, not a permanent commitment for later Iqalox versions:
 
 - **Paradigm**: primarily **imperative/procedural**, with **class-based
-  object orientation** (`class`, `extends`, `self`, `super`) and a
-  meaningful vein of **functional-language influence** — functions are
-  first-class values, closures capture their defining environment, and the
-  pipe operator (`|>`) encourages composing calls left-to-right the way
-  functional languages do. There is no logic- or constraint-programming
-  aspect.
+  object orientation** (`class`, `extends`, `with`, `trait`/`use`, `self`,
+  `super`) and a meaningful vein of **functional-language influence** —
+  functions and lambdas are first-class values, closures capture their
+  defining environment, list comprehensions and cons build vectors
+  declaratively, and the pipe operator (`|>`) encourages composing calls
+  left-to-right the way functional languages do. There is no logic- or
+  constraint-programming aspect.
 - **Typing discipline**: **dynamically typed**. There is no type
   declaration syntax anywhere in the grammar — variables, parameters, and
-  fields hold whatever value is assigned, and type errors (e.g. `"a" + 1`)
-  surface as runtime errors, not at compile time. Within that, Iqalox
-  leans **strong**: operators check operand types and raise a runtime
-  error rather than silently coercing between them (no string-to-number or
-  number-to-string coercion happens for `+`, `-`, `*`, `/`, `%`, `^`, or the
-  comparison operators).
+  properties hold whatever value is assigned, and type errors (e.g.
+  `"a" + 1`) surface as runtime errors, not at compile time. Within that,
+  Iqalox leans **strong**: operators check operand types and raise a
+  runtime error rather than silently coercing between them (no
+  string-to-number or number-to-string coercion happens for `+`, `-`,
+  `*`, `/`, `%`, `^`, or the comparison operators).
 - **Memory management**: fully **automatic**, via a real **mark-sweep
-  tracing garbage collector** built into the VM (`vm/src/vm.cpp`) — unlike
-  `0.1-poc`, which simply delegated to Python's own GC, `0.1`'s VM
+  tracing garbage collector** built into the VM (`vm/src/vm.cpp`), which
   allocates and traces every heap object (strings, vectors, functions,
   closures, classes, instances) itself. There is no manual memory
   management, no pointers, and no language-level concept of ownership or
@@ -90,70 +99,98 @@ exists today, not a permanent commitment for later Iqalox versions:
   with every binding/scope/slot already determined
   (`compiler/src/Bound.fs`), and lowered to a structured bytecode format
   (`compiler/src/Bytecode.fs`, `compiler/src/Codegen.fs`) that the VM
-  (`vm/src/vm.cpp`) loads and executes via a fetch-decode-execute loop over
-  an explicit value stack and call-frame stack. There is no tree-walking,
-  no JIT, and no further optimization pass on the bytecode itself.
+  (`vm/src/vm.cpp`) loads and executes via a fetch-decode-execute loop
+  over an explicit value stack and call-frame stack. There is no
+  tree-walking, no JIT, and no further optimization pass on the bytecode
+  itself. **New for `0.2`**: every program is compiled together with a
+  small prelude of standard-library functions written in Iqalox itself
+  (`compiler/src/Prelude.fs`, see [§13](#13-the-standard-library)) —
+  textually merged with the user's own source before resolution, not a
+  separate module or import mechanism.
 - **Evaluation strategy**: **eager (strict)** evaluation everywhere except
-  the short-circuiting operators — `and`/`or`, `??`, and the ternary/elvis
-  forms — which compile to conditional jumps rather than always evaluating
-  every operand (see [§5](#5-operators-and-precedence),
-  [§6](#6-control-flow)). Function arguments are fully evaluated before a
-  call executes (**call-by-value** for the argument slots themselves;
-  since the values passed may be references to heap objects, mutable
-  values like vectors are shared by reference).
+  the short-circuiting operators — `and`/`or`, `??`, and the
+  ternary/elvis forms — which compile to conditional jumps rather than
+  always evaluating every operand (see [§5](#5-operators-and-precedence),
+  [§6](#6-control-flow)). Function and lambda arguments are fully
+  evaluated before a call executes (**call-by-value** for the argument
+  slots themselves; since the values passed may be references to heap
+  objects, mutable values like vectors are shared by reference).
 - **Scoping**: **lexical (static) scoping**, resolved entirely at compile
   time. `compiler/src/Resolver.fs` assigns every local variable a fixed
   stack slot and every non-local reference an upvalue, following the same
   scope/slot/upvalue algorithm as `clox` (*Crafting Interpreters*); the VM
   never does a name-based environment lookup at runtime for locals.
-  Closures capture the variables active at the point a function is
-  *declared*, not where it's *called* — implemented as `ObjUpvalue`s that
-  point directly at a stack slot until that slot goes out of scope, then
-  hold a closed-over copy. `super` resolution is **lexical**, the same as
-  `0.1-poc` — it resolves to the class the calling method is *written in*,
-  never to the calling instance's actual runtime class (see
-  [§10](#10-classes-and-objects)).
-- **Name-binding / mutability default**: **immutable by default**, now
-  **enforced at compile time** rather than only at runtime — `var x = 1`
-  followed by `x = 2` is a compile-time error (`docs/PLAN-0.1-POC.md`
-  decision 2's runtime-only interim tradeoff is resolved for `0.1`). `var x
-  mut = 1` opts in to reassignment. This extends to function parameters
-  (also immutable inside the function body) but *not* to object fields,
-  which are always freely reassignable — the same deliberately asymmetric
-  design point as `0.1-poc` (see [§13](#13-known-limitations)). **New for
-  `0.1`**: a mutable variable declared without an initializer (`var x
-  mut`) starts as `undef`, not `nil` — reading it before its first
-  assignment is a runtime error, not a silent `nil` (see
-  [§4](#4-variables-and-mutability)).
+  Closures (both named functions and lambdas) capture the variables
+  active at the point they're *declared*, not where they're *called* —
+  implemented as `ObjUpvalue`s that point directly at a stack slot until
+  that slot goes out of scope, then hold a closed-over copy. `super`
+  resolution is **lexical** — it resolves to the class the calling method
+  is *written in*, never to the calling instance's actual runtime class
+  (see [§11](#11-classes-and-objects)); mixin composition (`with`) does
+  **not** extend `super`'s chain at all (see
+  [§12](#12-mixins-and-traits)).
+- **Name-binding / mutability default**: **immutable by default**,
+  enforced at **compile time** for local variables and function/lambda
+  parameters — `var x = 1` followed by `x = 2` is a compile-time error;
+  `var x mut = 1` opts in to reassignment. **New for `0.2`**: object
+  properties now have their own, separate mutability model — a property
+  is declared once, in the class body, as `var name`, `var name mut`,
+  `var name pub`, or `var name pub mut` (no initializer expression; see
+  [§11](#11-classes-and-objects)). Without `mut`, a property may be
+  assigned **at most once** (typically inside `init`) — a second
+  assignment is a runtime error, the property-level equivalent of local
+  variables' compile-time immutability check, but necessarily a runtime
+  one since which assignment is "the first" can depend on control flow.
+  This replaces `0.1`'s model, where fields sprang into existence on
+  first assignment with no immutability concept and no declaration
+  requirement at all (see [§15](#15-known-limitations)).
 - **Object model**: **class-based** (not prototype-based), with **single
-  inheritance** via `extends` and **nominal** dispatch — a method call
-  resolves against the instance's actual runtime class (`ObjClass`'s
-  `methods` map, populated by copying the superclass's methods at
-  `extends`-time), with no structural/duck-typed interface concept. The
-  object model is currently **partial**: user-defined classes produce real
-  objects with method dispatch, but the built-in value types (numbers,
-  strings, booleans, vectors) are plain values with **no methods of their
-  own** — there's no `"hello".length()`-style access on primitives.
-  **New for `0.1`**: a class can now reference itself by name from inside
-  its own methods (see [§10](#10-classes-and-objects)).
+  inheritance** via `extends`, plus, **new for `0.2`**, two additional
+  composition mechanisms: **traits** (`trait`/`use`, PHP-style static
+  copying of a trait's members into a class at compile time — a trait has
+  no runtime representation of its own) and **mixins** (`with`,
+  Scala-style composition of a real class's already-compiled
+  methods/properties at runtime, via a dedicated `Mixin` opcode). Method
+  dispatch remains **nominal** — a call resolves against the instance's
+  actual runtime class (`ObjClass`'s `methods`/`publicMethods` maps,
+  populated by copying superclass and mixin members in at
+  `extends`/`with`-time), with no structural/duck-typed interface
+  concept. **New for `0.2`**: declared properties and methods now carry
+  **visibility** (`pub`/private) — see [§11](#11-classes-and-objects) for
+  the full internal-vs-external access model, including the
+  protected-like treatment of a subclass's own methods. The built-in
+  value types (numbers, strings, booleans) remain plain values with no
+  methods of their own — there's no `"hello".length()`-style access on
+  primitives — but vectors are no longer purely literal-only data:
+  indexing (`v[i]`), a growing set of array-manipulation functions, and a
+  small matrix-manipulation library now operate on them (all as ordinary
+  global functions, not vector methods — see
+  [§9](#9-vectors-indexing-cons-comprehensions-and-spread) and
+  [§13](#13-the-standard-library)).
 - **Concurrency model**: **none**. Iqalox is single-threaded with no
   concurrency primitives, no `async`/`await`, and no scheduling model of
   any kind at this stage.
-- **Error-handling model**: internally, the compiler front-end accumulates
-  scan/parse/resolve/codegen errors as data (not exceptions), and the VM
-  signals runtime faults via a C++ exception (`RuntimeError`) caught once
-  at the top of `main`, but **none of this is exposed to Iqalox source
-  code** — there is no `try`/`catch`/`throw` construct. A runtime error
-  anywhere aborts the whole program (see [§12](#12-errors)).
+- **Error-handling model**: internally, the compiler front-end
+  accumulates scan/parse/resolve/codegen errors as data (not
+  exceptions), and the VM signals runtime faults via a C++ exception
+  (`RuntimeError`) caught once at the top of `main`, but **none of this
+  is exposed to Iqalox source code** — there is no `try`/`catch`/`throw`
+  construct. A runtime error anywhere aborts the whole program (see
+  [§14](#14-errors)).
 - **Metaprogramming/reflection**: **none**. No `eval`, no reflection API,
   no macros.
 - **Call syntax**: the standout, deliberately unusual axis for this
   language — see [§8](#8-the-call-syntax-no-parentheses). No function
   call, builtin or user-defined, takes parentheses; calls are formed by
-  **fixed-arity juxtaposition** (`f x`, `f x, y`) reminiscent of ML-family
-  languages, but *without* currying or partial application — a call's
-  arity is fixed by the callee's declaration, not inferred from how many
-  arguments happen to be written.
+  **fixed-arity juxtaposition** (`f x`, `f x, y`) reminiscent of
+  ML-family languages, but *without* currying or partial application — a
+  call's arity is fixed by the callee's declaration, not inferred from
+  how many arguments happen to be written. **New for `0.2`**: postfix
+  indexing (`v[0]`) is told apart from a paren-free call whose sole
+  argument is a vector literal (`f [0]`) purely by **whitespace** — a `[`
+  with no space before it is always indexing, a `[` with a space is
+  always the pre-existing call form. This is the only place whitespace is
+  significant anywhere in Iqalox's grammar (`langspec/SYNTAX_GRAMMAR.md`).
 - **Syntax style**: brace-delimited blocks (`{ ... }`, not
   indentation-sensitive) combined with **implicit statement termination**
   on a newline (à la Python/JavaScript ASI) — either a real `;` or a
@@ -172,28 +209,35 @@ DIGIT       → '0'...'9'
 ```
 
 - **Numbers** are always floating-point — there is no separate integer
-  type (`5` and `5.0` are the same value). Printing drops a trailing `.0`,
-  so `print 5` prints `5`, not `5.0` (see [§11](#11-the-standard-library-so-far)).
-- **Strings** may use single or double quotes interchangeably. **New for
-  `0.1`**: escape sequences are now processed inside string literals —
-  `\n` `\t` `\r` `\\` `\'` `\"` `\0` are recognized; any other character
-  after a backslash is a compile-time scan error. `0.1-poc` had no escape
-  processing at all (see [§13](#13-known-limitations)).
-- **Comments**: `# ...` runs to end of line; `<# ... #>` is a block comment
-  and may span multiple lines. Neither nests.
-- **Implicit semicolons**: a newline is scanned as a statement terminator,
-  exactly like a literal `;`. A blank line (or a comment-only line)
-  becomes a harmless empty statement, not an error.
+  type (`5` and `5.0` are the same value). Printing drops a trailing
+  `.0`, so `print 5` prints `5`, not `5.0` (see
+  [§13](#13-the-standard-library)).
+- **Strings** may use single or double quotes interchangeably. Escape
+  sequences are processed inside string literals — `\n` `\t` `\r` `\\`
+  `\'` `\"` `\0` are recognized; any other character after a backslash is
+  a compile-time scan error.
+- **Comments**: `# ...` runs to end of line; `<# ... #>` is a block
+  comment and may span multiple lines. Neither nests.
+- **Implicit semicolons**: a newline is scanned as a statement
+  terminator, exactly like a literal `;`. A blank line (or a
+  comment-only line) becomes a harmless empty statement, not an error.
+  The scanner turns *every* newline into an implicit `;` unconditionally,
+  with no awareness of bracket/paren depth — see
+  [§15](#15-known-limitations) item 9 for the resulting limitation on
+  multi-line vector literals and grouping expressions.
 - **Keywords** (cannot be used as identifiers): `and`, `class`, `false`,
   `fun`, `for`, `nil`, `or`, `return`, `super`, `self`, `true`, `var`,
-  `extends`, `break`, `continue`, `mut`. (`with`, `module`, `trait`, `use`
-  are reserved for future mixin/trait/module support but have no grammar
-  or meaning yet.) `print` and `concat` are **not** keywords — see
-  [§11](#11-the-standard-library-so-far).
+  `extends`, `break`, `continue`, `mut`, `pub`, `with`, `trait`, `use`.
+  (`module` is still reserved for future module support but has no
+  grammar or meaning yet.) `print` and `concat`, and the whole
+  array/matrix standard library (`push`, `pop`, `length`, `reverse`,
+  `map`, `filter`, `reduce`, `sort`, `transpose`, `multiply`, `add`,
+  `subtract`, `elementwise`), are **not** keywords — see
+  [§13](#13-the-standard-library).
 
 ## 3. Values and types
 
-Iqalox has five kinds of user-visible runtime value in `0.1`:
+Iqalox has five kinds of user-visible runtime value:
 
 | Type | Literal syntax | Example |
 |---|---|---|
@@ -201,22 +245,23 @@ Iqalox has five kinds of user-visible runtime value in `0.1`:
 | String | single- or double-quoted | `"hi"`, `'hi'` |
 | Boolean | `true` / `false` | `true` |
 | `nil` | `nil` | `nil` |
-| Vector | `[ ... ]`, comma-separated | `[1, 2, "three"]` |
+| Vector | `[ ... ]`, comma-separated, cons, comprehension, or spread | `[1, 2, "three"]` |
 
 Plus two callable/object kinds introduced by functions and classes:
-function values (user-defined or native builtins) and class
-instances — see [§7](#7-functions-and-closures) and
-[§10](#10-classes-and-objects).
+function values (user-defined, lambdas, or native builtins) and class
+instances — see [§7](#7-functions-closures-and-lambdas) and
+[§11](#11-classes-and-objects).
 
-**New for `0.1`**: there is also an internal `undef` value (distinct from
-`nil`), used to mark a mutable variable that hasn't been assigned yet.
-It is never actually observable in a running program — every read of a
-variable checks for `undef` first and raises a runtime error immediately,
-so it can't be printed, compared, passed to a function, or stored
-anywhere (see [§4](#4-variables-and-mutability)).
+There is also an internal `undef` value (distinct from `nil`), used to
+mark a mutable local variable, or a non-`mut` property, that hasn't been
+assigned yet. It is never actually observable in a running program —
+every read checks for `undef` first and raises a runtime error
+immediately, so it can't be printed, compared, passed to a function, or
+stored anywhere (see [§4](#4-variables-and-mutability),
+[§11](#11-classes-and-objects)).
 
-**Truthiness**: only `nil` and `false` are falsy. Every other value — `0`,
-`""` (empty string), and `[]` (empty vector) included — is truthy:
+**Truthiness**: only `nil` and `false` are falsy. Every other value —
+`0`, `""` (empty string), and `[]` (empty vector) included — is truthy:
 
 ```
 print (0 ? "truthy" : "falsy")     # truthy
@@ -230,12 +275,17 @@ not an error. **Ordering** comparisons (`>`, `>=`, `<`, `<=`) and
 **arithmetic** (`+`, `-`, `*`, `/`, `%`, `^`) require both operands to be
 numbers and raise a runtime error otherwise — there is no string
 comparison or string `+` concatenation (use `concat`,
-[§11](#11-the-standard-library-so-far)).
+[§13](#13-the-standard-library)).
 
-Vectors are **literals only** in `0.1`, same as `0.1-poc`: `[1, 2, 3]`
-produces a value, but there is no indexing (`v[0]`), no mutation, no
-`length`, and no other vector-manipulation stdlib yet — that's `0.2`
-scope (`ROADMAP.md`).
+**New for `0.2`**: vectors are no longer literals-only data. `[1, 2, 3]`
+still produces a value the same way it always has, but that value now
+supports **indexing** (read and write), **cons** and **list-comprehension**
+literal forms, **spread** inside an ordinary literal, and a real
+array/matrix **standard library** — see
+[§9](#9-vectors-indexing-cons-comprehensions-and-spread) and
+[§13](#13-the-standard-library) for the full details. A matrix is not a
+distinct type: it's simply a vector of vectors, indexed one level at a
+time (`matrix[row][col]`) — see [§9](#9-vectors-indexing-cons-comprehensions-and-spread).
 
 ## 4. Variables and mutability
 
@@ -248,45 +298,61 @@ var z mut          # OK -- mutable declarations may omit the initializer,
                     # but z starts as undef, not nil (see below)
 ```
 
-An immutable (`var x`, no `mut`) declaration **must** have an
+An immutable (`var x`, no `mut`) local declaration **must** have an
 initializer — `var x` with no `mut` and no `= ...` is a compile-time
 error, since there would be no way to ever give it a value. A mutable
 declaration may omit the initializer, in which case the variable starts
 as `undef`.
 
-**New for `0.1`**: reassigning a variable that wasn't declared `mut` is
-now caught at **compile time** — `compiler/src/Resolver.fs` tracks each
-binding's mutability and reports an error before any bytecode is even
-generated, resolving `0.1-poc`'s documented interim tradeoff
-(`docs/PLAN-0.1-POC.md` decision 2) of only catching this at runtime.
-Function parameters are immutable inside the function body by the same
+Reassigning a local variable that wasn't declared `mut` is caught at
+**compile time** — `compiler/src/Resolver.fs` tracks each binding's
+mutability and reports an error before any bytecode is even generated.
+Function and lambda parameters are immutable inside the body by the same
 rule, with no per-parameter `mut` syntax to opt out.
 
-**New for `0.1`**: reading a mutable variable before it's ever been
-assigned (`var z mut` then using `z` with no assignment in between) is a
-**runtime** error — `undef` is a distinct value from `nil`, and every
-variable read checks for it first. This is deliberately a runtime check,
-not a compile-time one: unlike immutability (which depends only on static
+Reading a mutable local variable before it's ever been assigned (`var z
+mut` then using `z` with no assignment in between) is a **runtime**
+error — `undef` is a distinct value from `nil`, and every variable read
+checks for it first. This is deliberately a runtime check, not a
+compile-time one: unlike immutability (which depends only on static
 structure — was there an initializer, is there a later assignment), a
 `var mut` binding's assignedness can depend on control flow the resolver
-doesn't model (e.g. a variable assigned inside one branch of a ternary but
-not another).
+doesn't model (e.g. a variable assigned inside one branch of a ternary
+but not another).
 
-Object fields (`self.x = ...`) are the one exception to all of the above:
-they are **always** freely reassignable, with no `mut` concept and no
-`undef` state at all (fields simply don't exist until first assigned —
-see [§13](#13-known-limitations) for why).
+**Object properties (`self.x`) follow a related but distinct model, new
+for `0.2`.** Unlike `0.1`, where fields sprang into existence on first
+assignment with no declaration and no immutability concept at all, every
+property a class uses must now be **declared** in the class body:
+
+```
+class Counter {
+    var count mut   # declared, private, mutable
+    ...
+}
+```
+
+A property declared **without** `mut` may be assigned **at most once**
+externally-invisible internal state is exactly what backs `init`-only
+initialization — assigning it a second time is a **runtime** error (the
+same `undef`-sentinel mechanism `var mut` locals use for
+must-assign-before-read, reused here for write-once instead). A property
+declared **with** `mut` may be reassigned freely, the same as a `var mut`
+local. See [§11](#11-classes-and-objects) for the full property model,
+including the separate `pub` visibility axis (whether a property is even
+*readable*/*writable* from outside the class at all) and how the two
+combine.
 
 ## 5. Operators and precedence
 
-From loosest-binding to tightest (see [§14](#14-grammar-and-precedence-reference)
-for the full grammar, and the root `README.md` for the same chain
-presented tightest-first):
+From loosest-binding to tightest (see
+[§16](#16-grammar-and-precedence-reference) for the full grammar, and the
+root `README.md` for the same chain presented tightest-first):
 
 | Operator(s) | Meaning | Notes |
 |---|---|---|
-| `=` | assignment | right-associative |
-| `\|>` | pipe | desugars to a call, see [§9](#9-the-pipe-operator) |
+| `=` | assignment | right-associative; also assigns through a trailing `[i]` index (see [§9](#9-vectors-indexing-cons-comprehensions-and-spread)) |
+| `\|>` | pipe | desugars to a call, see [§10](#10-the-pipe-operator) |
 | `,` | comma | left-associative, sequences expressions |
 | `? :` / `?:` | ternary / elvis | see [§6](#6-control-flow) |
 | `??` | null-coalescing | `a ?? b` is `a` unless `a` is `nil`, else `b` |
@@ -319,11 +385,25 @@ exactly once even though it's also the "then" value, via a jump that
 reuses the already-computed value rather than emitting the condition's
 bytecode twice.
 
+**New syntax that is not part of this table.** This table (and the root
+`README.md`'s copy of it) covers infix/prefix *operators* specifically —
+it has never listed member access (`.`), since that's postfix call-chain
+syntax rather than an operator with a precedence level relative to the
+others. `0.2` adds more syntax in that same postfix/structural category,
+which for the same reason doesn't appear as a table row either:
+**indexing** (`v[i]`) chains onto a call exactly like `.` does and binds
+tighter than any operator above it; **lambdas** (`(params) -> expr`),
+**cons** (`[item | list]`), **list comprehensions**
+(`[expr | x <- xs]`), and **vector-literal spread** (`[...v]`) are all
+literal/primary-expression forms, not operators applied to an existing
+expression — see [§9](#9-vectors-indexing-cons-comprehensions-and-spread)
+for indexing/cons/comprehension/spread and
+[§7](#7-functions-closures-and-lambdas) for lambdas.
+
 ## 6. Control flow
 
 **There is no `if`/`else` statement and no `while` loop.** Both are
-deliberately absent from the language (`docs/PLAN-0.1-POC.md` decision 1;
-`while` was removed outright).
+deliberately absent from the language; `while` was removed outright.
 
 The chainable ternary operator replaces `if`/`else` entirely, including
 for statement-like branches (side-effecting calls, `break`, `continue`):
@@ -337,8 +417,8 @@ for (var i mut = 0; i < 10; ++i) {
 ```
 
 `?:` is the **elvis** short form: `a ?: b` means "`a` if `a` is truthy,
-else `b`" — it reuses the condition as the "then" value instead of writing
-it twice:
+else `b`" — it reuses the condition as the "then" value instead of
+writing it twice:
 
 ```
 var name mut = false
@@ -354,8 +434,8 @@ to the top of (`continue`) the nearest enclosing `for` loop's bytecode;
 using either outside of a loop is reported as a compile-time codegen
 error rather than crashing anything.
 
-`for` is the only loop construct, with the full three-clause C-style form,
-every clause optional:
+`for` is the only loop construct, with the full three-clause C-style
+form, every clause optional:
 
 ```
 for (var i mut = 0; i < 5; ++i) { print i; }
@@ -370,7 +450,7 @@ var flag = true
 flag ? _ : print "only prints when flag is false"
 ```
 
-## 7. Functions and closures
+## 7. Functions, closures, and lambdas
 
 ```
 fun add(a, b) { return a + b; }
@@ -378,8 +458,8 @@ var result = add 1, 2   # 3
 ```
 
 Functions are first-class values. A bare function name with nothing
-recognizable as an argument after it is a *reference* to the function, not
-a call — this is what lets functions be passed around:
+recognizable as an argument after it is a *reference* to the function,
+not a call — this is what lets functions be passed around:
 
 ```
 fun makeFive() { return 5; }
@@ -387,9 +467,9 @@ fun apply(func) { return func(); }   # explicit () -- see §8
 print (apply makeFive)               # 5
 ```
 
-Closures capture their **defining** environment, and that capture is live
-(mutations to captured `mut` variables are visible across calls) — the VM
-implements this with `ObjUpvalue`, which points directly at the
+Closures capture their **defining** environment, and that capture is
+live (mutations to captured `mut` variables are visible across calls) —
+the VM implements this with `ObjUpvalue`, which points directly at the
 variable's stack slot for as long as that slot is live, then transitions
 to holding a closed-over copy once the enclosing call returns:
 
@@ -415,13 +495,40 @@ print (fact 5)   # 120
 A function called with the wrong number of arguments, or a non-callable
 value called at all, is a runtime error.
 
+**New for `0.2`: lambdas.** `(params) -> expr` is an anonymous function
+value — a single expression body (no `{ ... }`, no `return`), otherwise a
+closure exactly like any `fun`:
+
+```
+var double = (x) -> x * 2
+print (double 21)         # 42
+
+var makeAdder = (n) -> (x) -> x + n   # lambdas can return lambdas
+var addFive = makeAdder 5
+print (addFive 10)        # 15
+```
+
+A parenthesized parameter list is only read as a lambda's parameters if
+the very next token after the closing `)` is `->` — otherwise the same
+`(a, b)` shape is an ordinary grouped/comma expression (see
+[§5](#5-operators-and-precedence)'s comma row). This is resolved by
+lookahead **past** the closing paren, not by any other syntactic marker:
+
+```
+var pair = (1, 2)          # comma expression: evaluates to 2
+var addPair = (a, b) -> a + b   # lambda: the -> disambiguates it
+```
+
+Lambdas are used throughout `0.2`'s standard library — `map`, `filter`,
+`reduce`, and `sort` (see [§13](#13-the-standard-library)) all take a
+lambda as their first argument.
+
 ## 8. The call syntax (no parentheses)
 
 This is Iqalox's most distinctive departure from Lox (and from most
 C-family languages): **no function call — builtin or user-defined — ever
 takes parentheses to mark its argument list.** This was a deliberate,
-non-negotiable design decision (`docs/PLAN-0.1-POC.md` decision 4), not an
-oversight.
+non-negotiable design decision, not an oversight.
 
 - **A single simple argument needs nothing**: `add5 1`, `Duck "Waddles"`,
   `math.square 3`.
@@ -441,25 +548,127 @@ oversight.
   itself just another primary value: `print concat [1, 2]` parses as
   `print(concat([1, 2]))`, with `concat [1, 2]` recognized as one complete
   call that becomes `print`'s single argument.
-- Parentheses are **still used** for: grouping a compound argument (above),
-  the explicit zero-arg marker (above), and function *declarations'*
-  parameter lists (`fun f(a, b) { ... }` is unchanged) — only *call sites*
-  lost their parentheses.
+- Parentheses are **still used** for: grouping a compound argument
+  (above), the explicit zero-arg marker (above), function
+  *declarations'* parameter lists (`fun f(a, b) { ... }` is unchanged),
+  and, **new for `0.2`**, lambda parameter lists (`(a, b) -> ...`, see
+  [§7](#7-functions-closures-and-lambdas)) — only *call sites* lost their
+  parentheses.
 
-`print` and `concat` are ordinary functions under this same grammar (see
-[§11](#11-the-standard-library-so-far)) — there's no special
+`print` and `concat`, and every array/matrix stdlib function, are
+ordinary functions under this same grammar (see
+[§13](#13-the-standard-library)) — there's no special
 `printStmt`/`concatStmt` grammar rule the way Lox has a dedicated `print`
 statement.
 
-**Known ambiguity**: chaining `.method()` directly onto a call that itself
-takes an argument binds to the argument, not the outer call — see
-[§13](#13-known-limitations).
+**Known ambiguity**: chaining `.method()` directly onto a call that
+itself takes an argument binds to the argument, not the outer call — see
+[§15](#15-known-limitations).
 
-## 9. The pipe operator
+**New for `0.2`: indexing shares call syntax's paren-free juxtaposition
+space, disambiguated by whitespace.** `v[0]` (no space before `[`) reads
+as postfix indexing on `v`; `f [0]` (a space before `[`) reads as the
+pre-existing call form — `f` called with the vector literal `[0]` as its
+sole argument, exactly as `concat [1, 2]` above already does. This is the
+only place whitespace is significant anywhere in Iqalox's grammar — see
+[§9](#9-vectors-indexing-cons-comprehensions-and-spread).
 
-`a |> f` desugars, entirely at parse time, to the call `f(a)` — there's no
-separate runtime representation for a pipe at all, it's just sugar for a
-call written in the other order. It chains left-associatively:
+## 9. Vectors: indexing, cons, comprehensions, and spread
+
+`0.1`'s vectors were literals only — `[1, 2, 3]` produced a value with no
+way to read an element back out, mutate it, or build one up
+programmatically. `0.2` adds all of that.
+
+### Indexing
+
+```
+var v = [10, 20, 30]
+print v[0]        # 10
+print v[2]        # 30
+
+v[1] = 99
+print v[1]        # 99
+```
+
+- 0-based, **bounds-checked** — reading or writing past either end of the
+  vector is a runtime error (`Vector index N out of range.`), not
+  silently `nil` or a resize.
+- Indexing composes with anything that produces a vector, including a
+  call's own result, and nests for matrix-style access:
+
+```
+fun makeVector() { return [1, 2, 3]; }
+print makeVector()[0]   # 1
+
+var grid = [[1, 2], [3, 4]]
+print grid[0][1]        # 2
+grid[1][0] = 100
+print grid[1][0]        # 100
+```
+
+A matrix is not a distinct type — it's simply a vector of vectors,
+indexed one level at a time. See [§13](#13-the-standard-library) for the
+matrix-manipulation standard library that operates on this shape.
+
+- **As an assignment target**, `v[i] = x` follows the same parsing
+  pattern `self.x = value` already uses: parse an ordinary indexing
+  *read*, then peel the trailing `[expr]` off specifically when it's
+  immediately followed by `=`, and treat that step as the mutable
+  target — not a general "any expression is assignable" rule.
+  `langspec/SYNTAX_GRAMMAR.md`'s `assignment` production has the exact
+  grammar.
+
+### Cons and list comprehensions
+
+```
+var tail = [2, 3, 4]
+print [1 | tail]              # [1, 2, 3, 4]
+
+var xs = [1, 2, 3, 4]
+print [x * 2 | x <- xs]       # [2, 4, 6, 8]
+```
+
+Both forms share the same `[expr |` opening syntax and are told apart by
+lookahead on the token immediately after `|`: a generator marker `<-`
+means a list comprehension (`[expr | name <- source]`, evaluating `expr`
+once per element of `source` with `name` bound to it, collecting the
+results into a new vector); anything else means **cons**
+(`[item | list]`, producing a new vector with `item` prepended onto a
+copy of `list`).
+
+`0.2`'s comprehensions support exactly **one** generator clause and no
+guard/filter clause — `[x * 2 | x <- xs, x > 0]`-style filtering isn't
+available; use `filter` first, or `reduce`, instead (see
+[§13](#13-the-standard-library)). The bound name is a single identifier,
+not a destructuring pattern. A richer, multi-generator/guarded form is
+sketched as future scope in `ROADMAP.md`.
+
+Both forms desugar entirely at compile time into an ordinary loop inside
+a synthetic closure — there is no dedicated cons/comprehension runtime
+representation, just the two VM opcodes (`VectorLength`, `VectorAppend`)
+that closure's loop body compiles down to.
+
+### Vector-literal spread
+
+```
+var a = [1, 2]
+var b = [4, 5]
+print [...a, ...b]              # [1, 2, 4, 5]
+print [0, ...a, 2.5, ...b, 5]   # [0, 1, 2, 2.5, 4, 5, 5]
+```
+
+`...expr` inside a plain, comma-separated vector literal splices every
+element of `expr` (which must itself be a vector) into the result in
+place, and can be freely mixed with ordinary items in any order. Spread
+only applies inside this comma-separated literal form — it does not
+combine with cons or comprehension syntax (`[...a | b]` isn't meaningful
+under `0.2`'s scope for this feature).
+
+## 10. The pipe operator
+
+`a |> f` desugars, entirely at parse time, to the call `f(a)` — there's
+no separate runtime representation for a pipe at all, it's just sugar for
+a call written in the other order. It chains left-associatively:
 
 ```
 fun square(n) { return n * n; }
@@ -470,34 +679,135 @@ The right-hand side of `|>` must be a bare function name (a variable
 reference) — `a |> 1` is a compile-time parse error, since `1` isn't
 something that can be called.
 
-## 10. Classes and objects
+## 11. Classes and objects
 
 ```
 class Duck {
-    init(name) { self.name = name; }
-    quack() { print self.name; }
+    var name
+    var species pub
+
+    init(name, species) {
+        self.name = name
+        self.species = species
+    }
+
+    pub quack() {
+        print self.name
+    }
 }
 
-var duck = Duck "Waddles"   # calling the class constructs an instance
-duck.quack()                 # Waddles
+var duck = Duck "Waddles", "Mallard"   # calling the class constructs an instance
+duck.quack()                            # Waddles
+print duck.species                      # Mallard
 ```
 
 - **`self`**, not `this`, is the self-reference keyword.
 - A class with no `init` method has arity zero (`Math()`, no arguments).
-  A class's construction arity is always derived from its `init` method's
-  arity.
-- **Fields** (`self.x = ...`) are created by assignment and are always
-  freely reassignable — there's no field-declaration syntax and no
-  immutability concept for them (see [§13](#13-known-limitations)).
-  Accessing an undefined property on an instance is a runtime error.
-- **Single inheritance** via `extends`. Unlike `0.1-poc`'s live
-  superclass-pointer-chain walk, `0.1`'s VM copies the superclass's whole
-  method table into the subclass once, at `extends`-time (`ObjClass`'s
-  `methods` map) — behaviorally identical, since Iqalox has no syntax for
-  adding methods to a class after it's declared:
+  A class's construction arity is always derived from its `init`
+  method's arity.
+
+### Properties: declaration, visibility, and mutability
+
+**New for `0.2`.** `0.1` let a method assign `self.x = ...` to any name
+at all, springing the field into existence on first assignment, with no
+declaration and no immutability concept. `0.2` requires every property a
+class uses to be **declared** in the class body, with two independent
+modifiers:
 
 ```
-class A { greet() { print "A"; } }
+class Duck {
+    var name              # private, immutable -- set once, from init
+    var energy mut        # private, mutable -- self only
+    var species pub       # public, immutable -- readable from outside
+    var quacking pub mut  # public, mutable -- readable and writable from outside
+    ...
+}
+```
+
+- **`pub`** controls **external** visibility: whether code *outside* the
+  class (`duck.species`) can even see the property exists. Without
+  `pub`, an external read or write is a runtime error.
+- **`mut`** controls **mutability**: without it, a property may be
+  assigned at most once (a second assignment is a runtime error, the
+  same `undef`-sentinel write-once mechanism [§4](#4-variables-and-mutability)
+  describes); with it, a property may be freely reassigned.
+- These two axes are independent and combine as all four
+  `pub`/`mut` presence combinations — private+immutable (the default,
+  neither modifier), private+mutable, public+immutable, public+mutable.
+- A property declaration takes **no initializer expression** — `var x
+  pub = value` is not valid syntax. A property's actual value comes from
+  whatever assignment (typically inside `init`) happens to run first.
+
+Property declarations have no initializer syntax, and there's no
+getter/setter accessor-body concept either — `pub`/`mut` replace that
+category of feature entirely for `0.2`'s scope (no custom get/set logic,
+no computed properties).
+
+### Methods: visibility
+
+**New for `0.2`.** A method is declared `pub method(...)  { ... }` or
+just `method(...) { ... }` (private, the default):
+
+```
+class Vault {
+    var contents mut
+
+    init() { self.contents = 0 }
+
+    checkPin(pin) { return pin == 1234; }   # private -- self-only
+
+    pub deposit(amount, pin) {
+        self.checkPin pin ? self.contents = self.contents + amount : print "Wrong PIN."
+    }
+
+    pub balance() { return self.contents; }
+}
+
+var vault = Vault()
+vault.deposit 100, 1234
+print vault.balance()     # 100
+# vault.checkPin 1234     # runtime error -- checkPin has no pub
+```
+
+`init` is **always** externally callable regardless of any `pub`
+annotation (or lack of one) — the visibility system never blocks
+constructing an instance.
+
+### Internal vs. external access, and protected-like subclassing
+
+The property/method visibility rules above apply only to **external**
+access — code reaching a member through some other expression
+(`vault.checkPin`, `duck.species`). **Internal** access — a method
+reading or calling `self.x`/`self.method()` on itself — always bypasses
+every `pub`/`mut` gate; this is purely syntactic (is the access written
+as exactly `self.x`, not "does this code happen to be inside the same
+class"), which is what gives Iqalox a **protected-like** access model for
+free: a subclass's own method calling `self.inheritedPrivateMethod()`
+counts as internal access relative to *that* method's own body, the same
+as C++/Java/C#'s `protected` — not stricter, and with zero extra
+bookkeeping needed to support it.
+
+```
+class LoggingVault extends Vault {
+    pub depositLogged(amount, pin) {
+        self.checkPin pin ? print "PIN accepted." : print "PIN rejected."
+        self.deposit amount, pin
+    }
+}
+
+var logging = LoggingVault()
+logging.depositLogged 50, 1234   # reaches Vault's private checkPin fine
+```
+
+### Inheritance
+
+**Single inheritance** via `extends`. The VM copies the superclass's
+whole method table into the subclass once, at `extends`-time (`ObjClass`'s
+`methods` map) — Iqalox has no syntax for adding methods to a class after
+it's declared, so there's no need for a live pointer-chain walk instead:
+
+```
+class A { pub greet() { print "A"; } }
 class B extends A { }
 B().greet()   # A -- B has no override, inherits A's
 ```
@@ -507,34 +817,148 @@ B().greet()   # A -- B has no override, inherits A's
   *written in*, not the actual runtime class of the calling instance. A
   three-level hierarchy where only the middle class overrides and calls
   `super` demonstrates this: the grandchild still ends up invoking the
-  grandparent's method through the middle class's `super` call, regardless
-  of which subclass instance it's called on. Ordinary (non-`super`) method
-  calls, in contrast, dispatch dynamically against the receiver's actual
-  runtime class — so an inherited method calling `self.method()` correctly
-  reaches a subclass's override.
+  grandparent's method through the middle class's `super` call,
+  regardless of which subclass instance it's called on. Ordinary
+  (non-`super`) method calls, in contrast, dispatch dynamically against
+  the receiver's actual runtime class — so an inherited method calling
+  `self.method()` correctly reaches a subclass's override.
 - **Extending a non-class value** (`class B extends NotAClass { }` where
   `NotAClass` isn't a class) is a runtime error, checked when the `class`
   statement executes.
-- **New for `0.1`**: a class can reference itself by name from inside its
-  own methods — `0.1-poc` had no placeholder-then-patch binding step to
-  support this (see [§13](#13-known-limitations) in
-  `docs/LANGUAGE-POC.md`); `0.1`'s resolver defines the class's own name
-  in scope before resolving its methods, so a method can look itself, or
-  another instance of the same class, up by name.
-- Printing a class value itself shows `<class Duck>`; printing an instance
-  shows `<Duck instance>`.
-- **Out of scope for `0.1`** (deferred to `0.2`, per
-  `docs/PLAN-0.1-POC.md` decision 5): getters/setters, mixins (`with`),
-  and traits (`trait`/`use`). Only plain field access and baseline Lox
-  method dispatch exist today.
+- A class can reference itself by name from inside its own methods — the
+  resolver defines the class's own name in scope before resolving its
+  methods, so a method can look itself, or another instance of the same
+  class, up by name.
+- A subclass **redeclaring** a property already declared by an ancestor
+  is a compile-time error — properties have no override semantics
+  (methods do; see [§12](#12-mixins-and-traits) for how this extends to
+  `with`-mixed-in and `use`-traited members too).
+- Printing a class value itself shows `<class Duck>`; printing an
+  instance shows `<Duck instance>`.
 
-## 11. The standard library (so far)
+## 12. Mixins and traits
 
-`0.1` has exactly two builtin functions, both registered as ordinary
-(shadowable, non-keyword) global bindings by the VM before any user
-statement runs (`vm/src/natives.hpp`/`.cpp`) — there is no
-`printStmt`/`concatStmt`, and no reserved-word status protects their
-names:
+**New for `0.2`.** Beyond single inheritance, a class can compose members
+from other sources two different ways, split by keyword: **traits**
+(`trait`/`use`) and **mixins** (`with`). They look similar on the surface
+but work completely differently underneath, and that difference is
+deliberate and visible.
+
+### Traits (`trait`/`use`): compile-time static copying
+
+```
+trait Flyable {
+    pub fly() { print "Flying!"; }
+}
+
+trait Swimmable {
+    pub swim() { print "Swimming!"; }
+}
+
+class Duck {
+    use Flyable, Swimmable
+
+    pub quack() { print "Quack!"; }
+}
+
+var duck = Duck()
+duck.fly()    # Flying!
+duck.swim()   # Swimming!
+duck.quack()  # Quack!
+```
+
+A `trait` is grammared like a class body (properties, methods, and even
+nested `use` of other traits) but has **zero runtime representation** —
+`use Flyable, Swimmable` statically inlines the named traits' members
+into `Duck` entirely at **compile time** (`compiler/src/Resolver.fs`),
+the same way PHP's `trait`/`use` works. A trait-provided method's `self`
+and `super` resolve relative to the *using* class, not the trait itself.
+Because a trait never exists at runtime, it can never be the target of
+`extends` or `with` — only a real class can be mixed in that way (see
+below).
+
+### Mixins (`with`): runtime composition
+
+```
+class Named {
+    pub greet() { print "Hello!"; }
+}
+
+class Robot with Named {
+    pub beep() { print "Beep boop."; }
+}
+
+var robot = Robot()
+robot.greet()   # Hello!
+robot.beep()    # Beep boop.
+```
+
+`with` composes a **real, independently-instantiable class**'s already-
+compiled methods and properties into the composing class at **runtime**,
+via a dedicated `Mixin` opcode (mirroring how `extends`/`Inherit` copies
+a superclass's members in, except the mixin's own value is discarded
+afterward — it's never needed again). `with` can combine with `extends`
+on the same class:
+
+```
+class Vehicle { pub honk() { print "Honk!"; } }
+class Winged { pub fly() { print "Zoom!"; } }
+
+class FlyingCar extends Vehicle with Winged {
+    pub drive() { print "Driving."; }
+}
+
+var car = FlyingCar()
+car.honk()    # Honk!
+car.fly()     # Zoom!
+car.drive()   # Driving.
+```
+
+`0.2` ships a **simplified, non-C3-linearized** composition algorithm for
+`with` — multiple mixins compose independently rather than through a
+full C3 method-resolution-order chain, and `super` does **not** chain
+through a `with`-mixin the way it does through `extends`. A full
+Scala-style linearization is deliberately deferred; see `ROADMAP.md`'s
+"Language feature ideas under consideration" for the reasoning.
+
+### Conflict resolution
+
+Two composed sources — two used traits, a used trait and the class's own
+superclass, two `with`-mixins, or a mixin and the superclass — sharing a
+member name is a **compile-time error**. There is no `insteadof`/`as`-style
+disambiguation syntax (PHP has one; `0.2`'s grammar doesn't); the only
+ways out are renaming one of the conflicting members, or declaring the
+member directly on the composing class, which **always silently wins**
+over anything composed in:
+
+- For **methods**, the composing class's own literal declaration
+  overriding a composed one is ordinary polymorphism — no error, no
+  special syntax needed.
+- For **properties**, redeclaring one already provided by a composed
+  source is **still a compile-time error** — properties have no override
+  semantics at all (see [§11](#11-classes-and-objects)), so "the class's
+  own body wins" doesn't extend to silently accepting a property
+  redeclaration the way it does for methods.
+
+```
+trait A { pub greet() { print "A"; } }
+trait B { pub greet() { print "B"; } }
+
+class C {
+    use A, B   # compile-time error: 'greet' is provided by both A and B
+}
+```
+
+## 13. The standard library
+
+`0.2` has a substantially larger standard library than `0.1`'s two
+functions, all registered as ordinary (shadowable, non-keyword) global
+bindings — there is no reserved-word status protecting any of these
+names, and shadowing one (`var length = ...`) at the top level is a
+compile-time error (redeclaring an existing global) exactly like
+redeclaring any other global; shadowing inside a nested scope is fine.
+
+### Core
 
 - **`print value`** — stringifies `value` (see [§3](#3-values-and-types)'s
   stringification rules: `nil` → `nil`, floats drop a trailing `.0`,
@@ -543,178 +967,241 @@ names:
   them with no separator, returning the resulting string. This is
   currently the *only* way to build a string from non-string values or to
   join strings together, since `+` doesn't work on strings
-  ([§3](#3-values-and-types)). A non-vector argument is a runtime error
-  (`Argument to 'concat' must be a vector, got <type>.`).
+  ([§3](#3-values-and-types)). A non-vector argument is a runtime error.
 
 ```
 concat ["a", 1, "b"]   # "a1b"
 ```
 
-Because these are just values, they can be shadowed like any other name —
-attempting to `var print = ...`/`var concat = ...` at the **top level**
-is a compile-time error (redeclaring an existing global), the same as
-redeclaring any other global; shadowing inside a nested scope is fine:
+### Array manipulation
+
+`push`, `pop`, `length`, and `reverse` are true natives
+(`vm/src/natives.cpp`) — they operate directly on an `ObjVector`'s
+storage and never call back into user code:
+
+- **`push vector, value`** — appends `value` to `vector` **in place**.
+  Returns `nil`.
+- **`pop vector`** — removes and returns the last element of `vector`
+  **in place**. A runtime error on an empty vector.
+- **`length vector`** — returns the element count as a number.
+- **`reverse vector`** — returns a **new** vector with elements in
+  reverse order; does not mutate the original.
+
+`map`, `filter`, `reduce`, and `sort` are not natives — they're ordinary
+Iqalox `fun` declarations (`compiler/src/Prelude.fs`), textually
+prepended to every program's source before it's compiled, using the same
+paren-free call syntax and lambda syntax any user program has. They take
+a lambda as their first argument and never mutate their vector
+argument(s):
+
+- **`map fn, vector`** — returns a new vector of `fn(element)` applied to
+  each element.
+- **`filter fn, vector`** — returns a new vector of only the elements for
+  which `fn(element)` is truthy.
+- **`reduce fn, vector, initial`** — folds `vector` left-to-right via
+  `acc = fn(acc, element)`, starting from `initial`, returning the final
+  accumulator.
+- **`sort fn, vector`** — returns a new, sorted vector; `fn(a, b)` should
+  return truthy when `a` belongs before `b` (e.g. `(a, b) -> a < b` for
+  ascending, `(a, b) -> a > b` for descending).
 
 ```
-fun test() {
-    var print = 42   # shadows the builtin inside this function only
-    return print
-}
+var v = [3, 1, 4, 1, 5]
+print (map (x) -> x * 2, v)              # [6, 2, 8, 2, 10]
+print (filter (x) -> x % 2 == 0, v)      # [4]
+print (reduce (a, b) -> a + b, v, 0)     # 14
+print (sort (a, b) -> a < b, v)          # [1, 1, 3, 4, 5]
+```
+
+### Matrix manipulation
+
+A matrix is a vector of vectors, indexed one level at a time (see
+[§9](#9-vectors-indexing-cons-comprehensions-and-spread)). `transpose`,
+`multiply`, `add`, and `subtract` are true natives that validate their
+argument(s) are a genuinely **rectangular** matrix (every row the same
+length) and raise a dedicated, clearly-worded runtime error on a shape
+mismatch (e.g. multiplying a 2x3 by a 4x2 matrix):
+
+- **`transpose matrix`** — returns a new MxN → NxM transposed matrix.
+- **`multiply a, b`** — matrix product; `a`'s column count must equal
+  `b`'s row count.
+- **`add a, b`** / **`subtract a, b`** — elementwise sum/difference;
+  `a` and `b` must be the same shape.
+
+`elementwise fn, a, b` is, like `map`/`filter`/`reduce`/`sort`, ordinary
+Iqalox source (`compiler/src/Prelude.fs`) rather than a native — it
+applies `fn(a[i][j], b[i][j])` across every position and returns the
+resulting matrix, but **deliberately does not validate** that `a` and `b`
+are the same shape the way the four natives above do: since there's no
+`try`/`throw` construct for Prelude-level Iqalox code to raise a
+dedicated error with, a shape mismatch here just falls through to the
+ordinary "vector index out of range" error a step later — a real,
+non-crashing runtime error either way, just not a custom-worded one.
+
+```
+var a = [[1, 2], [3, 4]]
+var b = [[5, 6], [7, 8]]
+
+print transpose a                        # [[1, 3], [2, 4]]
+print multiply a, b                      # [[19, 22], [43, 50]]
+print add a, b                           # [[6, 8], [10, 12]]
+print subtract a, b                      # [[-4, -4], [-4, -4]]
+print elementwise (x, y) -> x * y, a, b  # [[5, 12], [21, 32]]
 ```
 
 Everything else commonly found in a language's standard library — string
-manipulation beyond `concat`, array/vector manipulation, math beyond the
-operators in [§5](#5-operators-and-precedence), I/O, collections beyond
-vector literals — is **not implemented yet**; see `ROADMAP.md`'s "Standard
-library vision" section for what's planned and roughly when.
+manipulation beyond `concat`, math beyond the operators in
+[§5](#5-operators-and-precedence), I/O, collections beyond vectors — is
+**not implemented yet**; see `ROADMAP.md`'s "Standard library vision"
+section for what's planned and roughly when.
 
-## 12. Errors
+## 14. Errors
 
-Iqalox distinguishes two error phases, both of which currently **abort the
-whole program** — there is no way for Iqalox source code to catch or
+Iqalox distinguishes two error phases, both of which currently **abort
+the whole program** — there is no way for Iqalox source code to catch or
 recover from either kind:
 
 - **Compile-time errors** — scan errors (e.g. an unterminated string, an
   invalid escape sequence, an unexpected character), parse errors (e.g. a
   malformed ternary), resolve errors (e.g. reassigning an immutable
-  variable, using `super` outside a subclass), and codegen errors (e.g.
-  `break` outside a loop). `iqaloxc` reports each as `[line N] Error:
-  message` to stderr and exits with status `65`. Compilation never
-  reaches the VM at all if any stage reports an error.
-- **Runtime errors** — e.g. assigning to an immutable variable was already
-  caught above, but wrong arity, dividing by zero, a non-number operand to
-  an arithmetic/comparison operator, an undefined variable/property,
-  reading a `var mut` before its first assignment, extending a non-class,
-  calling a non-callable value. `iqaloxvm` reports the message plus
-  `[line N]` to stderr and exits with status `70`, after whatever output
-  was already produced. The line comes from a per-instruction-byte line
-  table the bytecode format carries alongside the instructions themselves
-  (format v2, `compiler/src/Bytecode.fs`) — every emitted instruction is
-  stamped with whichever source token `Codegen.fs` most recently had in
-  view, the same way `clox` stamps every byte it emits with the parser's
-  current line.
+  variable, using `super` outside a subclass, an undeclared property, a
+  trait/mixin member conflict), and codegen errors (e.g. `break` outside
+  a loop). `iqaloxc` reports each as `[line N] Error: message` to stderr
+  and exits with status `65`. Compilation never reaches the VM at all if
+  any stage reports an error.
+- **Runtime errors** — e.g. wrong arity, dividing by zero, a non-number
+  operand to an arithmetic/comparison operator, an undefined
+  variable/property, reading a `var mut` (or non-`mut` property) before
+  its first assignment, reassigning a non-`mut` property a second time,
+  an out-of-range vector index, extending/mixing-in a non-class,
+  external access to a non-`pub` member, calling a non-callable value.
+  `iqaloxvm` reports the message plus `[line N]` to stderr and exits with
+  status `70`, after whatever output was already produced. The line
+  comes from a per-instruction-byte line table the bytecode format
+  carries alongside the instructions themselves — every emitted
+  instruction is stamped with whichever source token `Codegen.fs` most
+  recently had in view, the same way `clox` stamps every byte it emits
+  with the parser's current line.
 
 **Remaining, smaller gap versus `0.1-poc`**: `0.1-poc` additionally shows
 *which token* triggered the error (`Error at 'x': ...`) plus a caret-
-underlined source excerpt, for both compile-time and runtime errors. `0.1`
-has real line numbers for both now, but not yet the token text or source
-excerpt — the VM in particular has no access to the original source text
-at all (it only ever receives a compiled `.iqbc` file), so reproducing
-`0.1-poc`'s excerpt there would need embedding source text in the bytecode
-format, not just a line table. See [§13](#13-known-limitations) item 7.
+underlined source excerpt, for both compile-time and runtime errors.
+`0.2` has real line numbers for both, but not yet the token text or
+source excerpt — the VM in particular has no access to the original
+source text at all (it only ever receives a compiled `.iqbc` file), so
+reproducing `0.1-poc`'s excerpt there would need embedding source text in
+the bytecode format, not just a line table. See
+[§15](#15-known-limitations) item 8.
 
 There is no `try`/`catch`/`throw` construct in the language itself.
 
-## 13. Known limitations
+## 15. Known limitations
 
-These are documented tradeoffs and open items, not undiscovered bugs — see
-`docs/PLAN-0.1.md` and `docs/PLAN-0.1-POC.md` for the full history of how
-each was arrived at.
+These are documented tradeoffs and open items, not undiscovered bugs —
+see `docs/PLAN-0.2.md`, `docs/PLAN-0.1.md`, and `docs/PLAN-0.1-POC.md`
+for the full history of how each was arrived at.
 
-1. **Vectors are literals only.** `[1, 2, 3]` produces a value with no
-   indexing, mutation, length, or other operations — full array support is
-   `0.2` scope.
-2. **No string concatenation via `+`.** `"a" + "b"` is a runtime error
+1. **No string concatenation via `+`.** `"a" + "b"` is a runtime error
    (arithmetic `+` requires both operands to be numbers); use `concat
    ["a", "b"]` instead.
-3. **Object fields have no immutability concept at all.** Unlike `var`,
-   `self.x = ...` is always allowed, both the first time and on every
-   later reassignment — there's no `mut`-equivalent for fields, and no
-   field-declaration syntax to hang one on even if there were.
-4. **Chaining `.method()` straight onto a call that itself takes an
+2. **Chaining `.method()` straight onto a call that itself takes an
    argument is ambiguous, and currently binds to the argument, not the
    outer call.** `B "Bea".greet()` parses as `B(("Bea").greet())`, not
    `(B("Bea")).greet()` — there's no parenthesis marking where a
-   paren-free call's argument list ends, unlike Lox's `f(x).y`. Workaround:
-   bind the call's result to a variable first, or wrap the whole call in
-   its own grouping parens (`(B "Bea").greet()`).
-5. **No built-in methods on primitive values.** Numbers, strings,
-   booleans, and vectors have no methods of their own (`"hi".length()`
-   doesn't exist) — only user-defined class instances support method
-   dispatch.
-6. **No concurrency, no exception handling, no reflection/metaprogramming**
+   paren-free call's argument list ends, unlike Lox's `f(x).y`. The same
+   ambiguity applies to indexing: `f x[0]` binds `[0]` to `x`, not to
+   `f`'s result. Workaround: bind the call's result to a variable first,
+   or wrap the whole call in its own grouping parens (`(B "Bea").greet()`).
+3. **No built-in methods on primitive values.** Numbers, strings, and
+   booleans have no methods of their own (`"hi".length()` doesn't
+   exist); vectors gain real standard-library functions in `0.2`
+   ([§13](#13-the-standard-library)), but as ordinary global functions,
+   not vector *methods* — `v.length()` still doesn't exist, only
+   `length v`.
+4. **No concurrency, no exception handling, no reflection/metaprogramming**
    exist at the language level (see [§1](#1-introduction-and-classification)).
-7. **No token text or source excerpt on errors, unlike `0.1-poc`.**
+5. **List comprehensions support exactly one generator and no guard
+   clause.** `[x * 2 | x <- xs, x > 0]`-style filtering isn't available —
+   use `filter` first, or `reduce`, instead. A richer multi-generator/
+   guarded form is sketched as future scope in `ROADMAP.md`.
+6. **`with`-mixin composition is simplified, not full C3 linearization.**
+   Multiple mixins compose independently rather than through a real
+   method-resolution-order chain, and `super` doesn't chain through a
+   `with`-mixin the way it does through `extends`. Deferred deliberately
+   (see [§12](#12-mixins-and-traits)); a full C3 algorithm is logged in
+   `ROADMAP.md` as a future idea, not committed scope.
+7. **No trait member-conflict disambiguation syntax.** PHP's `insteadof`/
+   `as` have no equivalent here — a conflict between two composed sources
+   is always a hard compile-time error; the only ways out are renaming or
+   redeclaring the member directly on the composing class
+   ([§12](#12-mixins-and-traits)).
+8. **No token text or source excerpt on errors, unlike `0.1-poc`.**
    `0.1-poc` reports both compile-time and runtime errors as `[line N]
    Error at 'x': message` plus a caret-underlined single-line source
-   excerpt. `0.1` reports a real `[line N]` for every error kind
-   (including runtime errors, via a per-instruction-byte line table in the
-   bytecode format itself — format v2, `compiler/src/Bytecode.fs`), but
-   not yet the offending token's text or a source excerpt. This was
-   originally a bigger, confirmed regression (no line number *at all* on
-   runtime errors or codegen errors) found while writing this document,
-   not caught by the Phase 9 conformance suite (which only diffs
-   successful-run stdout, not error-path stderr/exit codes) — the line-
-   number part is now fixed; the excerpt/token-text part remains open,
-   and for the VM specifically would need embedding source text in the
-   bytecode format (it only ever receives a compiled `.iqbc` file, never
-   the original source), not just a line table.
-8. **Leading-underscore identifiers scan correctly here but not in
-   `0.1-poc`.** Fixed in `compiler/src/Scanner.fs` (`docs/PLAN-0.1.md`
-   Phase 2) but not carried back into `poc/`, since decoupling
-   the two implementations' bugfix schedules is the deliberate model going
-   forward (see `docs/PLAN-0.1-POC.md`'s running list) — see
-   `docs/LANGUAGE-POC.md` §13 for the `0.1-poc`-side version of this
-   limitation.
+   excerpt. `0.2` reports a real `[line N]` for every error kind
+   (including runtime errors, via a per-instruction-byte line table in
+   the bytecode format itself), but not yet the offending token's text or
+   a source excerpt. The excerpt/token-text part remains open, and for
+   the VM specifically would need embedding source text in the bytecode
+   format (it only ever receives a compiled `.iqbc` file, never the
+   original source), not just a line table.
 9. **A vector literal or grouping expression can't span multiple lines.**
-   `compiler/src/Scanner.fs` turns *every* newline into an implicit
-   `;` unconditionally, with no awareness of bracket/paren depth — so
+   The scanner turns *every* newline into an implicit `;`
+   unconditionally, with no awareness of bracket/paren depth — so
    `print (\n1 + 2\n)` or a `[...]` literal split across lines both fail
    with `Expect expression.` at the line following the opening bracket,
    the newline having already terminated the "statement" right after it.
-   Found while writing a `0.2`-target example (`docs/PLAN-0.2.md` Phase
-   1), not by any existing test, since every fixture up to now happened
-   to keep every bracketed expression on one line. Not fixed here —
-   making the scanner bracket-depth-aware is a real scanner change with
-   its own test surface, out of scope for the indexing work that
-   surfaced it.
+   Not fixed here — making the scanner bracket-depth-aware is a real
+   scanner change with its own test surface.
 10. **A non-identifier callee can't be called at all, with or without
-    parentheses.** `CallHead()`'s "am I followed by something that looks
-    like an argument" check only ever runs for a bare `IDENTIFIER` (or,
-    indirectly, a property/method access via `FinishPropertyAccess`) —
-    a grouped expression never gets that treatment, so neither
-    `(f) 5` nor even `(f)()` parses (`Expect line break or ';' after
-    expression.`); the callee has to be bound to a name first. Pre-existing
-    since `0.1`'s original call grammar, not new here, but newly relevant
-    once lambdas (`0.2`, `docs/PLAN-0.2.md` Phase 2) make "produce a
-    callable value inline" common — an immediately-invoked lambda
-    expression isn't currently expressible.
+    parentheses.** The "am I followed by something that looks like an
+    argument" check only ever runs for a bare `IDENTIFIER` (or,
+    indirectly, a property/method access), so a grouped expression never
+    gets that treatment — neither `(f) 5` nor even `(f)()` parses; the
+    callee has to be bound to a name first. This makes an
+    immediately-invoked lambda expression currently inexpressible: `((x)
+    -> x + 1) 5` doesn't parse, even though `(x) -> x + 1` is a perfectly
+    valid lambda value once bound to a variable.
 11. **A one-line block whose last statement is a bare `return <value>`
-    needs an explicit trailing `;` before the closing `}`.** `Scanner.fs`'s
-    ASI only ever fires on an actual newline, so `fun f(x) { return x }`
-    (everything on one line) fails to parse (`Expect line break or ';'
-    after return value.`) — the closing `}` doesn't itself imply a
-    statement terminator. Writing the body across multiple lines (or an
-    explicit `; }`) works fine, and every fixture in this repository
-    already does one or the other, which is why this went unnoticed until
-    `docs/PLAN-0.2.md` Phase 5's array-stdlib prelude tried the single-line
-    form. Not fixed here — a real scanner change (teaching ASI that `}`
-    also implies a terminator, mirroring how many C-like languages'
-    "automatic semicolon insertion" rules work) with its own test surface,
-    out of scope for a stdlib-functions phase.
-12. **A runtime error raised from inside a `docs/PLAN-0.2.md` Phase 5
-    prelude function (`map`/`filter`/`reduce`/`sort`) reports a `[line N]`
-    relative to the prelude's own source text, not the user's file.**
-    `Program.fs` scans and parses `Prelude.fs`'s embedded source
-    separately from the user's own, purely so a failure in each can be
-    attributed correctly at *compile* time — but once both are merged
-    into one program and compiled to one `Chunk`, a *runtime* fault
-    raised from inside a prelude function's own closure body carries that
-    function's own internal line number (1-based within `Prelude.fs`'s
-    `source` string), with nothing to indicate it came from a different
-    "file" than the one the user is looking at. Not solved here — nothing
-    in this pipeline has ever needed multi-file source-position tracking
-    before now, and adding it is a bigger change than this stdlib phase's
-    own scope.
+    needs an explicit trailing `;` before the closing `}`.** ASI only
+    ever fires on an actual newline, so `fun f(x) { return x }`
+    (everything on one line) fails to parse — the closing `}` doesn't
+    itself imply a statement terminator. Writing the body across multiple
+    lines (or an explicit `; }`) works fine. Not fixed here — a real
+    scanner change (teaching ASI that `}` also implies a terminator,
+    mirroring how many C-like languages' "automatic semicolon insertion"
+    rules work) with its own test surface.
+12. **A runtime error raised from inside a `map`/`filter`/`reduce`/`sort`/
+    `elementwise` prelude function reports a `[line N]` relative to the
+    prelude's own source text, not the user's file.** `Program.fs` scans
+    and parses `Prelude.fs`'s embedded source separately from the user's
+    own, purely so a failure in each can be attributed correctly at
+    *compile* time — but once both are merged into one program and
+    compiled to one `Chunk`, a *runtime* fault raised from inside a
+    prelude function's own closure body carries that function's own
+    internal line number (1-based within `Prelude.fs`'s `source`
+    string), with nothing to indicate it came from a different "file"
+    than the one the user is looking at. Not solved here — nothing in
+    this pipeline has ever needed multi-file source-position tracking
+    before now.
+13. **`elementwise`'s shape-mismatch behavior is generic, not
+    dedicated.** Unlike `transpose`/`multiply`/`add`/`subtract` (true
+    natives with clean, custom-worded shape-validation errors),
+    `elementwise` is ordinary Iqalox source with no `throw`/`raise`
+    construct available to it — a shape mismatch surfaces as the
+    ordinary "vector index out of range" error a step later, not a
+    dedicated shape-mismatch message. See [§13](#13-the-standard-library).
 
-The following `0.1-poc` limitations are **resolved** as of `0.1` (see
-`docs/LANGUAGE-POC.md` §13 for their original write-ups): no escape
-sequences in string literals (now fixed, §2 above), immutability
-enforcement being runtime-only rather than compile-time (now fixed, §4
-above), and classes being unable to reference themselves by name (now
-fixed, §10 above).
+The following limitations from earlier versions are **resolved** as of
+`0.2` (see `docs/LANGUAGE-0.1.md` §13 for their original write-ups):
+vectors being literal-only with no indexing/mutation/length (now fixed,
+[§9](#9-vectors-indexing-cons-comprehensions-and-spread),
+[§13](#13-the-standard-library)), and object fields having no
+immutability or declaration concept at all (now fixed,
+[§11](#11-classes-and-objects) — properties must be declared and default
+to write-once).
 
-## 14. Grammar and precedence reference
+## 16. Grammar and precedence reference
 
 The authoritative, up-to-date grammar lives in
 `langspec/SYNTAX_GRAMMAR.md`; the precedence table (same information,

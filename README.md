@@ -4,10 +4,11 @@ Iqalox is a programming language based on Lox, from Bob Nystrom's
 [Crafting Interpreters](http://craftinginterpreters.com/), mutated and extended to suit the author's
 preferences and interests. "*Iqalox*" is a play on the Kalaallisut word for Arctic char, *Eqaluk*, and *Lox*.
 
-`0.1` is the current, primary implementation: a compiler frontend (F#, `compiler/`) that compiles `.iqx`
+`0.2` is the current, primary implementation: a compiler frontend (F#, `compiler/`) that compiles `.iqx`
 source to a bytecode file, executed by a stack-based virtual machine (modern C++23, `vm/`). This repository
 also keeps `poc/` around — the original `0.1-poc` proof of concept, a Python tree-walk interpreter — as a
-frozen, working reference implementation, now that `0.1` has reached feature parity with it.
+frozen, working reference implementation, and `docs/LANGUAGE-0.1.md` documents the earlier `0.1` milestone,
+which `0.2` has superseded.
 
 ## Getting started
 
@@ -30,17 +31,17 @@ cmake --build vm/build --target iqaloxvm -j
 Either way, running a program is a two-step pipeline — compile to bytecode, then run it:
 
 ```sh
-iqaloxc langspec/versions/0.1/examples/classes.iqx classes.iqbc
+iqaloxc langspec/examples/classes.iqx classes.iqbc
 iqaloxvm classes.iqbc
 ```
 
 (If you built from source instead of downloading a release, replace `iqaloxc` with
 `dotnet run --project compiler/src/Iqaloxc.fsproj --` and `iqaloxvm` with `vm/build/iqaloxvm`.)
 
-See `docs/LANGUAGE.md` for the full `0.1` language reference (with plenty of runnable examples and a list
-of known limitations), `ROADMAP.md` for the version plan, and `docs/LANGUAGE-POC.md` for the frozen
-`0.1-poc`-era reference. You'll find the **syntax grammar** in `langspec/`; the **lexical grammar** and
-**precedence rules** are presented below.
+See `docs/LANGUAGE.md` for the full `0.2` language reference (with plenty of runnable examples and a list
+of known limitations), `ROADMAP.md` for the version plan, and `docs/LANGUAGE-0.1.md`/`docs/LANGUAGE-POC.md`
+for the frozen `0.1`/`0.1-poc`-era references. You'll find the **syntax grammar** in `langspec/`; the
+**lexical grammar** and **precedence rules** are presented below.
 
 ## Lexical Grammar ##
 
@@ -73,3 +74,16 @@ Listed tightest-binding (evaluated first) to loosest. `%`/`^` share
 `*`/`/`'s precedence level rather than binding tighter, unlike some other
 languages. `?:` is the elvis short form of the ternary (`a ?: b` ≡
 `a ? a : b`) at the same precedence as the full `? :` form.
+
+This table covers infix/prefix *operators* specifically — it has never
+listed member access (`.`), since that's postfix call-chain syntax, not
+an operator with a precedence level relative to the others. `0.2` adds
+more syntax in that same postfix/structural category, which for the same
+reason doesn't appear as a table row either: indexing (`v[i]`) chains
+onto `call` exactly like `.` does and binds tighter than any operator
+above; lambdas (`(params) -> expr`), cons (`[item | list]`), list
+comprehensions (`[expr | x <- xs]`), and vector-literal spread
+(`[...v]`) are all literal/primary-expression forms, not operators
+applied to an existing expression. See `langspec/SYNTAX_GRAMMAR.md`'s
+`call`/`primary`/`vector` productions for exactly how each of those
+parses.

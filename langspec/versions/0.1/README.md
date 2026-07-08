@@ -11,7 +11,7 @@ enforcement, and classes referencing themselves by name from inside their own me
 This directory holds the language specification (this README, `SYNTAX_GRAMMAR.md`, and
 the runnable examples under `examples/`) for the `0.1` milestone. See `../ROADMAP.md`
 for the full version plan, `../docs/PLAN-0.1.md` for the detailed implementation log,
-and `../docs/LANGUAGE.md` for the complete, prose language reference (this file and
+and `../docs/LANGUAGE-0.1.md` for the complete, prose language reference (this file and
 `SYNTAX_GRAMMAR.md` are the terser grammar-level counterpart). `../archived/` holds
 frozen snapshots of earlier *planning* iterations — historical record, not the current
 spec, and not the same thing as this directory's own versioned snapshots (see the
