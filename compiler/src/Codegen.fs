@@ -90,6 +90,7 @@ let rec private lineOfExpr (expr: BoundExpr) : int option =
     | BSet(_, name, _) -> Some name.Line
     | BIndex(_, _, bracket) -> Some bracket.Line
     | BIndexSet(_, _, _, bracket) -> Some bracket.Line
+    | BSlice(_, _, _, bracket) -> Some bracket.Line
     | BLambda decl -> Some decl.Name.Line
     | BVectorLengthInternal vector -> lineOfExpr vector
     | BVectorAppendInternal(vector, _) -> lineOfExpr vector
@@ -172,6 +173,8 @@ let private stackEffect (instr: Instruction) : int =
     | VectorAppend -> -2
     // Pops source + target, pushes target back: net -1.
     | VectorExtend -> -1
+    // Pops obj + start + stop, pushes the new sliced vector: net -2.
+    | GetSlice -> -2
 
 type private LoopContext =
     { BreakTargetDepth: int
@@ -464,6 +467,15 @@ type private Codegen() =
             this.CompileExpr index
             this.CompileExpr value
             state.Emit SetIndex |> ignore
+        | BSlice(obj, start, stop, _) ->
+            this.CompileExpr obj
+            match start with
+            | Some s -> this.CompileExpr s
+            | None -> state.Emit Nil |> ignore
+            match stop with
+            | Some s -> this.CompileExpr s
+            | None -> state.Emit Nil |> ignore
+            state.Emit GetSlice |> ignore
         | BLambda decl -> this.CompileFunctionValue(decl, isMethod = false)
         | BSpread _ ->
             // `Ast.Spread`'s doc comment: `Parser.fs` only ever produces

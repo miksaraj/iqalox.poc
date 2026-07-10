@@ -689,6 +689,8 @@ type private Resolver(globals: Dictionary<string, bool>, classes: Dictionary<str
         | Index(obj, index, bracket) -> BIndex(this.ResolveExpr obj, this.ResolveExpr index, bracket)
         | IndexSet(obj, index, value, bracket) ->
             BIndexSet(this.ResolveExpr obj, this.ResolveExpr index, this.ResolveExpr value, bracket)
+        | Slice(obj, start, stop, bracket) ->
+            BSlice(this.ResolveExpr obj, start |> Option.map this.ResolveExpr, stop |> Option.map this.ResolveExpr, bracket)
         | Lambda(parameters, arrow, body) ->
             // Desugars to a nameless FunctionDecl with a single implicit
             // `return` statement, then resolves exactly like a nested

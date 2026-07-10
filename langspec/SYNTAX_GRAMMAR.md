@@ -1,16 +1,14 @@
 # Syntax Grammar for Iqalox (0.3)
-*WIP — target spec, not yet phased into `compiler/`+`vm/` at all
-(`docs/PLAN-0.3.md` is still being drafted, no phases have landed); see
-that document's §4 feature checklist once it exists for what's actually
-landed so far.*
+*WIP — target spec, phased into `compiler/`+`vm/` incrementally
+(`docs/PLAN-0.3.md` §5); see that document's §4 feature checklist for
+what has actually landed so far.*
 
-This is currently an exact copy of `0.2`'s frozen grammar
-(`langspec/versions/0.2/SYNTAX_GRAMMAR.md`) — `0.3` planning has only
-just begun, and no `0.3` design decisions have been finalized yet, so
-there is nothing new to add here. This file will grow "Notes: new for
-`0.3`" sections and new grammar productions as `docs/PLAN-0.3.md`'s design
-decisions are actually resolved, the same way `0.2`'s own top-level
-grammar grew from `0.1`'s.
+This is `0.2`'s grammar (`langspec/versions/0.2/SYNTAX_GRAMMAR.md`) plus
+everything `docs/PLAN-0.3.md` §1 has resolved for `0.3` so far: slices.
+Negative indexing needed no new grammar at all (see below). This file
+will keep growing new "Notes: new for `0.3`" entries and grammar
+productions as more of `docs/PLAN-0.3.md`'s design decisions land, the
+same way `0.2`'s own top-level grammar grew from `0.1`'s.
 
 ## Notes: inherited from `0.1`, unchanged
 
@@ -114,6 +112,24 @@ grammar grew from `0.1`'s.
   about what a program *means*, not what parses — both `use A, B` and
   `with M1, M2` parse unambiguously today regardless of how those
   questions resolve.
+
+## Notes: new for `0.3`
+
+* **Negative indices (`v[-1]`) need no new grammar at all** — `-1`
+  already parses as an ordinary `unary` expression inside the existing
+  `"[" expression "]"` production; only the runtime bounds check changed
+  (`docs/LANGUAGE.md` §9), not anything in this file.
+* **Slices (`v[a:b]`) are a genuinely new `call` postfix form**,
+  `docs/PLAN-0.3.md` decision 3: `"[" expression? ":" expression? "]"`,
+  replacing the plain indexing alternative whenever a top-level `:`
+  appears before the closing `]`. Told apart from plain indexing by
+  scanning ahead (without consuming anything) for that `:` at the
+  bracket's own nesting depth, skipping over any ternary `? :` pair at
+  that same depth along the way — `v[cond ? a : b]` (a ternary used as a
+  plain index) still parses as ordinary indexing, not a slice, since its
+  `?` is seen before its `:`. No slice-assignment production exists
+  (`v[a:b] = ...` is not valid syntax) — slices are read-only this
+  version.
 ##
     program         → declaration* EOF ;
 
@@ -172,7 +188,8 @@ grammar grew from `0.1`'s.
 
     unary           → ( "!" | "-" ) unary | call ;
     call            → call_head ( "." IDENTIFIER arguments?
-                                 | "[" expression "]" )* ;
+                                 | "[" expression "]"
+                                 | "[" expression? ":" expression? "]" )* ;
     call_head       → IDENTIFIER arguments?
                     | primary ;
     arguments       → "(" ")"

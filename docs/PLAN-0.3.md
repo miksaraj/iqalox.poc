@@ -232,8 +232,8 @@ each one, verified via new tests (§6).
 
 | Feature | Design decision(s) | Status |
 |---|---|---|
-| Negative vector indices (get/set) | §1.2 | Not started |
-| Slices (`v[a:b]`, end-inclusive, read-only) | §1.3 | Not started |
+| Negative vector indices (get/set) | §1.2 | Done |
+| Slices (`v[a:b]`, end-inclusive, read-only) | §1.3 | Done |
 | Multi-generator list comprehensions | §1.1 | Not started |
 | List comprehension guard clause | §1.1 | Not started |
 | Unused-variable compile-time warning | §2.3 | Not started |
@@ -261,9 +261,37 @@ run, `.github/workflows/ci.yml`) is intentionally pinned to
 `0.1-poc`-equivalent semantics — can actually still run), not the newest
 frozen snapshot in general, so it's correctly left untouched.
 
-**Phase 1 — Negative indices and slices.** Extend `GetIndex`/`SetIndex`'s
-bounds check for negative offsets (decision 2); add the new slice
-grammar production, `GetSlice` opcode, and VM handler (decision 3).
+**Phase 1 — Negative indices and slices — done.** `vm/src/vm.cpp`'s
+`checkVectorIndex` now translates a negative index to `length + index`
+before bounds-checking (decision 2) — no grammar change was needed for
+this half at all, since `v[-1]` already parsed as ordinary indexing over
+a unary-minus expression; only the runtime semantics changed, and the
+error message dropped "non-negative" from its wording accordingly (still
+a hard error either direction out of range). Slices (`v[a:b]`, decision
+3) needed a real new `Ast.Slice`/`Bound.BSlice` node, one new `GetSlice`
+opcode (no `SetSlice` — slices are read-only), and a `Parser.fs`
+lookahead (`isSliceAhead`) that scans for a bracket-depth-0 `:` before
+the closing `]`, explicitly tracking (and skipping past) any ternary
+`? :` pair at that same depth so `v[cond ? a : b]` still parses as
+ordinary indexing rather than being mistaken for a slice. `Codegen.fs`
+emits a plain `Nil` instruction for whichever bound is omitted
+(`v[:3]`/`v[2:]`/`v[:]`) rather than giving `GetSlice` its own
+optional-operand encoding; `Vm::getSlice` resolves `nil` bounds to
+0/`length-1`, translates negative bounds the same way single-index access
+does, then **clamps** (rather than erroring) any bound that's still out
+of range and returns an **empty vector** rather than erroring when
+`start` resolves after `stop` — the specific clamping/empty-on-inverted
+behavior proposed in decision 3 and not separately re-confirmed.
+`langspec/examples/indexing.iqx` was extended with both features end to
+end (verified via the real `compiler/`+`vm/` toolchain), and
+`langspec/SYNTAX_GRAMMAR.md`/`docs/LANGUAGE.md` §9 both cover the new
+syntax/semantics. New tests: 11 xUnit (3 Parser disambiguation/negative-
+index/omitted-bound cases, 2 Resolver, 2 Codegen instruction-sequence,
+plus the `Slice` pattern threaded through existing shape-assertion
+tests) and 13 Catch2 (negative get/set/out-of-range, and a full slice
+matrix: basic, omitted bounds, both omitted, negative bounds, inverted
+range, out-of-range clamp, copy-not-view, non-vector receiver, non-number
+bound).
 
 **Phase 2 — Full list comprehensions.** Multi-generator (nested-loop
 desugaring) and guard-clause (decision 1) support in `Resolver.fs`'s

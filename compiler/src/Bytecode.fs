@@ -194,6 +194,16 @@ type Instruction =
     /// never needs that isolation since it never declares a *named*
     /// local, only ever chains ordinary stack-relative pushes/pops.
     | VectorExtend
+    /// Pops stop, then start, then the vector (`docs/PLAN-0.3.md`
+    /// decision 3), pushes a new vector -- both bounds are numbers or
+    /// `nil` (an omitted bound, `v[:3]`/`v[2:]`/`v[:]`; `Codegen.fs`
+    /// emits a plain `Nil` for whichever side is missing rather than
+    /// giving this opcode its own optional-operand encoding). End-
+    /// inclusive, negative-from-the-end, always a fresh copy, out-of-
+    /// range/`start > stop` bounds clamp to an empty result rather than
+    /// erroring -- see `vm/src/vm.cpp`'s handler for the exact resolution
+    /// rules.
+    | GetSlice
 
 type Constant =
     | NumberConstant of float
@@ -269,6 +279,7 @@ let private opcodeOf =
     | PropertyPub _ -> 0x34uy
     | PropertyPubMut _ -> 0x35uy
     | Mixin -> 0x36uy
+    | GetSlice -> 0x37uy
 
 /// Serialized byte length of one instruction -- see the module doc
 /// comment's "Instruction encoding" table.
@@ -300,7 +311,8 @@ let instructionByteLength (instruction: Instruction) : int =
     | SetIndex
     | VectorLength
     | VectorAppend
-    | VectorExtend -> 1
+    | VectorExtend
+    | GetSlice -> 1
     | Closure(_, upvalues) -> 1 + 2 + 2 + (3 * List.length upvalues)
     | _ -> 3
 
@@ -380,7 +392,8 @@ let rec private writeChunk (writer: BinaryWriter) (chunk: Chunk) : unit =
         | SetIndex
         | VectorLength
         | VectorAppend
-        | VectorExtend -> ()
+        | VectorExtend
+        | GetSlice -> ()
         | Constant i
         | PopN i
         | GetLocal i

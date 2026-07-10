@@ -171,14 +171,23 @@ private:
     void checkPropertyNotUndef(const Value& value, const std::string& propName);
     static void checkNumberOperand(const Value& value, const char* message);
     static void checkNumberOperands(const Value& a, const Value& b, const char* message);
-    // Shared by GetIndex/SetIndex (docs/PLAN-0.2.md Phase 1): validates
-    // `receiver` is a vector and `indexValue` is an in-range, non-negative
-    // integer index, returning the validated index. Throws via
-    // `runtimeError` (not a bare `RuntimeError`, unlike
-    // `checkNumberOperand(s)`) so an out-of-range/wrong-type index gets
-    // the same `[line N]` treatment `GetProperty`/`SetProperty` already
-    // get.
+    // Shared by GetIndex/SetIndex. Validates `receiver` is a vector and
+    // `indexValue` is an in-range integer index, returning the validated
+    // (already from-the-end-translated) index. `docs/PLAN-0.3.md`
+    // decision 2: negative indices are valid, translated to `length +
+    // index`; still a hard error (via `runtimeError`, not a bare
+    // `RuntimeError`, so it gets the same `[line N]` treatment
+    // `GetProperty`/`SetProperty` already do) when out of range either
+    // direction.
     size_t checkVectorIndex(const Value& receiver, const Value& indexValue);
+    // `docs/PLAN-0.3.md` decision 3: `v[a:b]`, end-inclusive. `startValue`/
+    // `stopValue` are `nil` for an omitted bound (defaulting to 0/
+    // length-1 respectively); negative bounds translate the same way
+    // `checkVectorIndex` does. Unlike single-index access, an
+    // out-of-range or `start > stop` bound clamps to an empty result
+    // rather than erroring -- always returns a freshly allocated vector,
+    // never a view onto `receiver`.
+    Value getSlice(const Value& receiver, const Value& startValue, const Value& stopValue);
 
     uint8_t readByte(CallFrame& frame);
     uint16_t readU16(CallFrame& frame);

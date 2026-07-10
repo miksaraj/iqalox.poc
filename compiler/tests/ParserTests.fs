@@ -462,6 +462,63 @@ let ``no-space bracket after a property access is indexing, not a call`` () =
     | e -> failwith $"expected Index over a Get, got %A{e}"
 
 [<Fact>]
+let ``a negative index needs no new grammar -- it's ordinary indexing with a unary-minus expression`` () =
+    // docs/PLAN-0.3.md decision 2.
+    match singleExpr "v[-1]" with
+    | Index(Variable objName, Unary(operator, Literal(NumberValue 1.0)), _) ->
+        Assert.Equal("v", objName.Lexeme)
+        Assert.Equal(Minus, operator.Type)
+    | e -> failwith $"expected Index over a Unary, got %A{e}"
+
+[<Fact>]
+let ``a colon inside brackets is a slice, both bounds present`` () =
+    // docs/PLAN-0.3.md decision 3.
+    match singleExpr "v[1:2]" with
+    | Slice(Variable objName, Some(Literal(NumberValue 1.0)), Some(Literal(NumberValue 2.0)), _) ->
+        Assert.Equal("v", objName.Lexeme)
+    | e -> failwith $"expected Slice with both bounds, got %A{e}"
+
+[<Fact>]
+let ``a slice's start bound may be omitted`` () =
+    match singleExpr "v[:2]" with
+    | Slice(Variable _, None, Some(Literal(NumberValue 2.0)), _) -> ()
+    | e -> failwith $"expected Slice with no start bound, got %A{e}"
+
+[<Fact>]
+let ``a slice's stop bound may be omitted`` () =
+    match singleExpr "v[2:]" with
+    | Slice(Variable _, Some(Literal(NumberValue 2.0)), None, _) -> ()
+    | e -> failwith $"expected Slice with no stop bound, got %A{e}"
+
+[<Fact>]
+let ``a slice may omit both bounds`` () =
+    match singleExpr "v[:]" with
+    | Slice(Variable _, None, None, _) -> ()
+    | e -> failwith $"expected Slice with neither bound, got %A{e}"
+
+[<Fact>]
+let ``a slice bound may itself be a negative index`` () =
+    match singleExpr "v[-3:-1]" with
+    | Slice(Variable _, Some(Unary(startOp, _)), Some(Unary(stopOp, _)), _) ->
+        Assert.Equal(Minus, startOp.Type)
+        Assert.Equal(Minus, stopOp.Type)
+    | e -> failwith $"expected Slice with negative bounds, got %A{e}"
+
+[<Fact>]
+let ``a ternary used as a plain index is not mistaken for a slice`` () =
+    // The lookahead that tells indexing apart from a slice must skip past
+    // a ternary's own '?'/':' pair rather than treating the ternary's ':'
+    // as the slice separator.
+    match singleExpr "v[cond ? 1 : 2]" with
+    | Index(Variable _, Ternary(Variable condName, _, _, _, _), _) -> Assert.Equal("cond", condName.Lexeme)
+    | e -> failwith $"expected Index over a Ternary, got %A{e}"
+
+[<Fact>]
+let ``assigning to a slice is a parse error`` () =
+    let _, errors = parseWithErrors "v[1:2] = x"
+    Assert.NotEmpty errors
+
+[<Fact>]
 let ``space before bracket after a property access is still a vector-literal call argument`` () =
     match singleExpr "obj.method [0]" with
     | Call(Get(_, name), [ Vector [ Literal(NumberValue 0.0) ] ]) -> Assert.Equal("method", name.Lexeme)

@@ -131,6 +131,47 @@ type private ParserState(tokens: Token[]) =
             i <- i + 1
         ok && checkAt i Arrow
 
+    /// True when the `[` at the current position (`peekAt 0`) opens a
+    /// slice (`v[a:b]`, `docs/PLAN-0.3.md` decision 3) rather than plain
+    /// indexing (`v[i]`) -- scans ahead (without consuming anything) for
+    /// a `:` at this bracket's own nesting depth, before its matching
+    /// `]`. Ternary `? :` pairs at that same depth are tracked and
+    /// skipped rather than mistaken for the slice separator (`?:`, the
+    /// elvis form, is already a single `QuestionMarkColon` token and
+    /// never confused with either) -- `v[cond ? a : b]` (a ternary used
+    /// as a plain index) still parses as ordinary indexing, not a slice,
+    /// as long as its `?` is seen before its `:` in this scan.
+    let isSliceAhead () =
+        let mutable i = 1
+        let mutable depth = 0
+        let mutable ternaryDepth = 0
+        let mutable found = false
+        let mutable scanning = true
+        while scanning do
+            if checkAt i Eof then
+                scanning <- false
+            elif depth = 0 && checkAt i RightBracket then
+                scanning <- false
+            elif [ LeftBracket; LeftParen; LeftBrace ] |> List.exists (checkAt i) then
+                depth <- depth + 1
+                i <- i + 1
+            elif [ RightBracket; RightParen; RightBrace ] |> List.exists (checkAt i) then
+                depth <- depth - 1
+                i <- i + 1
+            elif depth = 0 && checkAt i QuestionMark then
+                ternaryDepth <- ternaryDepth + 1
+                i <- i + 1
+            elif depth = 0 && checkAt i Colon then
+                if ternaryDepth > 0 then
+                    ternaryDepth <- ternaryDepth - 1
+                    i <- i + 1
+                else
+                    found <- true
+                    scanning <- false
+            else
+                i <- i + 1
+        found
+
     let matchAny (types: TokenType list) =
         if types |> List.exists check then
             advance () |> ignore
@@ -462,10 +503,18 @@ type private ParserState(tokens: Token[]) =
                 let name = consume Identifier "Expect property name after '.'."
                 expr <- this.FinishPropertyAccess(Get(expr, name))
             elif check LeftBracket && isAdjacent (previous ()) (peek ()) then
+                let isSlice = isSliceAhead ()
                 let bracket = advance ()
-                let index = this.Expression()
-                consume RightBracket "Expect ']' after index." |> ignore
-                expr <- Index(expr, index, bracket)
+                if isSlice then
+                    let start = if check Colon then None else Some(this.Expression())
+                    consume Colon "Expect ':' in slice." |> ignore
+                    let stop = if check RightBracket then None else Some(this.Expression())
+                    consume RightBracket "Expect ']' after slice." |> ignore
+                    expr <- Slice(expr, start, stop, bracket)
+                else
+                    let index = this.Expression()
+                    consume RightBracket "Expect ']' after index." |> ignore
+                    expr <- Index(expr, index, bracket)
             else
                 more <- false
         expr
