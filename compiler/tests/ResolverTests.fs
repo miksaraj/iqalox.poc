@@ -420,6 +420,21 @@ let ``a list comprehension's bound variable shadows an outer variable of the sam
     | _ -> failwith $"unexpected shape: %A{bound}"
 
 [<Fact>]
+let ``a later generator may reference an earlier generator's bound name in its own source`` () =
+    // docs/PLAN-0.3.md decision 1 -- resolved as a direct consequence of
+    // the nested-loop desugaring, not a separately implemented feature.
+    let bound, errors = resolveSource "[y | x <- [1, 2], y <- [x]]"
+    Assert.Empty errors
+
+[<Fact>]
+let ``a guard clause resolves without error and still desugars to a one-parameter closure call`` () =
+    let bound, errors = resolveSource "[x | x <- xs | x > 0]"
+    Assert.Empty errors
+    match bound with
+    | [ BExpressionStmt(BCall(BLambda decl, [ _ ])) ] -> Assert.Equal(1, decl.Parameters.Length)
+    | _ -> failwith $"unexpected shape: %A{bound}"
+
+[<Fact>]
 let ``a spread element resolves to BSpread wrapping the resolved inner expression`` () =
     let bound, errors = resolveSource "var a = [1, 2]\n[...a]"
     Assert.Empty errors

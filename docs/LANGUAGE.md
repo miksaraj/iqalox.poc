@@ -686,17 +686,38 @@ results into a new vector); anything else means **cons**
 (`[item | list]`, producing a new vector with `item` prepended onto a
 copy of `list`).
 
-`0.2`'s comprehensions support exactly **one** generator clause and no
-guard/filter clause — `[x * 2 | x <- xs, x > 0]`-style filtering isn't
-available; use `filter` first, or `reduce`, instead (see
-[§13](#13-the-standard-library)). The bound name is a single identifier,
-not a destructuring pattern. A richer, multi-generator/guarded form is
-sketched as future scope in `ROADMAP.md`.
+**New for `0.3`: multiple generators and a guard clause.** Comma-separate
+more `name <- source` clauses for a Cartesian product (desugars to nested
+loops, the first-written generator outermost), and optionally follow the
+generator list with a **second** `|` and a guard expression:
 
-Both forms desugar entirely at compile time into an ordinary loop inside
-a synthetic closure — there is no dedicated cons/comprehension runtime
-representation, just the two VM opcodes (`VectorLength`, `VectorAppend`)
-that closure's loop body compiles down to.
+```
+print [[x, y] | x <- [1, 2], y <- ["a", "b"]]   # [[1, 'a'], [1, 'b'], [2, 'a'], [2, 'b']]
+print [n | n <- [1, 2, 3, 4, 5, 6] | n % 2 == 0] # [2, 4, 6]
+```
+
+A later generator's source expression may reference an earlier
+generator's bound name — it's re-evaluated fresh on every iteration of
+the outer loop(s), not just once up front:
+
+```
+fun upTo(n) { var r = []; for (var i mut = 0; i < n; ++i) { push r, i; } return r; }
+print [[x, y] | x <- [1, 2, 3], y <- upTo(x)]
+# [[1, 0], [2, 0], [2, 1], [3, 0], [3, 1], [3, 2]]
+```
+
+The guard is just an ordinary boolean expression (`==`, `!=`, `and`,
+`or`, `!`, ...) — there's no dedicated filter-clause syntax beyond the
+second `|`, and it sees every generator's bound name already in scope.
+The bound name in each generator clause is a single identifier, not a
+destructuring pattern.
+
+Both forms desugar entirely at compile time into ordinary (nested, for a
+multi-generator comprehension) loops inside a synthetic closure — there
+is no dedicated cons/comprehension runtime representation, just the two
+VM opcodes (`VectorLength`, `VectorAppend`) that closure's loop body
+compiles down to, plus a conditional (compiled exactly like any other
+ternary) around the append when a guard is present.
 
 ### Vector-literal spread
 
@@ -1170,22 +1191,18 @@ for the full history of how each was arrived at.
    `length v`.
 4. **No concurrency, no exception handling, no reflection/metaprogramming**
    exist at the language level (see [§1](#1-introduction-and-classification)).
-5. **List comprehensions support exactly one generator and no guard
-   clause.** `[x * 2 | x <- xs, x > 0]`-style filtering isn't available —
-   use `filter` first, or `reduce`, instead. A richer multi-generator/
-   guarded form is sketched as future scope in `ROADMAP.md`.
-6. **`with`-mixin composition is simplified, not full C3 linearization.**
+5. **`with`-mixin composition is simplified, not full C3 linearization.**
    Multiple mixins compose independently rather than through a real
    method-resolution-order chain, and `super` doesn't chain through a
    `with`-mixin the way it does through `extends`. Deferred deliberately
    (see [§12](#12-mixins-and-traits)); a full C3 algorithm is logged in
    `ROADMAP.md` as a future idea, not committed scope.
-7. **No trait member-conflict disambiguation syntax.** PHP's `insteadof`/
+6. **No trait member-conflict disambiguation syntax.** PHP's `insteadof`/
    `as` have no equivalent here — a conflict between two composed sources
    is always a hard compile-time error; the only ways out are renaming or
    redeclaring the member directly on the composing class
    ([§12](#12-mixins-and-traits)).
-8. **No token text or source excerpt on errors, unlike `0.1-poc`.**
+7. **No token text or source excerpt on errors, unlike `0.1-poc`.**
    `0.1-poc` reports both compile-time and runtime errors as `[line N]
    Error at 'x': message` plus a caret-underlined single-line source
    excerpt. `0.2` reports a real `[line N]` for every error kind
@@ -1195,7 +1212,7 @@ for the full history of how each was arrived at.
    the VM specifically would need embedding source text in the bytecode
    format (it only ever receives a compiled `.iqbc` file, never the
    original source), not just a line table.
-9. **A vector literal or grouping expression can't span multiple lines.**
+8. **A vector literal or grouping expression can't span multiple lines.**
    The scanner turns *every* newline into an implicit `;`
    unconditionally, with no awareness of bracket/paren depth — so
    `print (\n1 + 2\n)` or a `[...]` literal split across lines both fail
@@ -1203,16 +1220,16 @@ for the full history of how each was arrived at.
    the newline having already terminated the "statement" right after it.
    Not fixed here — making the scanner bracket-depth-aware is a real
    scanner change with its own test surface.
-10. **A non-identifier callee can't be called at all, with or without
-    parentheses.** The "am I followed by something that looks like an
-    argument" check only ever runs for a bare `IDENTIFIER` (or,
-    indirectly, a property/method access), so a grouped expression never
-    gets that treatment — neither `(f) 5` nor even `(f)()` parses; the
-    callee has to be bound to a name first. This makes an
-    immediately-invoked lambda expression currently inexpressible: `((x)
-    -> x + 1) 5` doesn't parse, even though `(x) -> x + 1` is a perfectly
-    valid lambda value once bound to a variable.
-11. **A one-line block whose last statement is a bare `return <value>`
+9. **A non-identifier callee can't be called at all, with or without
+   parentheses.** The "am I followed by something that looks like an
+   argument" check only ever runs for a bare `IDENTIFIER` (or,
+   indirectly, a property/method access), so a grouped expression never
+   gets that treatment — neither `(f) 5` nor even `(f)()` parses; the
+   callee has to be bound to a name first. This makes an
+   immediately-invoked lambda expression currently inexpressible: `((x)
+   -> x + 1) 5` doesn't parse, even though `(x) -> x + 1` is a perfectly
+   valid lambda value once bound to a variable.
+10. **A one-line block whose last statement is a bare `return <value>`
     needs an explicit trailing `;` before the closing `}`.** ASI only
     ever fires on an actual newline, so `fun f(x) { return x }`
     (everything on one line) fails to parse — the closing `}` doesn't
@@ -1221,7 +1238,7 @@ for the full history of how each was arrived at.
     scanner change (teaching ASI that `}` also implies a terminator,
     mirroring how many C-like languages' "automatic semicolon insertion"
     rules work) with its own test surface.
-12. **A runtime error raised from inside a `map`/`filter`/`reduce`/`sort`/
+11. **A runtime error raised from inside a `map`/`filter`/`reduce`/`sort`/
     `elementwise` prelude function reports a `[line N]` relative to the
     prelude's own source text, not the user's file.** `Program.fs` scans
     and parses `Prelude.fs`'s embedded source separately from the user's
@@ -1234,7 +1251,7 @@ for the full history of how each was arrived at.
     than the one the user is looking at. Not solved here — nothing in
     this pipeline has ever needed multi-file source-position tracking
     before now.
-13. **`elementwise`'s shape-mismatch behavior is generic, not
+12. **`elementwise`'s shape-mismatch behavior is generic, not
     dedicated.** Unlike `transpose`/`multiply`/`add`/`subtract` (true
     natives with clean, custom-worded shape-validation errors),
     `elementwise` is ordinary Iqalox source with no `throw`/`raise`
@@ -1242,14 +1259,18 @@ for the full history of how each was arrived at.
     ordinary "vector index out of range" error a step later, not a
     dedicated shape-mismatch message. See [§13](#13-the-standard-library).
 
-The following limitations from earlier versions are **resolved** as of
-`0.2` (see `docs/LANGUAGE-0.1.md` §13 for their original write-ups):
-vectors being literal-only with no indexing/mutation/length (now fixed,
+The following limitations from earlier versions are **resolved**:
+vectors being literal-only with no indexing/mutation/length (now fixed as
+of `0.2`, see `docs/LANGUAGE-0.1.md` §13 for the original write-up;
 [§9](#9-vectors-indexing-cons-comprehensions-and-spread),
-[§13](#13-the-standard-library)), and object fields having no
-immutability or declaration concept at all (now fixed,
-[§11](#11-classes-and-objects) — properties must be declared and default
-to write-once).
+[§13](#13-the-standard-library)), object fields having no immutability or
+declaration concept at all (now fixed as of `0.2`, `docs/LANGUAGE-0.1.md`
+§13; [§11](#11-classes-and-objects) — properties must be declared and
+default to write-once), and list comprehensions supporting only a single
+generator with no guard clause (now fixed as of `0.3`, see
+`docs/LANGUAGE-0.2.md` §15 once it exists for the original write-up;
+[§9](#9-vectors-indexing-cons-comprehensions-and-spread) covers the
+multi-generator/guarded form).
 
 ## 16. Grammar and precedence reference
 

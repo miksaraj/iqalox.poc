@@ -641,7 +641,7 @@ let ``a bare vertical bar with no generator marker is a cons`` () =
 [<Fact>]
 let ``a vertical bar followed by identifier-arrow is a list comprehension`` () =
     match singleExpr "[x * 2 | x <- xs]" with
-    | ListComprehension(Binary(Variable bodyX, _, _), variable, Variable source, _) ->
+    | ListComprehension(Binary(Variable bodyX, _, _), [ variable, Variable source ], None, _) ->
         Assert.Equal("x", bodyX.Lexeme)
         Assert.Equal("x", variable.Lexeme)
         Assert.Equal("xs", source.Lexeme)
@@ -674,8 +674,34 @@ let ``cons can nest to build up a list from multiple items`` () =
 [<Fact>]
 let ``list comprehension source can be an arbitrary expression, not just an identifier`` () =
     match singleExpr "[x | x <- [1, 2, 3]]" with
-    | ListComprehension(_, variable, Vector _, _) -> Assert.Equal("x", variable.Lexeme)
+    | ListComprehension(_, [ variable, Vector _ ], None, _) -> Assert.Equal("x", variable.Lexeme)
     | e -> failwith $"expected ListComprehension, got %A{e}"
+
+[<Fact>]
+let ``multiple comma-separated generators parse in order`` () =
+    // docs/PLAN-0.3.md decision 1.
+    match singleExpr "[x + y | x <- xs, y <- ys]" with
+    | ListComprehension(_, [ (xVar, Variable xs); (yVar, Variable ys) ], None, _) ->
+        Assert.Equal("x", xVar.Lexeme)
+        Assert.Equal("xs", xs.Lexeme)
+        Assert.Equal("y", yVar.Lexeme)
+        Assert.Equal("ys", ys.Lexeme)
+    | e -> failwith $"expected ListComprehension with two generators, got %A{e}"
+
+[<Fact>]
+let ``a guard clause is introduced by a second vertical bar after the generators`` () =
+    match singleExpr "[x + y | x <- xs, y <- ys | x != y]" with
+    | ListComprehension(_, [ _; _ ], Some(Binary(Variable gx, operator, Variable gy)), _) ->
+        Assert.Equal(BangEqual, operator.Type)
+        Assert.Equal("x", gx.Lexeme)
+        Assert.Equal("y", gy.Lexeme)
+    | e -> failwith $"expected ListComprehension with a guard, got %A{e}"
+
+[<Fact>]
+let ``a comprehension with no guard leaves it as None`` () =
+    match singleExpr "[x | x <- xs]" with
+    | ListComprehension(_, [ _ ], None, _) -> ()
+    | e -> failwith $"expected ListComprehension with no guard, got %A{e}"
 
 [<Fact>]
 let ``a spread element parses as Spread wrapping the inner expression`` () =

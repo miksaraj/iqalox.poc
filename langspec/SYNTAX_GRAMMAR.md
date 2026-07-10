@@ -4,11 +4,12 @@
 what has actually landed so far.*
 
 This is `0.2`'s grammar (`langspec/versions/0.2/SYNTAX_GRAMMAR.md`) plus
-everything `docs/PLAN-0.3.md` §1 has resolved for `0.3` so far: slices.
-Negative indexing needed no new grammar at all (see below). This file
-will keep growing new "Notes: new for `0.3`" entries and grammar
-productions as more of `docs/PLAN-0.3.md`'s design decisions land, the
-same way `0.2`'s own top-level grammar grew from `0.1`'s.
+everything `docs/PLAN-0.3.md` §1 has resolved for `0.3` so far: slices
+and full (multi-generator, guarded) list comprehensions. Negative
+indexing needed no new grammar at all (see below). This file will keep
+growing new "Notes: new for `0.3`" entries and grammar productions as
+more of `docs/PLAN-0.3.md`'s design decisions land, the same way `0.2`'s
+own top-level grammar grew from `0.1`'s.
 
 ## Notes: inherited from `0.1`, unchanged
 
@@ -130,6 +131,16 @@ same way `0.2`'s own top-level grammar grew from `0.1`'s.
   `?` is seen before its `:`. No slice-assignment production exists
   (`v[a:b] = ...` is not valid syntax) — slices are read-only this
   version.
+* **List comprehensions gain multiple comma-separated generators and an
+  optional guard clause**, lifting `0.2`'s decision 3 restriction to a
+  single generator with no guards (`docs/PLAN-0.3.md` decision 1). The
+  guard, when present, is introduced by a **second** `|` after the
+  generator list — `[expr | x <- xs, y <- ys | guard]` — not folded into
+  the generator list with a comma (a real typo in this project's own
+  earlier planning sketch, corrected while resolving decision 1). No new
+  top-level ambiguity versus cons: the second `|` only appears once a
+  parse has already committed to the comprehension branch (having seen
+  at least one `<-`), which cons parsing never reaches.
 ##
     program         → declaration* EOF ;
 
@@ -210,6 +221,8 @@ same way `0.2`'s own top-level grammar grew from `0.1`'s.
     vector          → "[" vectorBody? "]" ;
     vectorBody      → vectorItem ( "," vectorItem )*
                     | expression "|" expression
-                    | expression "|" IDENTIFIER "<-" expression ;
+                    | expression "|" generator ( "," generator )*
+                                  ( "|" expression )? ;
+    generator       → IDENTIFIER "<-" expression ;
     vectorItem      → "..." expression
                     | expression ;

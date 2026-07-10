@@ -234,8 +234,8 @@ each one, verified via new tests (§6).
 |---|---|---|
 | Negative vector indices (get/set) | §1.2 | Done |
 | Slices (`v[a:b]`, end-inclusive, read-only) | §1.3 | Done |
-| Multi-generator list comprehensions | §1.1 | Not started |
-| List comprehension guard clause | §1.1 | Not started |
+| Multi-generator list comprehensions | §1.1 | Done |
+| List comprehension guard clause | §1.1 | Done |
 | Unused-variable compile-time warning | §2.3 | Not started |
 | Module support (file-based, `import`, compile-time-only) | §1.4-9 | Not started |
 | Array-manipulation stdlib namespace revisit | §2.1 | Not started (open question) |
@@ -293,9 +293,48 @@ matrix: basic, omitted bounds, both omitted, negative bounds, inverted
 range, out-of-range clamp, copy-not-view, non-vector receiver, non-number
 bound).
 
-**Phase 2 — Full list comprehensions.** Multi-generator (nested-loop
-desugaring) and guard-clause (decision 1) support in `Resolver.fs`'s
-existing comprehension desugaring path.
+**Phase 2 — Full list comprehensions — done.** `Ast.ListComprehension`'s
+`variable: Token * source: Expr` pair became `generators: (Token * Expr)
+list` plus `guard: Expr option`; `Parser.fs`'s existing `<-`-lookahead
+disambiguation (cons vs. comprehension) is unchanged, extended with a
+`while matchAny [ Comma ]` loop over more generators and an optional
+second `matchAny [ VerticalBar ]` for the guard, both gated behind
+`commaAsOperator` already being suppressed inside `[...]` so a
+generator's own source expression can't accidentally swallow the comma
+separating it from the next generator.
+
+`Resolver.fs`'s desugaring generalizes from one fixed loop to a
+recursively built nest of them, one per generator, outermost/first-
+written first — the real design decision here, not just mechanical
+repetition: only the **first** generator's source is evaluated once, in
+the enclosing scope, and passed into the synthetic closure as its sole
+parameter, exactly matching `0.2`'s existing shape byte-for-byte (a
+dedicated Codegen test asserts the single-generator, no-guard case's
+instruction sequence is completely unchanged). Every later generator's
+source is instead declared as a fresh local **inside** the previous
+generator's loop body, re-evaluated on every outer iteration — required,
+not just convenient, since a later generator's source may reference an
+earlier generator's already-bound name (`[[x, y] | x <- xs, y <- range
+x]`, decision 1's own example), which is only in scope from inside that
+enclosing loop. The guard, when present, wraps the existing
+`InternalVectorAppend` in a `Ternary` — compiling through the exact same
+conditional-jump machinery any other ternary already uses, not a new
+opcode. Manually verified end to end (Cartesian product, a dependent
+generator via a `range`-style helper, a guard alone, and multi-generator
++ guard together) beyond what the unit tests assert, since the nested-
+loop desugaring's runtime behavior isn't fully provable from instruction-
+sequence assertions alone. 4 new xUnit Parser tests (multi-generator
+parsing, guard parsing, no-guard-stays-`None`), 2 new Resolver tests
+(a dependent generator resolves without error, a guard resolves and
+still desugars to a one-parameter call), and 2 new Codegen instruction-
+sequence tests (the guard's ternary-shaped jumps, and the second
+generator's source correctly re-fetched from inside the outer loop
+rather than passed as a second parameter). `langspec/examples/
+cons_and_comprehensions.iqx` extended with all four new forms.
+`docs/LANGUAGE.md` §9 rewritten for the lifted restriction, and §15's old
+item 5 (single-generator/no-guard limitation) removed and the list
+renumbered — cross-checked against `docs/PLAN-0.3.md`'s own Phase 1 risk
+entry, which cited the old item 12 (now item 11) by number.
 
 **Phase 3 — Unused-variable warnings.** `Resolver.fs`-only (§3); resolve
 open question 3 (`_`-prefix exemption) when this phase actually starts.
@@ -366,7 +405,9 @@ without it — not just new disassembler instruction-sequence assertions.
   `AskUserQuestion` laying out the real cost, not a silent scope
   expansion.
 - **The multi-file error-attribution gap above isn't new, just wider.**
-  `docs/LANGUAGE.md` §15 item 12 already documents that a runtime error
+  `docs/LANGUAGE.md` §15 item 11 (renumbered from item 12 when Phase 2
+  resolved item 5, single-generator-only comprehensions) already
+  documents that a runtime error
   from inside `Prelude.fs`'s own functions reports a line number relative
   to *that* file, not the user's — a real, disclosed, not-yet-fixed
   limitation. Modules multiply the number of files a compiled program can

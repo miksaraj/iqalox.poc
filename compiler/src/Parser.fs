@@ -668,15 +668,26 @@ type private ParserState(tokens: Token[]) =
                         | _ -> false
                     if not firstIsSpread && matchAny [ VerticalBar ] then
                         // Cons ([item | list]) and list comprehensions
-                        // ([expr | x <- xs]) share this `[expr |` prefix,
-                        // told apart by lookahead on the generator marker
-                        // `<-` (docs/PLAN-0.2.md decision 2).
+                        // ([expr | x <- xs, y <- ys | guard]) share this
+                        // `[expr |` prefix, told apart by lookahead on the
+                        // generator marker `<-` (docs/PLAN-0.2.md decision
+                        // 2). `docs/PLAN-0.3.md` decision 1 extends the
+                        // comprehension form with more comma-separated
+                        // generators and an optional guard behind a
+                        // second `|` -- neither changes this disambiguation,
+                        // since both still open with the same first `x <- xs`.
                         if check Identifier && checkAt 1 LeftArrow then
-                            let variable = advance ()
-                            advance () |> ignore // '<-'
-                            let source = this.Expression()
+                            let parseGenerator () =
+                                let variable = advance ()
+                                advance () |> ignore // '<-'
+                                variable, this.Expression()
+                            let generators = ResizeArray<Token * Expr>()
+                            generators.Add(parseGenerator ())
+                            while matchAny [ Comma ] do
+                                generators.Add(parseGenerator ())
+                            let guard = if matchAny [ VerticalBar ] then Some(this.Expression()) else None
                             consume RightBracket "Expect ']' after list comprehension." |> ignore
-                            ListComprehension(first, variable, source, bracket)
+                            ListComprehension(first, List.ofSeq generators, guard, bracket)
                         else
                             let list = this.Expression()
                             consume RightBracket "Expect ']' after cons." |> ignore
