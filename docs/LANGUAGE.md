@@ -1174,8 +1174,9 @@ compiles and runs exactly as before, they're printed to stderr as
 `[line N] Warning: message` purely for the programmer's benefit.
 
 The only warning `0.3` produces is **unused-variable detection**: a
-declared local variable, function/lambda parameter, or non-`pub` class
-property/method that's never actually used gets flagged.
+declared local variable, function/lambda parameter, top-level `var`/`fun`,
+or non-`pub` class property/method that's never actually used gets
+flagged.
 
 ```
 fun f(a, b) {
@@ -1189,10 +1190,16 @@ fun f(a, b) {
 
 A few rules shape what counts as "used":
 
-- For a local variable or parameter, only a **read** counts — assigning
-  to it (`x = 1`) without ever reading it back does **not** count as
-  using it, and still warns. Capturing it into a nested closure always
-  counts as a use, regardless of whether that closure reads or writes it.
+- For a local variable, parameter, or top-level `var`, only a **read**
+  counts — assigning to it (`x = 1`) without ever reading it back does
+  **not** count as using it, and still warns. Capturing it into a nested
+  closure always counts as a use, regardless of whether that closure
+  reads or writes it.
+- A top-level `fun` counts as used if it's called anywhere in the file,
+  including from inside another function declared earlier or later in
+  the same file (declaration order doesn't matter, same as any other
+  top-level name). A top-level `class` is never checked at all — only
+  `var`/`fun` declarations at the top level are covered.
 - For a private class property or method, a `self.`-qualified reference
   counts **either way** — both `self.x` (read) and `self.x = value`
   (write) mark a property used, and `self.method()` marks a method used.
@@ -1222,8 +1229,12 @@ fun f(_unused, keep) {
   non-`pub` member (and such a call would fail at runtime regardless,
   since a non-`pub` member can't be accessed from outside its class in
   the first place).
-- Top-level (global) `var`/`fun` declarations are never checked — only
-  locals, parameters, and private class members.
+- The standard-library functions [§13](#13-the-standard-library) provides
+  as ordinary top-level `fun` declarations under the hood (`map`,
+  `filter`, `reduce`, `sort`, `elementwise`) are never warned about,
+  whether or not the current program happens to call all five of them —
+  a program that only calls `map` isn't told that `sort` is "unused"
+  just because it was always declared for it.
 
 ## 15. Known limitations
 
