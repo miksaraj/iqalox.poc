@@ -1,5 +1,6 @@
 #include "vm.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 #include "bytecode.hpp"
@@ -130,16 +131,51 @@ size_t Vm::checkVectorIndex(const Value& receiver, const Value& indexValue) {
         runtimeError("Vector index must be a number, got " + typeName(indexValue) + ".");
     }
     double indexNum = asNumber(indexValue);
-    if (indexNum < 0.0 || std::floor(indexNum) != indexNum) {
-        runtimeError("Vector index must be a non-negative integer, got " + stringify(indexValue) + ".");
+    if (std::floor(indexNum) != indexNum) {
+        runtimeError("Vector index must be an integer, got " + stringify(indexValue) + ".");
     }
     auto* vector = static_cast<ObjVector*>(asObj(receiver));
-    size_t index = static_cast<size_t>(indexNum);
-    if (index >= vector->elements.size()) {
-        runtimeError("Vector index " + std::to_string(index) + " out of range for vector of length " +
+    double length = static_cast<double>(vector->elements.size());
+    double resolved = indexNum < 0.0 ? indexNum + length : indexNum;
+    if (resolved < 0.0 || resolved >= length) {
+        runtimeError("Vector index " + stringify(indexValue) + " out of range for vector of length " +
                       std::to_string(vector->elements.size()) + ".");
     }
-    return index;
+    return static_cast<size_t>(resolved);
+}
+
+Value Vm::getSlice(const Value& receiver, const Value& startValue, const Value& stopValue) {
+    if (!isObj(receiver) || asObj(receiver)->type != ObjType::Vector) {
+        runtimeError("Only vectors can be sliced, got " + typeName(receiver) + ".");
+    }
+    auto* vector = static_cast<ObjVector*>(asObj(receiver));
+    double length = static_cast<double>(vector->elements.size());
+
+    auto resolveBound = [&](const Value& boundValue, double defaultValue, const char* label) {
+        if (isNil(boundValue)) return defaultValue;
+        if (!isNumber(boundValue)) {
+            runtimeError(std::string("Slice ") + label + " bound must be a number, got " + typeName(boundValue) + ".");
+        }
+        double n = asNumber(boundValue);
+        if (std::floor(n) != n) {
+            runtimeError(std::string("Slice ") + label + " bound must be an integer, got " + stringify(boundValue) + ".");
+        }
+        return n < 0.0 ? n + length : n;
+    };
+
+    // Out-of-range/start-after-stop bounds clamp to an empty result
+    // rather than erroring, unlike single-index access -- decision 3's
+    // deliberately more lenient treatment of a degenerate slice range.
+    double start = std::clamp(resolveBound(startValue, 0.0, "start"), 0.0, length);
+    double stop = std::clamp(resolveBound(stopValue, length - 1.0, "stop"), -1.0, length - 1.0);
+
+    auto* result = allocate<ObjVector>();
+    if (start <= stop) {
+        auto startIt = vector->elements.begin() + static_cast<std::ptrdiff_t>(start);
+        auto stopIt = vector->elements.begin() + static_cast<std::ptrdiff_t>(stop) + 1;
+        result->elements.assign(startIt, stopIt);
+    }
+    return objValue(result);
 }
 
 uint8_t Vm::readByte(CallFrame& frame) { return frame.closure->function->chunk.code[frame.ip++]; }
@@ -758,6 +794,13 @@ void Vm::run() {
                 size_t index = checkVectorIndex(receiver, indexValue);
                 static_cast<ObjVector*>(asObj(receiver))->elements[index] = value;
                 push(value);
+                break;
+            }
+            case OpCode::GetSlice: {
+                Value stopValue = pop();
+                Value startValue = pop();
+                Value receiver = pop();
+                push(getSlice(receiver, startValue, stopValue));
                 break;
             }
             case OpCode::VectorLength: {

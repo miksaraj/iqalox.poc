@@ -370,6 +370,52 @@ let ``indexing pushes obj and index, then emits GetIndex with no operand`` () =
     )
 
 [<Fact>]
+let ``a slice with both bounds pushes obj, start, and stop, then emits GetSlice`` () =
+    // docs/PLAN-0.3.md decision 3. Bounds 1 and 2 reuse the vector
+    // literal's own already-pooled 1.0/2.0 constants (constant pooling
+    // dedupes by value, same as `indexing pushes obj and index...` above
+    // -- no new constant slots needed here).
+    let chunk = compileSource "var v = [1, 2, 3]\nv[1:2]"
+    Assert.Equal<Instruction[]>(
+        [| Constant 0
+           Constant 1
+           Constant 2
+           BuildVector 3
+           DefineGlobal 3
+           GetGlobal 3
+           Constant 0
+           Constant 1
+           GetSlice
+           Pop
+           Nil
+           Return |],
+        chunk.Code
+    )
+    Assert.Equal<Constant[]>(
+        [| NumberConstant 1.0; NumberConstant 2.0; NumberConstant 3.0; StringConstant "v" |],
+        chunk.Constants
+    )
+
+[<Fact>]
+let ``an omitted slice bound emits a plain Nil instead of a constant`` () =
+    let chunk = compileSource "var v = [1, 2, 3]\nv[:2]"
+    Assert.Equal<Instruction[]>(
+        [| Constant 0
+           Constant 1
+           Constant 2
+           BuildVector 3
+           DefineGlobal 3
+           GetGlobal 3
+           Nil // omitted start bound
+           Constant 1 // stop bound reuses the vector literal's pooled 2.0
+           GetSlice
+           Pop
+           Nil // implicit nil return of the top-level script
+           Return |],
+        chunk.Code
+    )
+
+[<Fact>]
 let ``indexed assignment pushes obj, index, and value, then emits SetIndex with no operand`` () =
     let chunk = compileSource "var v = [1, 2]\nv[0] = 9"
     Assert.Equal<Instruction[]>(

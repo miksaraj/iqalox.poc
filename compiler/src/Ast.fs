@@ -51,6 +51,10 @@ type Expr =
     | Set of obj: Expr * name: Token * value: Expr
     | Index of obj: Expr * index: Expr * bracket: Token
     | IndexSet of obj: Expr * index: Expr * value: Expr * bracket: Token
+    /// `v[a:b]` (`docs/PLAN-0.3.md` decision 3) -- either bound may be
+    /// omitted (`v[:3]`, `v[2:]`, `v[:]`); no `SliceSet` counterpart
+    /// exists since slices are read-only this version.
+    | Slice of obj: Expr * start: Expr option * stop: Expr option * bracket: Token
     | Lambda of parameters: Token list * arrow: Token * body: Expr
     | Cons of item: Expr * list: Expr * bracket: Token
     | ListComprehension of body: Expr * variable: Token * source: Expr * bracket: Token

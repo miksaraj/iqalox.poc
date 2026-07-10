@@ -66,6 +66,9 @@ type BoundExpr =
     | BSet of obj: BoundExpr * name: Token * value: BoundExpr
     | BIndex of obj: BoundExpr * index: BoundExpr * bracket: Token
     | BIndexSet of obj: BoundExpr * index: BoundExpr * value: BoundExpr * bracket: Token
+    /// `docs/PLAN-0.3.md` decision 3 -- `start`/`stop` are `None` when
+    /// the corresponding bound was omitted (`v[:3]`, `v[2:]`, `v[:]`).
+    | BSlice of obj: BoundExpr * start: BoundExpr option * stop: BoundExpr option * bracket: Token
     /// Reuses `BoundFunctionDecl` wholesale -- a lambda resolves through
     /// exactly the same scope/slot/upvalue machinery as a nested named
     /// function (`docs/PLAN-0.2.md` §3), just with a synthetic `Name` (a

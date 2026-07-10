@@ -92,6 +92,10 @@ enum class OpCode : uint8_t {
     // members are copied in (super does not chain through with-mixins
     // this version).
     Mixin = 0x36,
+    // docs/PLAN-0.3.md decision 3: `v[a:b]`, end-inclusive, negative
+    // bounds and omitted bounds (encoded as `nil`) both supported. See
+    // Vm::run's handler for the exact resolution/clamping rules.
+    GetSlice = 0x37,
 };
 
 // Loads `path` as a format-v1 bytecode file and returns its top-level

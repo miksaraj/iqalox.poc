@@ -618,6 +618,56 @@ matrix-manipulation standard library that operates on this shape.
   `langspec/SYNTAX_GRAMMAR.md`'s `assignment` production has the exact
   grammar.
 
+**New for `0.3`: negative indices.** `v[-1]` reads (or writes) the last
+element, `v[-2]` the second-to-last, and so on — a negative index needed
+no new grammar at all, since `-1` already parses as an ordinary unary-minus
+expression; only the runtime bounds check changed, to accept `-length..-1`
+as valid (translated internally to `length + index`) alongside the
+existing `0..length-1`:
+
+```
+var v = [10, 20, 30]
+print v[-1]   # 30
+v[-1] = 99
+print v[-1]   # 99
+```
+
+An index outside `-length..length-1` either direction is still the same
+"Vector index N out of range" runtime error as before.
+
+### Slices
+
+**New for `0.3`.** `v[a:b]` returns a **new** vector containing the
+elements from index `a` through index `b`, **inclusive** of both ends —
+unlike many other languages' half-open slices. Either bound may be
+omitted (`v[:3]`, `v[2:]`, `v[:]`), defaulting to the start/end of the
+vector respectively; either bound may be negative, using the same
+from-the-end convention as single-index access:
+
+```
+var v = [10, 20, 30, 40, 50]
+print v[1:3]    # [20, 30, 40] -- inclusive of index 3
+print v[:2]     # [10, 20, 30]
+print v[3:]     # [40, 50]
+print v[:]      # [10, 20, 30, 40, 50] -- a full copy
+print v[-2:-1]  # [40, 50]
+```
+
+Unlike single-index access, a slice is deliberately more lenient: an
+out-of-range bound **clamps** into the vector's own extent rather than
+raising a runtime error, and a `start` that resolves after `stop`
+produces an **empty vector** rather than an error:
+
+```
+print v[0:100]  # [10, 20, 30, 40, 50] -- clamped, not an error
+print v[3:1]    # [] -- start after stop, not an error
+```
+
+A slice always allocates a fresh vector — mutating the result never
+mutates the source it was sliced from. There is no slice-assignment in
+`0.3` (`v[a:b] = ...` is a parse error); slices are read-only this
+version.
+
 ### Cons and list comprehensions
 
 ```

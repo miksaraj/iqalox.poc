@@ -169,14 +169,69 @@ TEST_CASE("indexing out of range is a runtime error", "[vm]") {
     REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
 }
 
-TEST_CASE("indexing with a negative index is a runtime error", "[vm]") {
+TEST_CASE("a valid negative index reads from the end of the vector", "[vm]") {
+    // docs/PLAN-0.3.md decision 2: v[-1] is the last element, translated
+    // to length + index -- no longer an error, unlike 0.2.
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t ten = b.addNumberConstant(10);
+    uint16_t twenty = b.addNumberConstant(20);
+    uint16_t thirty = b.addNumberConstant(30);
+    uint16_t negOne = b.addNumberConstant(-1);
+    uint16_t result = b.addStringConstant("result");
+
+    b.emitU16(OpCode::Constant, ten);
+    b.emitU16(OpCode::Constant, twenty);
+    b.emitU16(OpCode::Constant, thirty);
+    b.emitU16(OpCode::BuildVector, 3);
+    b.emitU16(OpCode::Constant, negOne);
+    b.emit(OpCode::GetIndex);
+    b.emitU16(OpCode::DefineGlobal, result);
+
+    vm.interpret(b.build());
+
+    REQUIRE(asNumber(*vm.getGlobal("result")) == 30.0);
+}
+
+TEST_CASE("a valid negative index also writes to the end of the vector", "[vm]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t ten = b.addNumberConstant(10);
+    uint16_t twenty = b.addNumberConstant(20);
+    uint16_t ninetyNine = b.addNumberConstant(99);
+    uint16_t negOne = b.addNumberConstant(-1);
+    uint16_t vName = b.addStringConstant("v");
+    uint16_t result = b.addStringConstant("result");
+
+    b.emitU16(OpCode::Constant, ten);
+    b.emitU16(OpCode::Constant, twenty);
+    b.emitU16(OpCode::BuildVector, 2);
+    b.emitU16(OpCode::DefineGlobal, vName);  // v = [10, 20]
+
+    b.emitU16(OpCode::GetGlobal, vName);
+    b.emitU16(OpCode::Constant, negOne);
+    b.emitU16(OpCode::Constant, ninetyNine);
+    b.emit(OpCode::SetIndex);  // v[-1] = 99 -- v is now [10, 99]
+    b.emit(OpCode::Pop);
+
+    b.emitU16(OpCode::GetGlobal, vName);
+    b.emitU16(OpCode::Constant, negOne);
+    b.emit(OpCode::GetIndex);
+    b.emitU16(OpCode::DefineGlobal, result);
+
+    vm.interpret(b.build());
+
+    REQUIRE(asNumber(*vm.getGlobal("result")) == 99.0);
+}
+
+TEST_CASE("an out-of-range negative index is still a runtime error", "[vm]") {
     Vm vm;
     ChunkBuilder b(vm);
     uint16_t one = b.addNumberConstant(1);
-    uint16_t negOne = b.addNumberConstant(-1);
+    uint16_t tooNegative = b.addNumberConstant(-100);
     b.emitU16(OpCode::Constant, one);
-    b.emitU16(OpCode::BuildVector, 1);
-    b.emitU16(OpCode::Constant, negOne);
+    b.emitU16(OpCode::BuildVector, 1);  // [1] -- valid indices are 0 and -1 only
+    b.emitU16(OpCode::Constant, tooNegative);
     b.emit(OpCode::GetIndex);
 
     REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
@@ -228,6 +283,211 @@ TEST_CASE("assigning into a non-vector value via index is a runtime error", "[vm
     b.emitU16(OpCode::Constant, zero);
     b.emitU16(OpCode::Constant, one);
     b.emit(OpCode::SetIndex);
+
+    REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
+}
+
+// docs/PLAN-0.3.md decision 3: v[a:b], end-inclusive slices.
+
+namespace {
+
+// Builds v = [10, 20, 30, 40] as a global named "v" and returns the
+// vector's own element constants for reuse by callers that need to
+// assert against specific values.
+void buildFourElementVector(Vm& vm, ChunkBuilder& b, uint16_t vName) {
+    uint16_t ten = b.addNumberConstant(10);
+    uint16_t twenty = b.addNumberConstant(20);
+    uint16_t thirty = b.addNumberConstant(30);
+    uint16_t forty = b.addNumberConstant(40);
+    b.emitU16(OpCode::Constant, ten);
+    b.emitU16(OpCode::Constant, twenty);
+    b.emitU16(OpCode::Constant, thirty);
+    b.emitU16(OpCode::Constant, forty);
+    b.emitU16(OpCode::BuildVector, 4);
+    b.emitU16(OpCode::DefineGlobal, vName);
+}
+
+}  // namespace
+
+TEST_CASE("a basic slice is end-inclusive", "[vm]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t vName = b.addStringConstant("v");
+    uint16_t result = b.addStringConstant("result");
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t two = b.addNumberConstant(2);
+    buildFourElementVector(vm, b, vName);  // v = [10, 20, 30, 40]
+
+    b.emitU16(OpCode::GetGlobal, vName);
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::Constant, two);
+    b.emit(OpCode::GetSlice);  // v[1:2] -- end-inclusive, so [20, 30]
+    b.emitU16(OpCode::DefineGlobal, result);
+
+    vm.interpret(b.build());
+
+    auto* vec = static_cast<ObjVector*>(asObj(*vm.getGlobal("result")));
+    REQUIRE(vec->elements.size() == 2);
+    REQUIRE(asNumber(vec->elements[0]) == 20.0);
+    REQUIRE(asNumber(vec->elements[1]) == 30.0);
+}
+
+TEST_CASE("an omitted slice bound defaults to start/end", "[vm]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t vName = b.addStringConstant("v");
+    uint16_t result = b.addStringConstant("result");
+    uint16_t two = b.addNumberConstant(2);
+    buildFourElementVector(vm, b, vName);  // v = [10, 20, 30, 40]
+
+    b.emitU16(OpCode::GetGlobal, vName);
+    b.emit(OpCode::Nil);  // omitted start -- defaults to 0
+    b.emitU16(OpCode::Constant, two);
+    b.emit(OpCode::GetSlice);  // v[:2] -- [10, 20, 30]
+    b.emitU16(OpCode::DefineGlobal, result);
+
+    vm.interpret(b.build());
+
+    auto* vec = static_cast<ObjVector*>(asObj(*vm.getGlobal("result")));
+    REQUIRE(vec->elements.size() == 3);
+    REQUIRE(asNumber(vec->elements[2]) == 30.0);
+}
+
+TEST_CASE("both slice bounds omitted copies the whole vector", "[vm]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t vName = b.addStringConstant("v");
+    uint16_t result = b.addStringConstant("result");
+    buildFourElementVector(vm, b, vName);
+
+    b.emitU16(OpCode::GetGlobal, vName);
+    b.emit(OpCode::Nil);
+    b.emit(OpCode::Nil);
+    b.emit(OpCode::GetSlice);  // v[:]
+    b.emitU16(OpCode::DefineGlobal, result);
+
+    vm.interpret(b.build());
+
+    auto* vec = static_cast<ObjVector*>(asObj(*vm.getGlobal("result")));
+    REQUIRE(vec->elements.size() == 4);
+}
+
+TEST_CASE("negative slice bounds count from the end", "[vm]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t vName = b.addStringConstant("v");
+    uint16_t result = b.addStringConstant("result");
+    uint16_t negThree = b.addNumberConstant(-3);
+    uint16_t negOne = b.addNumberConstant(-1);
+    buildFourElementVector(vm, b, vName);  // v = [10, 20, 30, 40]
+
+    b.emitU16(OpCode::GetGlobal, vName);
+    b.emitU16(OpCode::Constant, negThree);
+    b.emitU16(OpCode::Constant, negOne);
+    b.emit(OpCode::GetSlice);  // v[-3:-1] -- [20, 30, 40]
+    b.emitU16(OpCode::DefineGlobal, result);
+
+    vm.interpret(b.build());
+
+    auto* vec = static_cast<ObjVector*>(asObj(*vm.getGlobal("result")));
+    REQUIRE(vec->elements.size() == 3);
+    REQUIRE(asNumber(vec->elements[0]) == 20.0);
+    REQUIRE(asNumber(vec->elements[2]) == 40.0);
+}
+
+TEST_CASE("a slice with start after stop is an empty vector, not an error", "[vm]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t vName = b.addStringConstant("v");
+    uint16_t result = b.addStringConstant("result");
+    uint16_t three = b.addNumberConstant(3);
+    uint16_t one = b.addNumberConstant(1);
+    buildFourElementVector(vm, b, vName);
+
+    b.emitU16(OpCode::GetGlobal, vName);
+    b.emitU16(OpCode::Constant, three);
+    b.emitU16(OpCode::Constant, one);
+    b.emit(OpCode::GetSlice);  // v[3:1]
+    b.emitU16(OpCode::DefineGlobal, result);
+
+    vm.interpret(b.build());
+
+    auto* vec = static_cast<ObjVector*>(asObj(*vm.getGlobal("result")));
+    REQUIRE(vec->elements.empty());
+}
+
+TEST_CASE("an out-of-range slice bound clamps instead of erroring", "[vm]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t vName = b.addStringConstant("v");
+    uint16_t result = b.addStringConstant("result");
+    uint16_t zero = b.addNumberConstant(0);
+    uint16_t hundred = b.addNumberConstant(100);
+    buildFourElementVector(vm, b, vName);  // v = [10, 20, 30, 40]
+
+    b.emitU16(OpCode::GetGlobal, vName);
+    b.emitU16(OpCode::Constant, zero);
+    b.emitU16(OpCode::Constant, hundred);
+    b.emit(OpCode::GetSlice);  // v[0:100] -- clamps to the whole vector
+    b.emitU16(OpCode::DefineGlobal, result);
+
+    vm.interpret(b.build());
+
+    auto* vec = static_cast<ObjVector*>(asObj(*vm.getGlobal("result")));
+    REQUIRE(vec->elements.size() == 4);
+}
+
+TEST_CASE("a slice is a copy, not a view -- mutating it doesn't mutate the source", "[vm]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t vName = b.addStringConstant("v");
+    uint16_t resultName = b.addStringConstant("result");
+    uint16_t zero = b.addNumberConstant(0);
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t ninetyNine = b.addNumberConstant(99);
+    buildFourElementVector(vm, b, vName);  // v = [10, 20, 30, 40]
+
+    b.emitU16(OpCode::GetGlobal, vName);
+    b.emitU16(OpCode::Constant, zero);
+    b.emitU16(OpCode::Constant, one);
+    b.emit(OpCode::GetSlice);  // result = v[0:1] = [10, 20]
+    b.emitU16(OpCode::DefineGlobal, resultName);
+
+    b.emitU16(OpCode::GetGlobal, resultName);
+    b.emitU16(OpCode::Constant, zero);
+    b.emitU16(OpCode::Constant, ninetyNine);
+    b.emit(OpCode::SetIndex);  // result[0] = 99 -- must not touch v
+    b.emit(OpCode::Pop);
+
+    vm.interpret(b.build());
+
+    auto* original = static_cast<ObjVector*>(asObj(*vm.getGlobal("v")));
+    REQUIRE(asNumber(original->elements[0]) == 10.0);
+}
+
+TEST_CASE("slicing a non-vector value is a runtime error", "[vm]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t zero = b.addNumberConstant(0);
+    b.emitU16(OpCode::Constant, one);  // receiver = 1, not a vector
+    b.emit(OpCode::Nil);
+    b.emitU16(OpCode::Constant, zero);
+    b.emit(OpCode::GetSlice);
+
+    REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
+}
+
+TEST_CASE("a non-number slice bound is a runtime error", "[vm]") {
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t vName = b.addStringConstant("v");
+    buildFourElementVector(vm, b, vName);
+
+    b.emitU16(OpCode::GetGlobal, vName);
+    b.emit(OpCode::Nil);
+    b.emit(OpCode::True);  // stop bound = true, not a number
+    b.emit(OpCode::GetSlice);
 
     REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
 }

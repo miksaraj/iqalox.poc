@@ -308,6 +308,26 @@ let ``indexed assignment resolves obj, index, and value sub-expressions`` () =
     | _ -> failwith $"unexpected shape: %A{bound}"
 
 [<Fact>]
+let ``a slice with both bounds resolves the object and both bound sub-expressions`` () =
+    // docs/PLAN-0.3.md decision 3.
+    let bound, errors = resolveSource "var v = [1, 2, 3]\nv[1:2]"
+    Assert.Empty errors
+    match bound with
+    | [ BVarStmt(DeclaredGlobal "v", _, _)
+        BExpressionStmt(BSlice(BVariable(GlobalBinding "v", _), Some(BLiteral(NumberValue 1.0)), Some(BLiteral(NumberValue 2.0)), _)) ] ->
+        ()
+    | _ -> failwith $"unexpected shape: %A{bound}"
+
+[<Fact>]
+let ``a slice with an omitted bound resolves it as None, not a placeholder expression`` () =
+    let bound, errors = resolveSource "var v = [1, 2, 3]\nv[:2]"
+    Assert.Empty errors
+    match bound with
+    | [ BVarStmt(DeclaredGlobal "v", _, _)
+        BExpressionStmt(BSlice(BVariable(GlobalBinding "v", _), None, Some(BLiteral(NumberValue 2.0)), _)) ] -> ()
+    | _ -> failwith $"unexpected shape: %A{bound}"
+
+[<Fact>]
 let ``a lambda's parameters resolve as locals, same as a named function's`` () =
     let bound, errors = resolveSource "(a, b) -> a + b"
     Assert.Empty errors
