@@ -107,19 +107,32 @@ and private resolveUpvalue (context: FunctionContext) (name: string) : (int * bo
 /// file that global happens to be declared. Also where top-level
 /// redeclaration is caught (`var x = 1 ... var x = 2`, matching `poc`'s
 /// `Environment.define`'s "already declared" rule, just moved to compile
-/// time here).
-let private preRegisterGlobals (globals: Dictionary<string, bool>) (errors: ResizeArray<ResolveError>) (stmts: Stmt list) =
-    let register (name: Token) (isMutable: bool) =
+/// time here). `globalDecls` additionally records every top-level `var`/
+/// `fun`'s own declaration token, keyed by name, for the unused-variable
+/// warning (`docs/PLAN-0.3.md` decision 4) -- `class` is deliberately
+/// left out (a top-level class's *members* get their own, separate
+/// unused-property/-method check; "this class itself is never
+/// instantiated anywhere in the file" wasn't part of what was asked for).
+let private preRegisterGlobals
+    (globals: Dictionary<string, bool>)
+    (globalDecls: Dictionary<string, Token * string>)
+    (errors: ResizeArray<ResolveError>)
+    (stmts: Stmt list)
+    =
+    let register (name: Token) (isMutable: bool) (kind: string option) =
         if globals.ContainsKey name.Lexeme then
             errors.Add { Message = $"Variable '{name.Lexeme}' already declared."; Token = name }
         else
             globals.[name.Lexeme] <- isMutable
+            match kind with
+            | Some k -> globalDecls.[name.Lexeme] <- (name, k)
+            | None -> ()
 
     for stmt in stmts do
         match stmt with
-        | VarStmt(name, _, isMutable) -> register name isMutable
-        | FunctionStmt decl -> register decl.Name false
-        | ClassStmt(name, _, _, _, _, _) -> register name false
+        | VarStmt(name, _, isMutable) -> register name isMutable (Some "Variable")
+        | FunctionStmt decl -> register decl.Name false (Some "Function")
+        | ClassStmt(name, _, _, _, _, _) -> register name false None
         | _ -> ()
 
 /// A class or trait's own property/method declarations, flattened into
@@ -476,7 +489,13 @@ let private findDeclaredMethod (effectiveMembers: Dictionary<string, MemberSet>)
     | true, m -> m.Methods.ContainsKey methodName
     | false, _ -> false
 
-type private Resolver(globals: Dictionary<string, bool>, classes: Dictionary<string, ClassInfo>, effectiveMembers: Dictionary<string, MemberSet>) =
+type private Resolver
+    (
+        globals: Dictionary<string, bool>,
+        globalDecls: Dictionary<string, Token * string>,
+        classes: Dictionary<string, ClassInfo>,
+        effectiveMembers: Dictionary<string, MemberSet>
+    ) =
     let errors = ResizeArray<ResolveError>()
     let mutable context = FunctionContext(None)
     // The name of the class whose method body is currently being resolved
@@ -507,6 +526,14 @@ type private Resolver(globals: Dictionary<string, bool>, classes: Dictionary<str
     // lint. Checked against each class's own literal member declarations
     // in `CheckUnusedClassMembers` once the whole program has resolved.
     let usedSelfNames = HashSet<string>()
+
+    // Every top-level global name (`var`/`fun`) seen on the read side of
+    // `resolveReference` anywhere in the program -- same read-vs-write
+    // rule as a local (`markUsed` below), so a global that's only ever
+    // assigned and never read still warns, same as a local would.
+    // Checked in `CheckUnusedGlobals` against `globalDecls` once the
+    // whole program has resolved.
+    let usedGlobalNames = HashSet<string>()
 
     let beginScope () = context.ScopeDepth <- context.ScopeDepth + 1
 
@@ -540,7 +567,10 @@ type private Resolver(globals: Dictionary<string, bool>, classes: Dictionary<str
             | Some(index, isMutable) -> UpvalueBinding index, Some isMutable
             | None ->
                 match globals.TryGetValue name with
-                | true, isMutable -> GlobalBinding name, Some isMutable
+                | true, isMutable ->
+                    if markUsed then
+                        usedGlobalNames.Add name |> ignore
+                    GlobalBinding name, Some isMutable
                 | false, _ -> GlobalBinding name, None
 
     let declareVariable (name: Token) (isMutable: bool) : DeclaredBinding =
@@ -590,6 +620,27 @@ type private Resolver(globals: Dictionary<string, bool>, classes: Dictionary<str
                     && not (usedSelfNames.Contains methodName)
                 then
                     warn meth.Name $"Method '{methodName}' is never used."
+
+    /// Warns on any top-level `var`/`fun` name in `globalDecls` that
+    /// `usedGlobalNames` never saw a real read of anywhere in the
+    /// program -- same read-vs-write rule as a local (assigning to a
+    /// global without ever reading it back still warns). `exemptNames`
+    /// lets the caller carve out names that shouldn't be checked at all
+    /// even though they're ordinary top-level declarations -- `Program.fs`
+    /// uses this for the prelude's own `map`/`filter`/`reduce`/`sort`/
+    /// `elementwise`, textually merged in ahead of the user's own source
+    /// (`docs/PLAN-0.2.md` Phase 5): a user program that only calls
+    /// `map` shouldn't be warned that `sort` is "unused" when it never
+    /// asked for `sort` to be declared in the first place. Must run after
+    /// the whole program has resolved, same as `CheckUnusedClassMembers`.
+    member this.CheckUnusedGlobals(exemptNames: Set<string>) =
+        for KeyValue(name, (token, kind)) in globalDecls do
+            if
+                not (isExemptFromUnusedCheck name)
+                && not (exemptNames.Contains name)
+                && not (usedGlobalNames.Contains name)
+            then
+                warn token $"{kind} '{name}' is never used."
 
     member this.ResolveStmt(stmt: Stmt) : BoundStmt =
         match stmt with
@@ -986,20 +1037,16 @@ type private Resolver(globals: Dictionary<string, bool>, classes: Dictionary<str
 let private nativeGlobals =
     [ "print"; "concat"; "push"; "pop"; "length"; "reverse"; "transpose"; "multiply"; "add"; "subtract" ]
 
-/// Resolves `stmts` into a `BoundStmt` list plus any resolution errors
-/// (compile-time immutability violations, redeclarations, `self`/`super`
-/// used where they can't resolve) and, separately, any unused-variable/
-/// -parameter/-private-member warnings (`docs/PLAN-0.3.md` decision 4) --
-/// the caller should print the latter without letting them affect exit
-/// status. Never throws -- every error is recorded and resolution
-/// continues, since (unlike a syntax error) a semantic error doesn't
-/// prevent understanding the rest of the program's structure.
-let resolve (stmts: Stmt list) : BoundStmt list * ResolveError list * ResolveError list =
+/// Shared implementation behind `resolve`/`resolveWithExemptGlobals`
+/// below -- `exemptGlobalNames` is the only thing that differs between
+/// the two public entry points.
+let private resolveInternal (stmts: Stmt list) (exemptGlobalNames: Set<string>) : BoundStmt list * ResolveError list * ResolveError list =
     let globals = Dictionary<string, bool>()
     for name in nativeGlobals do
         globals.[name] <- false
+    let globalDecls = Dictionary<string, Token * string>()
     let preErrors = ResizeArray<ResolveError>()
-    preRegisterGlobals globals preErrors stmts
+    preRegisterGlobals globals globalDecls preErrors stmts
 
     let traits = Dictionary<string, TraitInfo>()
     preRegisterTraits traits preErrors stmts
@@ -1017,11 +1064,35 @@ let resolve (stmts: Stmt list) : BoundStmt list * ResolveError list * ResolveErr
     // error instead of silently vanishing.
     let nonTraitStmts = stmts |> List.filter (function TraitStmt _ -> false | _ -> true)
 
-    let resolver = Resolver(globals, classes, effectiveMembers)
+    let resolver = Resolver(globals, globalDecls, classes, effectiveMembers)
     let bound = nonTraitStmts |> List.map resolver.ResolveStmt
-    // Must run after every class/method body above has resolved, so
-    // `usedSelfNames` (populated along the way) is complete before
-    // checking it.
+    // Both must run after every top-level/class/method body above has
+    // resolved, so `usedSelfNames`/`usedGlobalNames` (populated along the
+    // way) are complete before checking them.
     resolver.CheckUnusedClassMembers()
+    resolver.CheckUnusedGlobals(exemptGlobalNames)
 
     bound, (List.ofSeq preErrors) @ resolver.Errors, resolver.Warnings
+
+/// Resolves `stmts` into a `BoundStmt` list plus any resolution errors
+/// (compile-time immutability violations, redeclarations, `self`/`super`
+/// used where they can't resolve) and, separately, any unused-variable/
+/// -parameter/-private-member/-global warnings (`docs/PLAN-0.3.md`
+/// decision 4) -- the caller should print the latter without letting them
+/// affect exit status. Never throws -- every error is recorded and
+/// resolution continues, since (unlike a syntax error) a semantic error
+/// doesn't prevent understanding the rest of the program's structure.
+let resolve (stmts: Stmt list) : BoundStmt list * ResolveError list * ResolveError list = resolveInternal stmts Set.empty
+
+/// Like `resolve`, but never warns about an unused top-level `var`/`fun`
+/// whose name is in `exemptGlobalNames`, regardless of whether the
+/// program actually reads it. `Program.fs` uses this for the merged
+/// prelude+user program, passing every one of the prelude's own function
+/// names (`map`/`filter`/`reduce`/`sort`/`elementwise`) -- these are
+/// ordinary top-level `fun` declarations exactly like any user function
+/// (`docs/PLAN-0.2.md` Phase 5), so without this exemption a user program
+/// that only calls `map` would be warned that `sort`/`filter`/`reduce`/
+/// `elementwise` are "unused," even though the user never declared them
+/// and has no way to remove them.
+let resolveWithExemptGlobals (stmts: Stmt list) (exemptGlobalNames: Set<string>) : BoundStmt list * ResolveError list * ResolveError list =
+    resolveInternal stmts exemptGlobalNames

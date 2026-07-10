@@ -17,6 +17,7 @@
 module Iqalox.Program
 
 open System
+open Iqalox.Ast
 open Iqalox.Scanner
 open Iqalox.Parser
 open Iqalox.Resolver
@@ -56,7 +57,19 @@ let main argv =
                             eprintfn "[line %d] Error: %s" e.Token.Line e.Message
                         65
                     else
-                        let bound, resolveErrors, resolveWarnings = resolve (preludeStmts @ stmts)
+                        // `docs/PLAN-0.3.md` decision 4's unused-global
+                        // check shouldn't flag a prelude function the
+                        // user's own program never happens to call --
+                        // `resolveWithExemptGlobals` carves those out by
+                        // name so only the user's own dead globals warn.
+                        let preludeFunctionNames =
+                            preludeStmts
+                            |> List.choose (function
+                                | FunctionStmt decl -> Some decl.Name.Lexeme
+                                | _ -> None)
+                            |> Set.ofList
+                        let bound, resolveErrors, resolveWarnings =
+                            resolveWithExemptGlobals (preludeStmts @ stmts) preludeFunctionNames
 
                         for w in resolveWarnings do
                             eprintfn "[line %d] Warning: %s" w.Token.Line w.Message

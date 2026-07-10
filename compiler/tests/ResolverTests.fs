@@ -24,6 +24,15 @@ let private resolveSourceWithWarnings (source: string) : BoundStmt list * Resolv
     let stmts, _ = parse tokens
     resolve stmts
 
+/// Scans and parses `source` into a `Stmt list` without resolving it --
+/// for tests exercising `resolveWithExemptGlobals` directly, which (unlike
+/// `resolve`) takes an already-parsed `Stmt list` plus the exempt-name set.
+let private parseSource (source: string) : Stmt list =
+    let source = if source.EndsWith "\n" then source else source + "\n"
+    let tokens, _ = scanTokens source
+    let stmts, _ = parse tokens
+    stmts
+
 [<Fact>]
 let ``a top-level var resolves as a global`` () =
     let bound, errors = resolveSource "var x = 1\nx"
@@ -682,3 +691,67 @@ let ``a private method only ever called externally (not via self) still warns`` 
     Assert.Empty errors
     Assert.Single warnings |> ignore
     Assert.Contains("Method 'hidden' is never used", warnings.[0].Message)
+
+// --- Extending the check to top-level (global) `var`/`fun` declarations,
+// --- per repository-owner follow-up (not covered by the original
+// --- AskUserQuestion round, which only asked about private class
+// --- members) ---
+
+[<Fact>]
+let ``an unused top-level var produces a warning`` () =
+    let _, errors, warnings = resolveSourceWithWarnings "var x = 1"
+    Assert.Empty errors
+    Assert.Single warnings |> ignore
+    Assert.Contains("Variable 'x' is never used", warnings.[0].Message)
+
+[<Fact>]
+let ``an unused top-level fun produces a warning`` () =
+    let _, errors, warnings = resolveSourceWithWarnings "fun f() {\n    return 1\n}"
+    Assert.Empty errors
+    Assert.Single warnings |> ignore
+    Assert.Contains("Function 'f' is never used", warnings.[0].Message)
+
+[<Fact>]
+let ``a top-level var that's read elsewhere in the file produces no warning`` () =
+    let _, errors, warnings = resolveSourceWithWarnings "var x = 1\nprint x"
+    Assert.Empty errors
+    Assert.Empty warnings
+
+[<Fact>]
+let ``a top-level fun that's called elsewhere in the file produces no warning`` () =
+    let _, errors, warnings = resolveSourceWithWarnings "fun f() {\n    return 1\n}\nprint f()"
+    Assert.Empty errors
+    Assert.Empty warnings
+
+[<Fact>]
+let ``a top-level var that's only ever assigned, never read, still warns`` () =
+    let _, errors, warnings = resolveSourceWithWarnings "var x mut = 1\nx = 2"
+    Assert.Empty errors
+    Assert.Single warnings |> ignore
+    Assert.Contains("Variable 'x' is never used", warnings.[0].Message)
+
+[<Fact>]
+let ``an underscore-prefixed unused top-level var or fun is exempt`` () =
+    let source = "var _x = 1\nfun _f() {\n    return 1\n}"
+    let _, errors, warnings = resolveSourceWithWarnings source
+    Assert.Empty errors
+    Assert.Empty warnings
+
+[<Fact>]
+let ``a never-instantiated top-level class produces no warning -- classes aren't part of this check`` () =
+    let _, errors, warnings = resolveSourceWithWarnings "class Widget {}"
+    Assert.Empty errors
+    Assert.Empty warnings
+
+[<Fact>]
+let ``resolveWithExemptGlobals never warns about a name in the exempt set, even if truly unused`` () =
+    let _, errors, warnings = resolveWithExemptGlobals (parseSource "var x = 1") (Set.ofList [ "x" ])
+    Assert.Empty errors
+    Assert.Empty warnings
+
+[<Fact>]
+let ``resolveWithExemptGlobals still warns about a top-level name that isn't in the exempt set`` () =
+    let _, errors, warnings = resolveWithExemptGlobals (parseSource "var x = 1\nvar y = 2\nprint y") (Set.ofList [ "y" ])
+    Assert.Empty errors
+    Assert.Single warnings |> ignore
+    Assert.Contains("Variable 'x' is never used", warnings.[0].Message)

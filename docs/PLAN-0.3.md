@@ -432,6 +432,49 @@ externally (never via `self`) still warns (documented as the deliberate
 at runtime anyway, since a non-`pub` method can't be invoked from outside
 its class).
 
+**Follow-up correction, same phase**: the first pass of this phase shipped
+with top-level (global) `var`/`fun` declarations deliberately excluded
+from the check — a scoping call made unilaterally rather than raised as
+its own question, unlike the private-class-member scope above, which
+*was* explicitly asked and answered. The repository owner caught this
+gap directly and it was corrected the same phase rather than deferred:
+top-level `var`/`fun` are now checked with the identical read-vs-write
+rule locals already use (a global assigned but never read still warns).
+`preRegisterGlobals` (`Resolver.fs`) gained a second output,
+`globalDecls: Dictionary<string, Token * string>`, recording each
+top-level `var`/`fun`'s own declaration token and a message-kind label
+("Variable"/"Function") — deliberately **not** populated for top-level
+`class` declarations, since "this class is never instantiated in the
+file" wasn't part of what was actually asked for or answered, unlike the
+class-*member* check. `resolveReference`'s existing global fallthrough
+now also populates a new `usedGlobalNames: HashSet<string>` whenever
+`markUsed` is true, mirroring `usedSelfNames`'s shape; `CheckUnusedGlobals`
+warns on any `globalDecls` entry `usedGlobalNames` never saw, honoring
+the same `_`-prefix exemption as everything else.
+
+This surfaced a real problem specific to `compiler/src/Prelude.fs`'s
+five stdlib functions (`docs/PLAN-0.2.md` Phase 5): `map`/`filter`/
+`reduce`/`sort`/`elementwise` are ordinary top-level `fun` declarations,
+textually merged ahead of the user's own source before resolving
+(`Program.fs`) — so, naively, a user program that only calls `map` would
+now be told `sort`/`filter`/`reduce`/`elementwise` are "unused," even
+though the user never declared them and has no way to remove them. Fixed
+by splitting `resolve`'s implementation into a private `resolveInternal`
+taking an `exemptGlobalNames: Set<string>` and two public entry points:
+`resolve` (unchanged 1-argument shape, `exemptGlobalNames = Set.empty` --
+every existing call site, including every test helper, keeps compiling
+unmodified) and a new `resolveWithExemptGlobals`, which `Program.fs` now
+calls instead, passing every one of `preludeStmts`' own `FunctionStmt`
+names (derived from the already-parsed prelude AST, not a second
+hardcoded name list). A full re-sweep of every `langspec/examples/*.iqx`
+fixture after this change produced zero warnings, confirming no example
+happens to declare a genuinely dead top-level global either. 8 new xUnit
+tests: unused top-level var/fun warn, a read/called one doesn't, write-
+only still warns, `_`-prefix exemption, a never-instantiated top-level
+class produces no warning (classes are deliberately out of scope), and
+two `resolveWithExemptGlobals`-specific tests (an exempted name never
+warns; a non-exempted sibling still does).
+
 **Phase 4 — Module system: multi-file compilation infrastructure.**
 `Program.fs`'s dependency-resolution pass (file discovery, path-to-module
 mapping, cycle detection); `Resolver.fs` processes the whole resolved
