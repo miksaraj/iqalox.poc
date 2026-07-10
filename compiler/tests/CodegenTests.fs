@@ -522,6 +522,120 @@ let ``list comprehension compiles to a call of a synthetic closure, source evalu
     | other -> failwith $"expected a FunctionConstant, got %A{other}"
 
 [<Fact>]
+let ``a guard clause wraps the append in a conditional, same jump shape as an ordinary ternary`` () =
+    // docs/PLAN-0.3.md decision 1. `x > 0`'s comparison, then a
+    // JumpIfFalse/Jump pair around VectorAppend vs. a bare Nil, exactly
+    // mirroring how any other ternary compiles.
+    let chunk = compileSource "[x | x <- xs | x > 0]"
+    match chunk.Constants.[0] with
+    | FunctionConstant proto ->
+        Assert.Equal<Instruction[]>(
+            [| BuildVector 0
+               Constant 0
+               GetLocal 2
+               GetLocal 0
+               VectorLength
+               Less
+               JumpIfFalse 31
+               Pop
+               GetLocal 0
+               GetLocal 2
+               GetIndex
+               GetLocal 3
+               Constant 0
+               Greater
+               JumpIfFalse 21
+               Pop
+               GetLocal 1
+               GetLocal 3
+               VectorAppend
+               Nil
+               Jump 23
+               Pop
+               Nil
+               Pop
+               PopN 1
+               GetLocal 2
+               Constant 1
+               Add
+               SetLocal 2
+               Pop
+               Jump 2
+               Pop
+               GetLocal 1
+               Return
+               Nil
+               Return |],
+            proto.Chunk.Code
+        )
+    | other -> failwith $"expected a FunctionConstant, got %A{other}"
+
+[<Fact>]
+let ``two generators compile to nested loops, the second's source re-evaluated inside the first's body`` () =
+    // docs/PLAN-0.3.md decision 1. `ys` (the second generator's source) is
+    // fetched via GetGlobal *inside* the outer loop's body -- not passed
+    // in as a synthetic-closure parameter the way the first generator's
+    // source (`xs`) is -- since a later generator may need to reference
+    // an earlier one's bound value.
+    let chunk = compileSource "[x + y | x <- xs, y <- ys]"
+    match chunk.Constants.[0] with
+    | FunctionConstant proto ->
+        Assert.Equal(1, proto.Arity) // still just one parameter -- only the first generator's source
+        Assert.Equal<Instruction[]>(
+            [| BuildVector 0
+               Constant 0
+               GetLocal 2
+               GetLocal 0
+               VectorLength
+               Less
+               JumpIfFalse 44
+               Pop
+               GetLocal 0
+               GetLocal 2
+               GetIndex
+               GetGlobal 1 // "ys", re-fetched every outer iteration
+               Constant 0
+               GetLocal 5
+               GetLocal 4
+               VectorLength
+               Less
+               JumpIfFalse 36
+               Pop
+               GetLocal 4
+               GetLocal 5
+               GetIndex
+               GetLocal 1
+               GetLocal 3
+               GetLocal 6
+               Add
+               VectorAppend
+               Nil
+               Pop
+               PopN 1
+               GetLocal 5
+               Constant 2
+               Add
+               SetLocal 5
+               Pop
+               Jump 13
+               Pop
+               PopN 3
+               GetLocal 2
+               Constant 2
+               Add
+               SetLocal 2
+               Pop
+               Jump 2
+               Pop
+               GetLocal 1
+               Return
+               Nil
+               Return |],
+            proto.Chunk.Code
+        )
+    | other -> failwith $"expected a FunctionConstant, got %A{other}"
+
+[<Fact>]
 let ``a spread-free vector literal still compiles to a single fixed-operand BuildVector`` () =
     // No behavior change for the common case -- VectorExtend only enters
     // the picture once a spread element is actually present.

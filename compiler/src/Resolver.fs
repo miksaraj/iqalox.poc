@@ -754,23 +754,63 @@ type private Resolver(globals: Dictionary<string, bool>, classes: Dictionary<str
             let boundItem = this.ResolveExpr item
             let boundList = this.ResolveExpr list
             BCall(BLambda boundDecl, [ boundItem; boundList ])
-        | ListComprehension(body, variable, source, bracket) ->
+        | ListComprehension(body, generators, guard, bracket) ->
             // Same runtime-length problem, same synthetic-closure fix as
-            // `Cons` above -- `source` becomes the closure's sole
-            // parameter (evaluated once, in the enclosing scope); the
-            // user's own bound name (`variable`) is declared fresh each
-            // iteration inside the loop body's own block scope (so its
-            // slot is correctly reused iteration to iteration, exactly
-            // like any other block-scoped `var` already is), and `body`
-            // is resolved *within* the synthetic function so any
-            // reference to an enclosing-scope name (not just `variable`)
-            // correctly captures it as an upvalue, same as a lambda's
-            // body would.
+            // `Cons` above. `docs/PLAN-0.3.md` decision 1 generalizes
+            // `0.2`'s single fixed generator into a comma-separated list
+            // (desugared to nested loops, outermost/first-written
+            // generator first) plus an optional trailing guard.
+            //
+            // Only the *first* generator's source is evaluated once, in
+            // the enclosing scope, and passed in as the synthetic
+            // closure's sole parameter -- exactly matching `0.2`'s own
+            // shape byte-for-byte when there's only one generator and no
+            // guard, so nothing here regresses that already-shipped case.
+            // Every later generator's source is instead declared as a
+            // fresh local *inside* the previous generator's loop body,
+            // re-evaluated on every outer iteration -- required, not just
+            // convenient, since a later generator's source expression may
+            // reference an earlier generator's bound name (`[p | x <- xs,
+            // y <- range x]`, decision 1's own example) and can only see
+            // that name in scope from inside the enclosing loop.
             let sourceParam = { bracket with Type = Identifier; Lexeme = "$source" }
             let resultName = { bracket with Type = Identifier; Lexeme = "$result" }
             let indexName = { bracket with Type = Identifier; Lexeme = "$index" }
             let lessOp = { bracket with Type = Less; Lexeme = "<" }
             let incrOp = { bracket with Type = PlusPlus; Lexeme = "++" }
+            let questionOp = { bracket with Type = QuestionMark; Lexeme = "?" }
+            let colonOp = { bracket with Type = Colon; Lexeme = ":" }
+            let appendStmt = ExpressionStmt(InternalVectorAppend(Variable resultName, body))
+            let innermost =
+                match guard with
+                | None -> appendStmt
+                | Some g ->
+                    ExpressionStmt(
+                        Ternary(g, questionOp, InternalVectorAppend(Variable resultName, body), colonOp, Literal NilValue)
+                    )
+            // Builds generators.[1..], nesting each one's loop inside the
+            // previous, with `inner` at the very center. `generators.[0]`
+            // is handled separately below since its source comes from the
+            // parameter, not a freshly declared local.
+            let rec buildInnerLoops (rest: (int * Token * Expr) list) (inner: Stmt) : Stmt list =
+                match rest with
+                | [] -> [ inner ]
+                | (i, variable, source) :: tail ->
+                    let sourceName = { bracket with Type = Identifier; Lexeme = $"$source{i}" }
+                    let indexN = { bracket with Type = Identifier; Lexeme = $"$index{i}" }
+                    [ VarStmt(sourceName, Some source, false)
+                      VarStmt(indexN, Some(Literal(NumberValue 0.0)), true)
+                      ForStmt(
+                          None,
+                          Some(Binary(Variable indexN, lessOp, InternalVectorLength(Variable sourceName))),
+                          Some(Unary(incrOp, Variable indexN)),
+                          Block(
+                              VarStmt(variable, Some(Index(Variable sourceName, Variable indexN, bracket)), false)
+                              :: buildInnerLoops tail inner
+                          )
+                      ) ]
+            let firstVariable, _ = generators.Head
+            let laterGenerators = generators.Tail |> List.mapi (fun i (v, s) -> i + 1, v, s)
             let syntheticDecl: FunctionDecl =
                 { Name = { bracket with Type = Identifier; Lexeme = "comprehension" }
                   Parameters = [ sourceParam ]
@@ -781,15 +821,16 @@ type private Resolver(globals: Dictionary<string, bool>, classes: Dictionary<str
                           None,
                           Some(Binary(Variable indexName, lessOp, InternalVectorLength(Variable sourceParam))),
                           Some(Unary(incrOp, Variable indexName)),
-                          Block [
-                              VarStmt(variable, Some(Index(Variable sourceParam, Variable indexName, bracket)), false)
-                              ExpressionStmt(InternalVectorAppend(Variable resultName, body))
-                          ]
+                          Block(
+                              VarStmt(firstVariable, Some(Index(Variable sourceParam, Variable indexName, bracket)), false)
+                              :: buildInnerLoops laterGenerators innermost
+                          )
                       )
                       ReturnStmt(bracket, Some(Variable resultName)) ]
                   IsPub = false }
             let boundDecl = this.ResolveFunction(syntheticDecl, isMethod = false)
-            let boundSource = this.ResolveExpr source
+            let _, firstSource = generators.Head
+            let boundSource = this.ResolveExpr firstSource
             BCall(BLambda boundDecl, [ boundSource ])
         | InternalVectorLength vector -> BVectorLengthInternal(this.ResolveExpr vector)
         | InternalVectorAppend(vector, value) -> BVectorAppendInternal(this.ResolveExpr vector, this.ResolveExpr value)

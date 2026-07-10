@@ -57,7 +57,13 @@ type Expr =
     | Slice of obj: Expr * start: Expr option * stop: Expr option * bracket: Token
     | Lambda of parameters: Token list * arrow: Token * body: Expr
     | Cons of item: Expr * list: Expr * bracket: Token
-    | ListComprehension of body: Expr * variable: Token * source: Expr * bracket: Token
+    /// `docs/PLAN-0.3.md` decision 1 -- `generators` is always non-empty
+    /// (comma-separated `x <- xs` clauses, outermost/first-written
+    /// first); `guard`, when present, is introduced by a second `|`
+    /// after the generator list (`[expr | x <- xs, y <- ys | guard]`).
+    /// `0.2` shipped exactly one generator and no guard; both are now
+    /// optional/repeatable rather than fixed.
+    | ListComprehension of body: Expr * generators: (Token * Expr) list * guard: Expr option * bracket: Token
     /// Internal-only, never produced by `Parser.fs` -- `Resolver.fs`
     /// synthesizes these while desugaring `Cons`/`ListComprehension` into
     /// a call to a synthetic closure (see its doc comment on those
