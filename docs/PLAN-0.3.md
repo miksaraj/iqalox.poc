@@ -236,7 +236,7 @@ each one, verified via new tests (§6).
 | Slices (`v[a:b]`, end-inclusive, read-only) | §1.3 | Done |
 | Multi-generator list comprehensions | §1.1 | Done |
 | List comprehension guard clause | §1.1 | Done |
-| Unused-variable compile-time warning | §2.3 | Not started |
+| Unused-variable compile-time warning | §2.3 | Done |
 | Module support (file-based, `import`, compile-time-only) | §1.4-9 | Not started |
 | Array-manipulation stdlib namespace revisit | §2.1 | Not started (open question) |
 | First set of compiler optimizations | §2.2 | Not started |
@@ -336,8 +336,101 @@ item 5 (single-generator/no-guard limitation) removed and the list
 renumbered — cross-checked against `docs/PLAN-0.3.md`'s own Phase 1 risk
 entry, which cited the old item 12 (now item 11) by number.
 
-**Phase 3 — Unused-variable warnings.** `Resolver.fs`-only (§3); resolve
-open question 3 (`_`-prefix exemption) when this phase actually starts.
+**Phase 3 — Unused-variable warnings — done.** `Resolver.fs`-only (§3), as
+planned — no `Ast.fs`/`Bound.fs`/`Bytecode.fs`/`vm/` changes at all. Scope
+turned out to need one more concrete answer than §1's numbered decisions
+capture: an early `AskUserQuestion` round (before this document's first
+draft) asked how far the warning should reach, and the repository owner's
+answer was "also unused private class members," not just locals/
+parameters — recorded here rather than under a renumbered §1 decision,
+since renumbering would have disturbed every existing cross-reference to
+decisions 1-9. Open question 3 (`_`-prefix exemption) is resolved the same
+way: proceeded with the proposed default (yes, exempt) rather than asking
+again, since it was flagged as a small, reversible detail up front.
+
+`Resolver.fs`'s `LocalVar` record gained `NameToken: Token option` (`None`
+for the synthetic `self`/`super` locals, `Some` for everything
+`declareVariable` actually declares) and a `mutable Used: bool`, flipped
+in place — F# records are reference types, so mutating a `LocalVar`
+fetched out of `FunctionContext.Locals` updates the stored instance
+directly, needing no second pass over the tree. Only a real **read**
+(`resolveReference`'s `Variable` case) marks a local used; a pure
+**write** (`Assign`) does not, threaded via a new `markUsed: bool`
+parameter added to every one of `resolveReference`'s 8 call sites — a
+variable assigned but never subsequently read is exactly the "why does
+this exist" case the warning is meant to catch. Capturing a local as an
+upvalue (`resolveUpvalue`) always counts as a use regardless of whether
+the closure that captures it reads or writes it — a deliberate
+simplification rather than threading a read/write flag through every
+recursive hop of upvalue resolution for a case narrow enough not to be
+worth it. The check itself (`checkUnusedLocals`) runs both from
+`endScope()` (the common case) and, separately, from `ResolveFunction`
+right before its own top-level scope is discarded — that scope (holding
+`self` plus every parameter and top-level body local) never goes through
+`endScope()` at all, a real gap only found once `checkUnusedLocals` was
+written and function parameters still weren't being checked.
+
+Property/method tracking works differently on purpose: a single global
+`usedSelfNames: HashSet<string>` collects every name seen on the
+right-hand side of `self.x` or `self.method()` (`Get`) *or* `self.x =
+value` (`Set`) anywhere in the whole program — both directions count as a
+use here, unlike the local/parameter read/write split above, since
+"this property is only ever written, never read" isn't the signal being
+hunted for at the class level. Deliberately a flat set of *names*, not
+scoped per class, trading a theoretical false negative (an unused private
+member in one class sharing a name with a genuinely-used private member
+in an unrelated class) for not threading a second, class-scoped
+structure through every method resolution — never produces a false
+positive, the safer failure mode for a first-pass lint. Checked once,
+after the whole program has resolved (`Resolver.CheckUnusedClassMembers`,
+called from `resolve` right after the main statement walk), against each
+class's own `ClassInfo.OwnLiteral.Properties`/`.Methods` only — trait/
+superclass/mixin-contributed members are never checked here, since they
+compose into potentially many classes and "unused by this one particular
+class" isn't a meaningful signal for them. `pub` members are always
+exempt (the point of `pub` is being part of the public surface, callable
+whether or not anything in this program happens to call it), and `init`
+is always exempt regardless of its own `pub`/private annotation
+(`docs/PLAN-0.2.md` decision 11 — externally callable regardless).
+
+`resolve`'s public signature grew a third return value
+(`BoundStmt list * ResolveError list * ResolveError list`, errors then
+warnings) — the minimal-blast-radius option, given how many indirect call
+sites destructure it, was keeping every test helper (`resolveSource` in
+`ResolverTests.fs`, `compileSource` in `CodegenTests.fs`, the prelude
+helpers in `PreludeTests.fs`) at their existing 2-tuple shape by
+discarding the new warnings list internally, and adding one new
+`resolveSourceWithWarnings` helper for the tests that actually need it,
+rather than touching every existing call site's destructuring pattern.
+`Program.fs` prints each warning (`[line N] Warning: ...`) unconditionally
+before checking `resolveErrors`, and does **not** fold them into the exit
+code — a program with only warnings still compiles and exits 0, per
+`ROADMAP.md`'s "a warning, not an error (yet)" framing.
+
+A full sweep of every `langspec/examples/*.iqx` fixture through the real
+toolchain surfaced exactly one warning, and it was a real, previously-
+unnoticed bug: `functions.iqx`'s `makeAdder`/`adder` closure example had
+`adder(i) { return n + 1 }` — ignoring its own parameter `i` entirely, so
+`add5 1` and `add5 100` both printed `6` instead of `6`/`105`. Fixed to
+`return n + i`; re-verified end to end (compile clean, no warnings, VM
+output now correct) — this is exactly the class of bug the feature is
+meant to catch, in the same spirit as the several `poc`-era bugs earlier
+phases found and fixed rather than carried forward. No dedicated new
+`langspec/examples/*.iqx` fixture was added for this phase, unlike
+Phases 1-2: those introduced new *syntax* worth demonstrating; this phase
+adds a compile-time diagnostic over syntax that already exists, with
+nothing new to show running. 14 new xUnit `Resolver.fs` tests: unused
+local/parameter warns, a used local doesn't, write-only still warns, an
+upvalue-captured variable doesn't warn, `_`-prefix exemption (both local
+and parameter), unused private property warns, a pub property never
+warns, a property only ever written via `self.x = value` doesn't warn
+(the read/write asymmetry versus locals, called out explicitly), unused
+private method warns, a pub method never warns, `init` is exempt even
+though nothing calls it via `self`, and a private method called only
+externally (never via `self`) still warns (documented as the deliberate
+`self.`-qualified-only simplification, not a bug — such a call would fail
+at runtime anyway, since a non-`pub` method can't be invoked from outside
+its class).
 
 **Phase 4 — Module system: multi-file compilation infrastructure.**
 `Program.fs`'s dependency-resolution pass (file discovery, path-to-module

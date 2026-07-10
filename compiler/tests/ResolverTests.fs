@@ -11,6 +11,17 @@ let private resolveSource (source: string) : BoundStmt list * ResolveError list 
     let source = if source.EndsWith "\n" then source else source + "\n"
     let tokens, _ = scanTokens source
     let stmts, _ = parse tokens
+    let bound, errors, _ = resolve stmts
+    bound, errors
+
+/// Like `resolveSource`, but also surfaces `docs/PLAN-0.3.md` decision 4's
+/// unused-variable/-parameter/-private-member warnings -- kept as a
+/// separate helper (rather than changing `resolveSource`'s own shape) so
+/// every existing test call site keeps destructuring a plain 2-tuple.
+let private resolveSourceWithWarnings (source: string) : BoundStmt list * ResolveError list * ResolveError list =
+    let source = if source.EndsWith "\n" then source else source + "\n"
+    let tokens, _ = scanTokens source
+    let stmts, _ = parse tokens
     resolve stmts
 
 [<Fact>]
@@ -558,3 +569,116 @@ let ``self.x = value targeting a property declared only by a with-mixin is not a
         "class Named {\n    var label\n    init(l) { self.label = l; }\n}\nclass Robot with Named {\n    rename(l) { self.label = l; }\n}"
     let _, errors = resolveSource source
     Assert.Empty errors
+
+// --- docs/PLAN-0.3.md decision 4: unused-variable/-parameter/-private-
+// --- member warnings ---
+
+[<Fact>]
+let ``an unused local variable produces a warning, not an error`` () =
+    let _, errors, warnings = resolveSourceWithWarnings "{\n    var x = 1\n}"
+    Assert.Empty errors
+    Assert.Single warnings |> ignore
+    Assert.Contains("'x' is never used", warnings.[0].Message)
+
+[<Fact>]
+let ``an unused function parameter produces a warning`` () =
+    let _, errors, warnings = resolveSourceWithWarnings "fun f(a, b) {\n    return a\n}\nf(1, 2)"
+    Assert.Empty errors
+    Assert.Single warnings |> ignore
+    Assert.Contains("'b' is never used", warnings.[0].Message)
+
+[<Fact>]
+let ``a used local variable produces no warning`` () =
+    let _, errors, warnings = resolveSourceWithWarnings "{\n    var x = 1\n    print x\n}"
+    Assert.Empty errors
+    Assert.Empty warnings
+
+[<Fact>]
+let ``a variable that is only ever assigned, never read, still warns`` () =
+    let _, errors, warnings = resolveSourceWithWarnings "{\n    var x mut = 1\n    x = 2\n}"
+    Assert.Empty errors
+    Assert.Single warnings |> ignore
+    Assert.Contains("'x' is never used", warnings.[0].Message)
+
+[<Fact>]
+let ``a variable captured by a nested closure counts as used`` () =
+    let source = "{\n    var x = 1\n    var f = () -> x\n    print f()\n}"
+    let _, errors, warnings = resolveSourceWithWarnings source
+    Assert.Empty errors
+    Assert.Empty warnings
+
+[<Fact>]
+let ``an underscore-prefixed unused local or parameter is exempt from the warning`` () =
+    let source = "fun f(_ignored) {\n    var _unused = 1\n    return 1\n}\nf(1)"
+    let _, errors, warnings = resolveSourceWithWarnings source
+    Assert.Empty errors
+    Assert.Empty warnings
+
+[<Fact>]
+let ``an unused private property produces a warning`` () =
+    let source = "class Widget {\n    var secret mut\n    init() {}\n}\nWidget()"
+    let _, errors, warnings = resolveSourceWithWarnings source
+    Assert.Empty errors
+    Assert.Single warnings |> ignore
+    Assert.Contains("Property 'secret' is never used", warnings.[0].Message)
+
+[<Fact>]
+let ``a property only ever assigned via self.x = value, never read, is still not warned about`` () =
+    // Unlike a local variable (where a pure write doesn't count as "using"
+    // it), `self.x = value` DOES count as usage for the property check --
+    // both `Get` and `Set` populate the same `self.`-qualified tracking
+    // set, a deliberate difference from the local/parameter check.
+    let source = "class Widget {\n    var secret mut\n    init(v) { self.secret = v; }\n}\nWidget(1)"
+    let _, errors, warnings = resolveSourceWithWarnings source
+    Assert.Empty errors
+    Assert.Empty warnings
+
+[<Fact>]
+let ``a pub property is never warned about even if unused`` () =
+    let source = "class Widget {\n    var secret pub mut\n    init(v) { self.secret = v; }\n}\nWidget(1)"
+    let _, errors, warnings = resolveSourceWithWarnings source
+    Assert.Empty errors
+    Assert.Empty warnings
+
+[<Fact>]
+let ``a property read only via self.x elsewhere in the class is not warned about`` () =
+    let source =
+        "class Widget {\n    var secret mut\n    init(v) { self.secret = v; }\n    reveal() { return self.secret; }\n    pub go() { return self.reveal(); }\n}\nprint Widget(1).go()"
+    let _, errors, warnings = resolveSourceWithWarnings source
+    Assert.Empty errors
+    Assert.Empty warnings
+
+[<Fact>]
+let ``an unused private method produces a warning`` () =
+    let source = "class Widget {\n    hidden() { return 1; }\n}\nWidget()"
+    let _, errors, warnings = resolveSourceWithWarnings source
+    Assert.Empty errors
+    Assert.Single warnings |> ignore
+    Assert.Contains("Method 'hidden' is never used", warnings.[0].Message)
+
+[<Fact>]
+let ``a pub method is never warned about even if unused`` () =
+    let source = "class Widget {\n    pub hidden() { return 1; }\n}\nWidget()"
+    let _, errors, warnings = resolveSourceWithWarnings source
+    Assert.Empty errors
+    Assert.Empty warnings
+
+[<Fact>]
+let ``init is exempt from the unused-method warning even though nothing ever calls it via self`` () =
+    let source = "class Widget {\n    init() {}\n}\nWidget()"
+    let _, errors, warnings = resolveSourceWithWarnings source
+    Assert.Empty errors
+    Assert.Empty warnings
+
+[<Fact>]
+let ``a private method only ever called externally (not via self) still warns`` () =
+    // Deliberate simplification (docs/PLAN-0.3.md decision 4): the check
+    // only tracks `self.`-qualified references, so an external call alone
+    // doesn't suppress the warning -- and such a call would fail at
+    // runtime anyway, since a non-pub method can't be invoked from outside
+    // its class.
+    let source = "class Widget {\n    hidden() { return 1; }\n}\nvar w = Widget()\nw.hidden()"
+    let _, errors, warnings = resolveSourceWithWarnings source
+    Assert.Empty errors
+    Assert.Single warnings |> ignore
+    Assert.Contains("Method 'hidden' is never used", warnings.[0].Message)

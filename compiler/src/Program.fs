@@ -56,7 +56,10 @@ let main argv =
                             eprintfn "[line %d] Error: %s" e.Token.Line e.Message
                         65
                     else
-                        let bound, resolveErrors = resolve (preludeStmts @ stmts)
+                        let bound, resolveErrors, resolveWarnings = resolve (preludeStmts @ stmts)
+
+                        for w in resolveWarnings do
+                            eprintfn "[line %d] Warning: %s" w.Token.Line w.Message
 
                         if not resolveErrors.IsEmpty then
                             for e in resolveErrors do

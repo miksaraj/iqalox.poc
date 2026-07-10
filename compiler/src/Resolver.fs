@@ -42,7 +42,19 @@ open Iqalox.Bound
 
 type ResolveError = { Message: string; Token: Token }
 
-type private LocalVar = { Name: string; Slot: int; IsMutable: bool; Depth: int }
+/// `NameToken`/`Used` (`docs/PLAN-0.3.md` decision 4 -- unused-variable
+/// warnings) are `None`/pre-`true` for the synthetic `self`/`super`
+/// locals (never user-declared, never warned about) and `Some`/`false`
+/// for everything `declareVariable` actually declares. Mutable so
+/// `resolveReference`/`resolveUpvalue` can flip it in place the moment a
+/// real read is seen, without a second pass over the tree.
+type private LocalVar =
+    { Name: string
+      Slot: int
+      IsMutable: bool
+      Depth: int
+      NameToken: Token option
+      mutable Used: bool }
 type private UpvalueEntry = { Name: string; Descriptor: UpvalueDescriptor; IsMutable: bool }
 
 type private FunctionContext(enclosing: FunctionContext option) =
@@ -73,6 +85,13 @@ and private resolveUpvalue (context: FunctionContext) (name: string) : (int * bo
     | Some enclosing ->
         match findLocal enclosing name with
         | Some local ->
+            // Capturing a local from an enclosing scope into a closure is
+            // always treated as a real use (`docs/PLAN-0.3.md` decision
+            // 4), regardless of whether the closure itself only reads or
+            // only writes it -- distinguishing those would need threading
+            // a read/write flag through every recursive hop here too, for
+            // a case narrow enough not to be worth it.
+            local.Used <- true
             let index = addUpvalue context name { FromEnclosingLocal = true; Index = local.Slot } local.IsMutable
             Some(index, local.IsMutable)
         | None ->
@@ -471,16 +490,51 @@ type private Resolver(globals: Dictionary<string, bool>, classes: Dictionary<str
 
     let error (token: Token) (message: string) = errors.Add { Message = message; Token = token }
 
+    // `docs/PLAN-0.3.md` decision 4: a compile-time warning, not an
+    // error -- collected separately from `errors` so `resolve`'s caller
+    // can print these without affecting `iqaloxc`'s exit status.
+    let warnings = ResizeArray<ResolveError>()
+    let warn (token: Token) (message: string) = warnings.Add { Message = message; Token = token }
+
+    // Every property/method name seen on the right-hand side of `self.x`
+    // (`Get`) or `self.x = value` (`Set`) anywhere in the whole program --
+    // deliberately a single global set of *names*, not scoped per class,
+    // trading a theoretical false negative (an unused private member in
+    // class A named the same as a genuinely-used private member in
+    // unrelated class B) for avoiding a second, class-scoped tracking
+    // structure threaded through every method resolution. Never produces
+    // a false positive, which is the safer failure mode for a first-pass
+    // lint. Checked against each class's own literal member declarations
+    // in `CheckUnusedClassMembers` once the whole program has resolved.
+    let usedSelfNames = HashSet<string>()
+
     let beginScope () = context.ScopeDepth <- context.ScopeDepth + 1
 
+    // A `_`-prefixed name is exempt (decision 4's open question 3's
+    // proposed default), mirroring the existing `_` ignore-operator's
+    // "explicitly don't care about this" convention.
+    let isExemptFromUnusedCheck (lexeme: string) = lexeme.StartsWith "_"
+
+    let checkUnusedLocals (depth: int) =
+        for local in context.Locals do
+            if local.Depth = depth && not local.Used then
+                match local.NameToken with
+                | Some token when not (isExemptFromUnusedCheck local.Name) ->
+                    warn token $"Variable '{local.Name}' is never used."
+                | _ -> () // None marks a synthetic self/super local -- never warned about
+
     let endScope () =
+        checkUnusedLocals context.ScopeDepth
         context.ScopeDepth <- context.ScopeDepth - 1
         while context.Locals.Count > 0 && context.Locals.[context.Locals.Count - 1].Depth > context.ScopeDepth do
             context.Locals.RemoveAt(context.Locals.Count - 1)
 
-    let resolveReference (name: string) : VariableBinding * bool option =
+    let resolveReference (name: string) (markUsed: bool) : VariableBinding * bool option =
         match findLocal context name with
-        | Some local -> LocalBinding local.Slot, Some local.IsMutable
+        | Some local ->
+            if markUsed then
+                local.Used <- true
+            LocalBinding local.Slot, Some local.IsMutable
         | None ->
             match resolveUpvalue context name with
             | Some(index, isMutable) -> UpvalueBinding index, Some isMutable
@@ -500,10 +554,42 @@ type private Resolver(globals: Dictionary<string, bool>, classes: Dictionary<str
             if alreadyInScope then
                 error name $"Variable '{name.Lexeme}' already declared in this scope."
             let slot = context.Locals.Count
-            context.Locals.Add { Name = name.Lexeme; Slot = slot; IsMutable = isMutable; Depth = context.ScopeDepth }
+            context.Locals.Add
+                { Name = name.Lexeme
+                  Slot = slot
+                  IsMutable = isMutable
+                  Depth = context.ScopeDepth
+                  NameToken = Some name
+                  Used = false }
             DeclaredLocal slot
 
     member this.Errors = List.ofSeq errors
+    member this.Warnings = List.ofSeq warnings
+
+    /// Warns on any non-`pub` property/method declared directly in a
+    /// class's own literal body (`OwnLiteral` -- trait/superclass/mixin-
+    /// contributed members are never checked here, since those compose
+    /// into potentially many classes and "unused by this one particular
+    /// class" isn't a meaningful signal for them) that `usedSelfNames`
+    /// never saw a `self.`-qualified reference to anywhere in the whole
+    /// program. `init` is always exempt (`docs/PLAN-0.2.md` decision 11 --
+    /// externally callable regardless of its own `pub`/private
+    /// annotation, so "unused" doesn't apply to it), same as a `_`-prefixed
+    /// name. Must run after every `ClassStmt`/method body in the program
+    /// has been resolved, so `usedSelfNames` is fully populated first.
+    member this.CheckUnusedClassMembers() =
+        for KeyValue(_, info) in classes do
+            for KeyValue(propName, prop) in info.OwnLiteral.Properties do
+                if not prop.IsPub && not (isExemptFromUnusedCheck propName) && not (usedSelfNames.Contains propName) then
+                    warn prop.Name $"Property '{propName}' is never used."
+            for KeyValue(methodName, meth) in info.OwnLiteral.Methods do
+                if
+                    not meth.IsPub
+                    && methodName <> "init"
+                    && not (isExemptFromUnusedCheck methodName)
+                    && not (usedSelfNames.Contains methodName)
+                then
+                    warn meth.Name $"Method '{methodName}' is never used."
 
     member this.ResolveStmt(stmt: Stmt) : BoundStmt =
         match stmt with
@@ -540,7 +626,7 @@ type private Resolver(globals: Dictionary<string, bool>, classes: Dictionary<str
                 superclassExpr
                 |> Option.map (function
                     | Variable superName ->
-                        let refBinding, _ = resolveReference superName.Lexeme
+                        let refBinding, _ = resolveReference superName.Lexeme true
                         refBinding, superName
                     | other -> failwith $"unreachable: superclass is always a bare Variable, got %A{other}")
 
@@ -548,7 +634,7 @@ type private Resolver(globals: Dictionary<string, bool>, classes: Dictionary<str
                 mixinExprs
                 |> List.map (function
                     | Variable mixinName ->
-                        let refBinding, _ = resolveReference mixinName.Lexeme
+                        let refBinding, _ = resolveReference mixinName.Lexeme true
                         refBinding, mixinName
                     | other -> failwith $"unreachable: a mixin is always a bare Variable, got %A{other}")
 
@@ -561,7 +647,9 @@ type private Resolver(globals: Dictionary<string, bool>, classes: Dictionary<str
                     { Name = "super"
                       Slot = context.Locals.Count
                       IsMutable = false
-                      Depth = context.ScopeDepth }
+                      Depth = context.ScopeDepth
+                      NameToken = None
+                      Used = true }
 
             // `classes.[name.Lexeme]`'s Inlined*/* already has this
             // class's own body merged with every `use`d trait's members
@@ -623,7 +711,13 @@ type private Resolver(globals: Dictionary<string, bool>, classes: Dictionary<str
         beginScope ()
 
         if isMethod then
-            context.Locals.Add { Name = "self"; Slot = 0; IsMutable = false; Depth = context.ScopeDepth }
+            context.Locals.Add
+                { Name = "self"
+                  Slot = 0
+                  IsMutable = false
+                  Depth = context.ScopeDepth
+                  NameToken = None
+                  Used = true }
 
         // Parameters are always immutable locals, matching poc (no
         // grammar exists for an individual mutable parameter).
@@ -640,6 +734,12 @@ type private Resolver(globals: Dictionary<string, bool>, classes: Dictionary<str
               Upvalues = context.Upvalues |> Seq.map (fun u -> u.Descriptor) |> List.ofSeq
               IsPub = decl.IsPub }
 
+        // `ResolveBlock`'s `endScope` never runs for this function's own
+        // top-level scope (parameters and `self` share it with the body's
+        // own top-level locals, deliberately -- see the comment above),
+        // so it needs its own unused-variable check here before the whole
+        // context is discarded.
+        checkUnusedLocals context.ScopeDepth
         context <- enclosing
         result
 
@@ -647,7 +747,10 @@ type private Resolver(globals: Dictionary<string, bool>, classes: Dictionary<str
         match expr with
         | Assign(name, value) ->
             let boundValue = this.ResolveExpr value
-            let binding, isMutable = resolveReference name.Lexeme
+            // `docs/PLAN-0.3.md` decision 4: a pure write doesn't count as
+            // "using" a variable for the unused-variable check -- only a
+            // real read does (the `Variable` case below).
+            let binding, isMutable = resolveReference name.Lexeme false
             match isMutable with
             | Some false -> error name $"Assigning to immutable variable '{name.Lexeme}' not allowed."
             | Some true -> ()
@@ -663,13 +766,21 @@ type private Resolver(globals: Dictionary<string, bool>, classes: Dictionary<str
         | Vector values -> BVector(values |> List.map this.ResolveExpr)
         | Spread(expr, ellipsis) -> BSpread(this.ResolveExpr expr, ellipsis)
         | Variable name ->
-            let binding, _ = resolveReference name.Lexeme
+            let binding, _ = resolveReference name.Lexeme true
             BVariable(binding, name)
         | BreakExpr keyword -> BBreak keyword
         | ContinueExpr keyword -> BContinue keyword
         | Ignore -> BIgnore
         | Call(callee, arguments) -> BCall(this.ResolveExpr callee, arguments |> List.map this.ResolveExpr)
-        | Get(obj, name) -> BGet(this.ResolveExpr obj, name)
+        | Get(obj, name) ->
+            // `docs/PLAN-0.3.md` decision 4: `self.x`/`self.method()` both
+            // parse through here (a method call is `Call(Get(...), ...)`),
+            // so this one case covers both property reads and method
+            // calls for the unused-private-member check below.
+            (match obj with
+             | SelfExpr _ -> usedSelfNames.Add name.Lexeme |> ignore
+             | _ -> ())
+            BGet(this.ResolveExpr obj, name)
         | Set(obj, name, value) ->
             // `docs/PLAN-0.2.md` decision 8's addendum: a bare
             // `self.x = value` with no matching property declaration
@@ -678,6 +789,9 @@ type private Resolver(globals: Dictionary<string, bool>, classes: Dictionary<str
             // undeclared local -- only checkable here (not for an
             // external `instance.x = value`, whose `instance` expression
             // has no statically-known class to check against).
+            (match obj with
+             | SelfExpr _ -> usedSelfNames.Add name.Lexeme |> ignore
+             | _ -> ())
             match obj, currentClassName with
             | SelfExpr _, Some className when (findDeclaredProperty effectiveMembers className name.Lexeme).IsNone ->
                 if findDeclaredMethod effectiveMembers className name.Lexeme then
@@ -835,13 +949,13 @@ type private Resolver(globals: Dictionary<string, bool>, classes: Dictionary<str
         | InternalVectorLength vector -> BVectorLengthInternal(this.ResolveExpr vector)
         | InternalVectorAppend(vector, value) -> BVectorAppendInternal(this.ResolveExpr vector, this.ResolveExpr value)
         | SelfExpr keyword ->
-            match resolveReference "self" with
+            match resolveReference "self" true with
             | GlobalBinding _, None ->
                 error keyword "Can't use 'self' outside of a method."
                 BSelf(GlobalBinding "self", keyword)
             | binding, _ -> BSelf(binding, keyword)
         | SuperExpr(keyword, method) ->
-            match resolveReference "super" with
+            match resolveReference "super" true with
             | GlobalBinding _, None ->
                 error keyword "Can't use 'super' outside of a class with a superclass."
                 BSuper(GlobalBinding "self", GlobalBinding "super", keyword, method)
@@ -851,7 +965,7 @@ type private Resolver(globals: Dictionary<string, bool>, classes: Dictionary<str
                 // *within* a method still finds the right `self` -- e.g. via an
                 // upvalue chain of its own -- rather than assuming `self` is
                 // always the current function's own slot 0.
-                let selfBinding, _ = resolveReference "self"
+                let selfBinding, _ = resolveReference "self" true
                 BSuper(selfBinding, binding, keyword, method)
 
 /// Native functions the VM provides without any user declaration (Phase
@@ -874,11 +988,13 @@ let private nativeGlobals =
 
 /// Resolves `stmts` into a `BoundStmt` list plus any resolution errors
 /// (compile-time immutability violations, redeclarations, `self`/`super`
-/// used where they can't resolve). Never throws -- every error is
-/// recorded and resolution continues, since (unlike a syntax error) a
-/// semantic error doesn't prevent understanding the rest of the program's
-/// structure.
-let resolve (stmts: Stmt list) : BoundStmt list * ResolveError list =
+/// used where they can't resolve) and, separately, any unused-variable/
+/// -parameter/-private-member warnings (`docs/PLAN-0.3.md` decision 4) --
+/// the caller should print the latter without letting them affect exit
+/// status. Never throws -- every error is recorded and resolution
+/// continues, since (unlike a syntax error) a semantic error doesn't
+/// prevent understanding the rest of the program's structure.
+let resolve (stmts: Stmt list) : BoundStmt list * ResolveError list * ResolveError list =
     let globals = Dictionary<string, bool>()
     for name in nativeGlobals do
         globals.[name] <- false
@@ -903,5 +1019,9 @@ let resolve (stmts: Stmt list) : BoundStmt list * ResolveError list =
 
     let resolver = Resolver(globals, classes, effectiveMembers)
     let bound = nonTraitStmts |> List.map resolver.ResolveStmt
+    // Must run after every class/method body above has resolved, so
+    // `usedSelfNames` (populated along the way) is complete before
+    // checking it.
+    resolver.CheckUnusedClassMembers()
 
-    bound, (List.ofSeq preErrors) @ resolver.Errors
+    bound, (List.ofSeq preErrors) @ resolver.Errors, resolver.Warnings

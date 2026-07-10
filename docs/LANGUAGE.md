@@ -1166,6 +1166,65 @@ the bytecode format, not just a line table. See
 
 There is no `try`/`catch`/`throw` construct in the language itself.
 
+### Compile-time warnings (new for `0.3`)
+
+Unlike the two error phases above, a **warning** never aborts compilation
+or affects `iqaloxc`'s exit status — a program with only warnings still
+compiles and runs exactly as before, they're printed to stderr as
+`[line N] Warning: message` purely for the programmer's benefit.
+
+The only warning `0.3` produces is **unused-variable detection**: a
+declared local variable, function/lambda parameter, or non-`pub` class
+property/method that's never actually used gets flagged.
+
+```
+fun f(a, b) {
+    return a       # 'b' is declared but never used
+}
+```
+
+```
+[line 1] Warning: Variable 'b' is never used.
+```
+
+A few rules shape what counts as "used":
+
+- For a local variable or parameter, only a **read** counts — assigning
+  to it (`x = 1`) without ever reading it back does **not** count as
+  using it, and still warns. Capturing it into a nested closure always
+  counts as a use, regardless of whether that closure reads or writes it.
+- For a private class property or method, a `self.`-qualified reference
+  counts **either way** — both `self.x` (read) and `self.x = value`
+  (write) mark a property used, and `self.method()` marks a method used.
+  This is a deliberate difference from the local-variable rule above: a
+  property that's only ever written from `init` and never read elsewhere
+  is still meaningful ("this needs to be set before it's used"), unlike a
+  local that's assigned and then dropped.
+- A `pub` property or method is never warned about, whether or not
+  anything in the current program happens to call it — that's the point
+  of marking something `pub`. `init` is likewise always exempt, since
+  it's always externally callable regardless of its own `pub`/private
+  annotation ([§11](#11-classes-and-objects)).
+- A name starting with `_` is exempt from the warning entirely, at any of
+  these positions — the same "explicitly don't care about this"
+  convention the standalone `_` ignore-operator already uses
+  ([§6](#6-control-flow)):
+
+```
+fun f(_unused, keep) {
+    return keep
+}
+```
+
+- The check only tracks `self.`-qualified references anywhere in the
+  program, not whether an external caller happens to invoke a `pub`
+  method — an external call alone doesn't suppress the warning for a
+  non-`pub` member (and such a call would fail at runtime regardless,
+  since a non-`pub` member can't be accessed from outside its class in
+  the first place).
+- Top-level (global) `var`/`fun` declarations are never checked — only
+  locals, parameters, and private class members.
+
 ## 15. Known limitations
 
 These are documented tradeoffs and open items, not undiscovered bugs —
