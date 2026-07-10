@@ -7,7 +7,7 @@
 
 fun makeAdder(n) {
     fun adder(i) {
-        return n + 1
+        return n + i
     }
     return adder
 }

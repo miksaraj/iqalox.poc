@@ -33,12 +33,12 @@ let ``the prelude scans and parses to exactly one FunctionStmt per stdlib functi
 
 [<Fact>]
 let ``the prelude resolves standalone with no errors`` () =
-    let _, errors = resolve (preludeStmts ())
+    let _, errors, _ = resolve (preludeStmts ())
     Assert.Empty errors
 
 [<Fact>]
 let ``the prelude compiles standalone with no errors`` () =
-    let bound, resolveErrors = resolve (preludeStmts ())
+    let bound, resolveErrors, _ = resolve (preludeStmts ())
     Assert.Empty resolveErrors
     let _, codegenErrors = compile bound
     Assert.Empty codegenErrors
@@ -56,7 +56,7 @@ let ``a user program can call map/filter/reduce/sort/elementwise as ordinary glo
     let userStmts, userParseErrors = parse userTokens
     Assert.Empty userParseErrors
 
-    let bound, errors = resolve (preludeStmts () @ userStmts)
+    let bound, errors, _ = resolve (preludeStmts () @ userStmts)
     Assert.Empty errors
     // The five prelude declarations resolve as globals, same as any
     // top-level `fun` -- and the user's own calls to them resolve as
@@ -81,7 +81,7 @@ let ``redeclaring map (or filter/reduce/sort) after the prelude is a compile-tim
     let source = "var map = 1\n"
     let tokens, _ = scanTokens source
     let stmts, _ = parse tokens
-    let _, errors = resolve (preludeStmts () @ stmts)
+    let _, errors, _ = resolve (preludeStmts () @ stmts)
     Assert.Single errors |> ignore
     Assert.Contains("already declared", errors.[0].Message)
 
@@ -97,5 +97,5 @@ let ``push/pop/length/reverse/transpose/multiply/add/subtract are native globals
     Assert.Empty scanErrors
     let stmts, parseErrors = parse tokens
     Assert.Empty parseErrors
-    let _, errors = resolve (preludeStmts () @ stmts)
+    let _, errors, _ = resolve (preludeStmts () @ stmts)
     Assert.Empty errors

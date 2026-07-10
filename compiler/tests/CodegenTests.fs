@@ -13,7 +13,7 @@ let private compileSource (source: string) : Chunk =
     let source = if source.EndsWith "\n" then source else source + "\n"
     let tokens, _ = scanTokens source
     let stmts, _ = parse tokens
-    let bound, resolveErrors = resolve stmts
+    let bound, resolveErrors, _ = resolve stmts
     Assert.Empty resolveErrors
     let chunk, codegenErrors = compile bound
     Assert.Empty codegenErrors
@@ -336,7 +336,7 @@ let ``the disassembler prints every top-level instruction and recurses into nest
 let ``break outside any loop is a codegen error, not a crash`` () =
     let tokens, _ = scanTokens "break\n"
     let stmts, _ = parse tokens
-    let bound, resolveErrors = resolve stmts
+    let bound, resolveErrors, _ = resolve stmts
     Assert.Empty resolveErrors
     let _, codegenErrors = compile bound
     Assert.Single codegenErrors |> ignore
@@ -351,7 +351,7 @@ let ``break outside any loop is a codegen error, not a crash`` () =
 let ``a codegen error reports the line of the statement it occurred on, not line 1`` () =
     let tokens, _ = scanTokens "var x = 1\nvar y = 2\nbreak\n"
     let stmts, _ = parse tokens
-    let bound, resolveErrors = resolve stmts
+    let bound, resolveErrors, _ = resolve stmts
     Assert.Empty resolveErrors
     let _, codegenErrors = compile bound
     Assert.Single codegenErrors |> ignore
