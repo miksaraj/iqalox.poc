@@ -1,16 +1,16 @@
-# Syntax Grammar for Iqalox (0.3)
-*WIP — target spec, not yet phased into `compiler/`+`vm/` at all
-(`docs/PLAN-0.3.md` is still being drafted, no phases have landed); see
-that document's §4 feature checklist once it exists for what's actually
-landed so far.*
+# Syntax Grammar for Iqalox (0.2)
+*Frozen — `0.2` shipped in full (`docs/PLAN-0.2.md`, all 9 phases done);
+this is the exact grammar as of that release. See the current top-level
+`langspec/SYNTAX_GRAMMAR.md` for `0.3`, the active target.*
 
-This is currently an exact copy of `0.2`'s frozen grammar
-(`langspec/versions/0.2/SYNTAX_GRAMMAR.md`) — `0.3` planning has only
-just begun, and no `0.3` design decisions have been finalized yet, so
-there is nothing new to add here. This file will grow "Notes: new for
-`0.3`" sections and new grammar productions as `docs/PLAN-0.3.md`'s design
-decisions are actually resolved, the same way `0.2`'s own top-level
-grammar grew from `0.1`'s.
+This is `0.1`'s grammar (`langspec/versions/0.1/SYNTAX_GRAMMAR.md`) plus
+everything `docs/PLAN-0.2.md` §1/§3 resolved for `0.2`: postfix indexing,
+lambdas, cons/list-comprehension vector forms, vector-literal spread,
+`pub`/`mut` property declarations, method visibility, and mixin (`with`)/
+trait (`trait`/`use`) composition. Notes carried over from `0.1` (no
+`if`/`while`, no parenthesized calls, etc.) are repeated below rather than
+requiring readers to cross-reference the old file for baseline rules that
+are still exactly true.
 
 ## Notes: inherited from `0.1`, unchanged
 
