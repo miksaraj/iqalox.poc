@@ -30,15 +30,16 @@ Implementation-agnostic material stays at the repository root:
 
 - `langspec/` — the language specification: syntax grammar and runnable
   examples, for whichever version is the **current active target** (right
-  now, `0.2` — see `docs/PLAN-0.2.md`). "Active target" can run ahead of
+  now, `0.3` — see `docs/PLAN-0.3.md`). "Active target" can run ahead of
   what's actually implemented in `compiler/`+`vm/` during a version's
   phased rollout; check that version's `docs/PLAN-0.X.md` §4 feature
   checklist for what has actually landed. `langspec/README.md` explains
   the directory's own layout in full. Two kinds of frozen snapshots live
   alongside the current spec, and they are **not the same thing**:
   `langspec/versions/<version>/` holds a complete, frozen copy of a
-  version's spec once it has fully shipped (currently just `versions/0.1/`,
-  moved there when `0.2` planning began, `docs/PLAN-0.2.md` decision 13);
+  version's spec once it has fully shipped (`versions/0.1/`, moved there
+  when `0.2` planning began, `docs/PLAN-0.2.md` decision 13; `versions/0.2/`,
+  moved there when `0.3` planning began, `docs/PLAN-0.3.md` Phase 0);
   `langspec/archived/` holds unrelated frozen snapshots of pre-renumbering
   *planning* iterations (0.1, 0.2, 0.3, per `ROADMAP.md`'s own renumbering
   note) — historical record, not to be edited, and not a version-by-version
@@ -50,8 +51,10 @@ Implementation-agnostic material stays at the repository root:
   below for what that means while a version's features are still landing).
 - `ROADMAP.md` — the version roadmap (0.1-poc onward).
 - `docs/` — implementation planning docs (`docs/PLAN-0.1-POC.md` for
-  `0.1-poc`, `docs/PLAN-0.1.md` for `0.1`, `docs/PLAN-0.2.md` for `0.2`);
-  `docs/LANGUAGE.md` for the current (`0.2`) language reference,
+  `0.1-poc`, `docs/PLAN-0.1.md` for `0.1`, `docs/PLAN-0.2.md` for `0.2`,
+  `docs/PLAN-0.3.md` for `0.3`, currently being planned);
+  `docs/LANGUAGE.md` for the current (`0.2`) language reference —
+  still accurate until `0.3`'s own features start landing,
   `docs/LANGUAGE-0.1.md` for the frozen `0.1`-era one, `docs/LANGUAGE-POC.md`
   for the frozen `0.1-poc`-era one — each version gets its own
   `LANGUAGE-<version>.md` this way as Iqalox evolves, rather than one file

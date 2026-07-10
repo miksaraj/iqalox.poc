@@ -15,7 +15,11 @@ langspec/
 ├── SYNTAX_GRAMMAR.md     current active-target version's grammar
 ├── examples/             current active-target version's example programs
 ├── versions/             frozen snapshots of versions that have fully shipped
-│   └── 0.1/
+│   ├── 0.1/
+│   │   ├── README.md
+│   │   ├── SYNTAX_GRAMMAR.md
+│   │   └── examples/
+│   └── 0.2/
 │       ├── README.md
 │       ├── SYNTAX_GRAMMAR.md
 │       └── examples/
@@ -26,19 +30,20 @@ langspec/
 ```
 
 - **Top level** (`README.md`, `SYNTAX_GRAMMAR.md`, `examples/`) is the **current active
-  target** — right now, `0.2` (`../docs/PLAN-0.2.md`). "Active target" means this is
+  target** — right now, `0.3` (`../docs/PLAN-0.3.md`). "Active target" means this is
   what the language is being designed and built *towards*, not necessarily what's fully
-  implemented yet: `compiler/`+`vm/` land `0.2`'s features incrementally across several
-  phases, and `../docs/PLAN-0.2.md` §4's feature checklist tracks exactly what's landed
+  implemented yet: `compiler/`+`vm/` land `0.3`'s features incrementally across several
+  phases, and `../docs/PLAN-0.3.md` §4's feature checklist tracks exactly what's landed
   so far. Until every phase lands, the top-level `examples/` describe the target spec
   and may not yet run against `compiler/`+`vm/` — see `../CLAUDE.md`'s "Example scripts"
   convention for how this is tracked during the transition.
 - **`versions/<version>/`** holds a frozen, complete snapshot of a version's spec once
   it has fully shipped and the next version's work begins moving the top level forward.
   Each snapshot is a full copy of what the top level looked like at that version's
-  release — its own `README.md`, `SYNTAX_GRAMMAR.md`, and `examples/`. Currently just
-  `versions/0.1/`, moved here when `0.2` planning began
-  (`../docs/PLAN-0.2.md` decision 13, Phase 0).
+  release — its own `README.md`, `SYNTAX_GRAMMAR.md`, and `examples/`. `versions/0.1/`
+  was moved here when `0.2` planning began (`../docs/PLAN-0.2.md` decision 13, Phase 0);
+  `versions/0.2/` was moved here the same way when `0.3` planning began
+  (`../docs/PLAN-0.3.md`, Phase 0).
 - **`archived/<version>/`** is a **different, unrelated thing** — don't confuse the two.
   These are frozen snapshots from *before* `../ROADMAP.md`'s version renumbering
   decision: early planning drafts of what "`0.1`," "`0.2`," "`0.3`" meant back when that
@@ -57,13 +62,14 @@ langspec/
 
 - **"What does Iqalox actually do today, as shipped?"** → `../docs/LANGUAGE.md` (the
   full prose reference for `0.2`, the current primary implementation) — or, for the
-  terser grammar-level equivalent, this directory's own top-level `SYNTAX_GRAMMAR.md`
-  and `examples/`. For `0.1` specifically, see `../docs/LANGUAGE-0.1.md` and
-  `versions/0.1/SYNTAX_GRAMMAR.md`/`versions/0.1/examples/`.
-- **"What's being planned/built for the next version?"** → `../docs/PLAN-0.2.md` for
-  the design decisions, open questions, and implementation status behind `0.2` (now
-  delivered); `0.3` planning hasn't started yet, so there's no `docs/PLAN-0.3.md` or
-  next-version top-level `langspec/` snapshot to point to.
+  terser grammar-level equivalent, `versions/0.2/SYNTAX_GRAMMAR.md`/
+  `versions/0.2/examples/`. For `0.1` specifically, see `../docs/LANGUAGE-0.1.md` and
+  `versions/0.1/SYNTAX_GRAMMAR.md`/`versions/0.1/examples/`. The top-level
+  `SYNTAX_GRAMMAR.md`/`examples/` describe `0.3`, the *target*, not what's shipped yet.
+- **"What's being planned/built for the next version?"** → `../docs/PLAN-0.3.md` for
+  the design decisions, open questions, and implementation status behind `0.3`, the
+  active target — this directory's own top-level `SYNTAX_GRAMMAR.md`/`examples/` track
+  it as phases land.
 - **"What did an early planning draft look like, before versions got renumbered?"** →
   `archived/<version>/` — but read `../ROADMAP.md`'s renumbering note first so the
   version number there isn't mistaken for today's version of the same name.

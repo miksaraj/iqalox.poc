@@ -156,23 +156,32 @@ Phase 9 forked it.
 
 ### 0.3 *(formerly `0.2`)* — *active target*
 
+See `docs/PLAN-0.3.md` for the full plan — design decisions, open
+questions, and phased sequencing:
+
 - Disallow unused variables — **compile-time warning**
-- Array-manipulation standard library improvements, including negative
-  indices and slice syntax (`v[a:b]`) deferred from `0.2`
+- Array-manipulation standard library improvements: negative indices and
+  slice syntax (`v[a:b]`, end-**inclusive**), deferred from `0.2`
 - Full list comprehensions: multiple comma-separated generators (nested/
-  Cartesian iteration) and boolean guards — `0.2` ships a single-generator,
-  no-guards slice only (`docs/PLAN-0.2.md`); this is the original
-  `[x + y | x <- xs, y <- ys, x not y]`-style sketch's full shape (exact
-  guard-expression syntax, e.g. whether `not` is real or just informal
-  pseudocode for "not equal," still needs pinning down when this starts)
-- **Module support** — brought forward from `0.5` (see below) so it's
-  ready for the `0.4`-onward standard library buildout to actually use,
-  rather than landing after several stdlib phases have already shipped as
-  flat globals. **Must also revisit module-scoped mixin/trait composition
-  here**: `0.2` only delivers the class-scoped case (`class C extends
-  Base with M1, M2`, `class D { use T; }`) since real `module`
-  declarations don't exist yet; `docs/PLAN-0.2.md` explicitly flagged
-  this as deferred, not dropped
+  Cartesian iteration) and a boolean guard clause — `0.2` ships a
+  single-generator, no-guard form only. **Corrects a typo in this
+  document's own original sketch while resolving it**: the guard is
+  introduced by its own `|`, not folded into the generator list with a
+  comma — `[x + y | x <- xs, y <- ys | x != y]`, not `[x + y | x <- xs, y
+  <- ys, x not y]` as originally written here. `not` was never a real
+  keyword; it was informal shorthand for `!=` — the guard reuses ordinary
+  boolean expressions already in the grammar (`docs/PLAN-0.3.md` decision 1).
+- **Module support** — brought forward from `0.5` (see below), resolved
+  as **file-based** (a file's path is its module name, no `module { }`
+  block syntax), an explicit **`import`** statement bringing specific
+  names into unqualified scope, single-entry-point transitive file
+  discovery (`iqaloxc`'s CLI shape is unchanged), and **compile-time-only**
+  resolution — `vm/` needs no changes at all, `iqaloxc` still emits one
+  `.iqbc` file (`docs/PLAN-0.3.md` decisions 4-8). Module-scoped mixin/
+  trait composition, flagged here as needing revisiting once real
+  `module` declarations existed, turned out to need no new design work
+  under this shape — a trait or class is just an ordinary importable
+  top-level declaration like any other (`docs/PLAN-0.3.md` decision 9).
 - **Revisit whether `0.2`'s array-manipulation stdlib (`length`, `push`,
   `pop`, `reverse`, `map`, `filter`, `reduce`, `sort` —
   `docs/PLAN-0.2.md` Phase 5) should move under a namespace (`Vector.map`)
@@ -185,9 +194,12 @@ Phase 9 forked it.
   a stdlib-functions phase, ahead of module support's own entry. Moved
   here alongside module support itself, since this is exactly the version
   where its precondition ("real module support exists") is first met.
-  Explicitly not a silent lock-in: raised and decided live with the
-  repository owner during Phase 5.
-- First set of compiler optimizations (see below)
+  Explicitly not a silent lock-in: still an open question
+  (`docs/PLAN-0.3.md` §2 item 1), to be raised with the repository owner
+  once module support itself has landed and the question is concrete.
+- First set of compiler optimizations (see below) — proposed as constant
+  propagation plus dead code elimination (`docs/PLAN-0.3.md` §2 item 2),
+  not yet separately confirmed.
 
 Comma-as-no-parens-multi-argument-call-separator (`push v, 4`) was also
 raised for reconsideration while reviewing Phase 5's array-stdlib
